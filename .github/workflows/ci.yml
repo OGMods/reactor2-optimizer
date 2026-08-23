@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A superseded run tells you nothing, so cancel it -- except on main, where a
+# cancelled run could abandon a half-finished Pages deployment. `github.ref` is
+# in the key, and the deploy job carries its own non-cancelling group below.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: Web app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # svelte-check + tsc over the app, the Vite config and the tests. The
+      # project holds this at 0 errors AND 0 warnings, so a warning is a
+      # failure here rather than something to scroll past.
+      - name: Typecheck
+        run: npm run check
+
+      # Unit tests plus the Python-to-TypeScript parity suite, which replays
+      # the golden fixtures in parity/fixtures/. It reads them from the repo,
+      # not from py_solver/, so this job needs no Python.
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  python:
+    name: Reference solver (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor the README promises, and a current release. Both are worth
+        # running: `int.is_integer()` exists only from 3.12, and a
+        # version-specific slip like that reached main once already.
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Deliberately no `pip install`. The solver and its tests are pure
+      # stdlib -- requirements.txt exists only for Pillow, which the PNG
+      # renderer needs and nothing under tests/ imports. Installing nothing
+      # keeps that documented claim honest instead of merely asserted.
+      #
+      # Discovery is scoped to tests/ rather than started from the package
+      # root, because `discover` imports the __init__.py of every package it
+      # walks into, and render/__init__.py imports Pillow eagerly. Starting
+      # from `.` therefore fails on the exact dependency this job exists to
+      # prove the suite does not need. `-t .` keeps the top-level directory
+      # at the root, so the tests still import `solver`, `data` and the rest
+      # by the same names they use locally.
+      - name: Test
+        working-directory: py_solver
+        run: python -m unittest discover -s tests -t . -v
+
+  # The committed fixtures pin the TypeScript port against a Python run made on
+  # someone's laptop. This regenerates them here and replays them, so a port
+  # that has drifted from the current reference is caught even if nobody
+  # remembered to re-export.
+  #
+  # Note it does NOT diff the exported bytes. A fixture carries its grid as a
+  # deflate blueprint code, and DEFLATE only guarantees a round-trip -- zlib
+  # builds on different platforms may emit different bytes for the same board,
+  # so a byte-diff would fail for a reason that is not a bug. Replaying is both
+  # the stronger check and the portable one.
+  parity:
+    name: Cross-language parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: npm ci
+
+      - name: Export fixtures from the Python reference
+        working-directory: py_solver
+        run: python -m parity.export_fixtures
+
+      - name: Replay them through the TypeScript port
+        run: npx vitest run src/lib/solver/parity.test.ts src/lib/solver/rng.parity.test.ts
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: [web, python, parity]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    # Never cancel a deployment in flight: a half-applied one leaves the site
+    # in an undefined state. Queue instead.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+    /*
+     * `types` REPLACES the app config's list rather than extending it, so
+     * "svelte" has to be repeated here. Without it `$state` and friends are
+     * untyped, and any `.svelte.ts` a test imports degrades to `any` — which
+     * surfaces as a pile of implicit-any errors in the *imported* file, not
+     * in the test.
+     */
+    "types": ["svelte", "vite/client", "node", "vitest/globals"]
+  },
+  "include": ["src/**/*.test.ts"],
+  "exclude": []
+}

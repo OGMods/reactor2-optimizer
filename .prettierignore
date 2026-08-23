@@ -1,0 +1,21 @@
+# Prettier's own defaults cover node_modules; the rest is this repo's.
+#
+# Note this file uses .gitignore syntax: a `#` only starts a comment at the
+# beginning of a line, never after a pattern.
+
+# Build output.
+dist/
+dist-ssr/
+
+# Generated data, written by something other than a person. Formatting it
+# would be undone by the next regeneration and show up as a diff every time.
+# parity/fixtures/ is written by py_solver/parity/export_fixtures.py; the
+# atlas is packed by an external script that is not part of this repo.
+package-lock.json
+parity/fixtures/
+public/data/web_atlas.json
+
+# Local tooling (gitignored) and Python build artifacts.
+tools/
+__pycache__/
+py_solver/solves/

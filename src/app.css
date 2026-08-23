@@ -1,0 +1,356 @@
+/*
+ * Design tokens + global reset.
+ *
+ * This file used to be the Vite/Svelte starter stylesheet (`.hero`,
+ * `#next-steps`, `#docs`, `#spacer`, a 1126px centred `#app`). None of it was
+ * reachable from this app, and the `#app` width actively fought the
+ * full-bleed canvas — `App.svelte` carried a block of `!important` overrides
+ * purely to undo it. Both are gone.
+ *
+ * The palette below is the neon identity the components already use, lifted
+ * out of the twenty-odd places that hard-coded `#00f3ff` / `rgba(0,243,255,…)`
+ * so the mobile work has one place to tune contrast.
+ */
+
+:root {
+  /* ── Layers ───────────────────────────────────────────────────────
+   * Declared once and referenced everywhere; never hard-code a z-index.
+   * Before this, header / HUD / palettes / inspector all sat at 10 and
+   * their stacking depended on DOM order in App.svelte.
+   *
+   * The sheet deliberately outranks the header. At its `full` detent the
+   * mobile sheet is 90dvh tall, so it *must* cover a top-anchored header —
+   * ordering them the other way leaves the header poking through the scrim
+   * over a panel that has the user's full attention. On desktop the two never
+   * overlap (the sidebar starts below the header), so nothing is lost.
+   */
+  --z-canvas: 0;
+  --z-inspector: 10;
+  --z-hud: 20;
+  --z-header: 30;
+  --z-sheet: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+
+  /* ── Surfaces ─────────────────────────────────────────────────── */
+  --surface-void: #0a0e17;
+  --surface-panel: rgba(10, 14, 23, 0.88);
+  --surface-panel-solid: #0d1424;
+  --surface-raised: rgba(255, 255, 255, 0.06);
+  --surface-sunken: rgba(8, 12, 20, 0.93);
+  /*
+   * What the board sits on. `PixiCanvas` paints its wrapper this colour *and*
+   * hands the same value to Pixi as the renderer's clear colour — a wrapper
+   * that disagreed would show as a flash of the wrong green for the frames
+   * before the canvas mounts. See `CANVAS_CLEAR` there, which is the one copy
+   * of this number Pixi needs as a numeric literal.
+   *
+   * It is also the backdrop the panel contrast below is measured against.
+   */
+  --canvas-clear: #46b696;
+
+  /* ── Colour, and the one law it follows ───────────────────
+   *
+   * This used to be twelve-odd hues with no rule behind them: two ambers
+   * (`#f59e0b` in the header, `#fbbf24` in the HUD), five reds, a Share button
+   * wearing the exact colour the board uses to say a building is idle, and
+   * grass painted the green that means "this one is working". The header read
+   * as a different product from the bar underneath it, which is what it was.
+   *
+   * The law, one line each:
+   *
+   *   neon    — this control is selected / active. Nothing else.
+   *   ok      — the board only: this building is working.
+   *   idle    — the board only: this building is doing nothing.
+   *   danger  — the board: overheating. In the UI: this destroys something.
+   *   warn    — a limit is reached, or this board is not yours to edit.
+   *
+   * The two board readings are **reserved**, and that is the whole point. The
+   * pad under every building, the pulse that breathes it and the readout in
+   * the corner all speak them (see `pixi/gridPainter.ts` and
+   * `BoardStatsCard`), so a player who has learnt that language must not meet
+   * it again on a button that has nothing to do with it — which is precisely
+   * what a terrain brush glowing green and a Share button glowing amber were
+   * teaching them to unlearn.
+   *
+   * A control therefore earns colour by being selected, or destructive, or
+   * neither. "Neither" is neutral, and most of the header is neither.
+   */
+
+  /* Selection — and the identity, so the wordmark keeps it too. */
+  --neon: #00f3ff;
+  --neon-dim: rgba(0, 243, 255, 0.3);
+  --neon-faint: rgba(0, 243, 255, 0.15);
+  --neon-bg: rgba(0, 243, 255, 0.14);
+  /* Border and glow of a *selected* control; `strong` is a solid one's hover. */
+  --neon-line: rgba(0, 243, 255, 0.5);
+  --neon-glow: rgba(0, 243, 255, 0.2);
+  --neon-strong: #33f6ff;
+
+  /*
+   * Board status. `--status-idle` is matched to the `indicator_idle` pad in the
+   * sprite atlas — the tile and the card describing it must not be two yellows.
+   */
+  --status-ok: #4ade80;
+  --status-ok-bg: rgba(74, 222, 128, 0.14);
+  --status-idle: #facc15;
+  --status-idle-bg: rgba(250, 204, 21, 0.16);
+
+  /*
+   * One red, where there were five (`#ff4757`, `#f43f5e`, `#ef4444`,
+   * `#f87171`, `#ff7a85`). Overheating is the board's use of it: a building
+   * that has shut down and a button that deletes an island are the same order
+   * of bad news, so they are deliberately one colour rather than two reds a
+   * player would waste time trying to tell apart.
+   */
+  --danger: #ff4757;
+  --danger-strong: #ff6b81;
+  --danger-soft: #ff8f9b;
+  --danger-bg: rgba(255, 71, 87, 0.12);
+  --danger-line: rgba(255, 71, 87, 0.4);
+
+  /* A limit reached, or a board that is not yours. Never a plain action. */
+  --warn: #f59e0b;
+  --warn-dim: rgba(245, 158, 11, 0.4);
+
+  /*
+   * `--success` is the same green, named for the one job outside the board: a
+   * transient "that worked" (the Copied toast). It is not a state anything
+   * holds, so it cannot be mistaken for a building's reading.
+   */
+  --success: #4ade80;
+
+  /*
+   * The single hue outside the law. A donate heart is pink everywhere on the
+   * web, and dressing it in `--danger` would tell the user the button breaks
+   * something.
+   */
+  --heart: #fb7185;
+  --heart-bg: rgba(244, 63, 94, 0.12);
+
+  /* ── Text ─────────────────────────────────────────────────────── */
+  --text: #e0f0ff;
+  --text-muted: #94a3b8;
+  /*
+   * `--text-dim` was `#64748b`, which is 3.4:1 against a panel and fails
+   * WCAG AA — and it is the colour of nineteen things, most of them set at
+   * 0.62–0.7rem: the grid steppers' labels, tile coordinates, menu headings,
+   * the "n minutes ago" on a solve.
+   *
+   * The bar is measured against the *lightest* background a panel actually
+   * makes, not against `--surface-void`. `--surface-panel` is 88% opaque over
+   * the canvas's `--canvas-clear`, so the real backdrop is
+   * around `#112226` — lighter than the void, and light text on it therefore
+   * has less contrast, not more. This value clears 4.5:1 there, and by more
+   * everywhere else.
+   *
+   * Some of its uses are disabled controls, which WCAG 1.4.3 exempts. They
+   * keep their own `opacity` and `cursor`, so lifting the token does not make
+   * them read as live.
+   */
+  --text-dim: #7d8da4;
+
+  --border: rgba(255, 255, 255, 0.08);
+  --border-neon: rgba(0, 243, 255, 0.25);
+
+  /* ── Safe areas ───────────────────────────────────────────────────
+   * `env()` resolves to 0px on anything without a notch, so these are
+   * safe to use unconditionally. They only do work once index.html asks
+   * for `viewport-fit=cover`.
+   */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* ── Metrics ──────────────────────────────────────────────────────
+   * 44px is the WCAG 2.5.5 / iOS HIG minimum tap target. Anything a
+   * thumb has to hit on a phone should use it as a floor.
+   */
+  --ctl-sm: 32px;
+  --ctl: 36px;
+  --tap: 44px;
+  --tap-lg: 48px;
+
+  /*
+   * The radius ladder. There were eighteen distinct values across the
+   * components — `6px` twenty times against `var(--radius)` nine — so the same
+   * kind of surface was rounded three different ways depending on who wrote
+   * it. Six steps, by what the thing *is*:
+   *
+   *   xs    chips, badges, the inline pills inside a row
+   *   sm    buttons, inputs, list rows
+   *   ---   panels, bars, dialogs (the unnamed default)
+   *   md    ribbon items — the 60x48 cards in the HUD's scrolling rows
+   *   lg    the mobile sheet, and any ribbon gone full-bleed on a phone
+   *   pill  anything whose radius should just be half its own height
+   *
+   * `--radius-pill` is what the HUD stack uses. Its three rows were 20px, 24px
+   * and 30px at three different heights, so no two of them curved alike while
+   * sitting directly on top of one another; 999px makes each a true pill
+   * whatever height it happens to be.
+   */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /*
+   * The type scale. There were twenty-one distinct rem values between 0.55 and
+   * 1.05 — 0.72, 0.74, 0.75, 0.76 all in play at once, differences no reader
+   * can see and no author can choose between on purpose.
+   *
+   * Seven steps, positioned on the clusters that were already there, so
+   * nothing moves by more than about a pixel. This is a maintenance fix, not a
+   * redesign: the point is that the next size added has somewhere to go.
+   */
+  --fs-2xs: 0.62rem;
+  --fs-xs: 0.7rem;
+  --fs-sm: 0.75rem;
+  --fs-base: 0.8rem;
+  --fs-md: 0.85rem;
+  --fs-lg: 0.95rem;
+  --fs-xl: 1.05rem;
+
+  --font: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  --mono: ui-monospace, "SF Mono", Consolas, monospace;
+
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  /* Overridden to 1ms under prefers-reduced-motion, below. */
+  --dur-fast: 0.18s;
+  --dur: 0.3s;
+
+  color-scheme: dark;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--surface-void);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  /* Stops iOS Safari inflating text in landscape. */
+  -webkit-text-size-adjust: 100%;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--surface-void);
+  color: var(--text);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+}
+
+/* Kills the grey flash iOS paints over a tapped button. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+/* ── Focus ──────────────────────────────────────────────────────────
+ * Keyboard focus must stay visible (quality floor). `:focus-visible`
+ * keeps it off pointer taps, where a persistent ring reads as stuck.
+ */
+:where(button, [href], input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--neon);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/*
+ * Off-screen but announced. For text that exists only to be read aloud — a
+ * live region reporting something the sighted user learns from the board
+ * itself. `clip-path` plus a 1px box, rather than `display: none` or
+ * `visibility: hidden`, both of which take the element out of the
+ * accessibility tree and silence it.
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Thin dark scrollbars for the panels that scroll internally. */
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--neon-dim) transparent;
+}
+.thin-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-xs);
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--neon-dim);
+  border-radius: var(--radius-xs);
+}
+
+/*
+ * Horizontal ribbon: the HUD rows must scroll rather than wrap, so a
+ * growing building list never pushes the canvas up.
+ */
+.ribbon {
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.ribbon::-webkit-scrollbar {
+  display: none;
+}
+.ribbon > * {
+  scroll-snap-align: start;
+  flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 1ms;
+    --dur: 1ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

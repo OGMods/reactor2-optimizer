@@ -1,0 +1,36 @@
+{
+  "extends": "@tsconfig/svelte/tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "es2023",
+    "module": "esnext",
+    "types": ["svelte", "vite/client"],
+    "allowArbitraryExtensions": true,
+    "noEmit": true,
+    /**
+     * Typecheck JS in `.svelte` and `.js` files by default.
+     * Disable checkJs if you'd like to use dynamic types in JS.
+     * Note that setting allowJs false does not prevent the use
+     * of JS in `.svelte` files.
+     */
+    "allowJs": true,
+    "checkJs": true,
+    "moduleDetection": "force",
+
+    /*
+     * Dead locals and unused parameters are errors here, not just in
+     * `tsconfig.node.json`. That config has carried these two since the
+     * scaffold, but it only covers `vite.config.ts` -- so the whole of `src/`,
+     * every `.svelte` component included, was the one part of the repo where
+     * an unused binding could accumulate silently.
+     *
+     * `svelte-check` reports them like any other diagnostic, so `npm run check`
+     * is what enforces it. The tree was already clean when they were switched
+     * on; this keeps it that way.
+     */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte"],
+  "exclude": ["src/**/*.test.ts"]
+}

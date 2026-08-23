@@ -1,0 +1,234 @@
+{
+  "name": "two_island_seed7",
+  "why": "Exercises _remap_placements -- the highest-risk port surface",
+  "seed": 7,
+  "max_steps": 2000,
+  "grid": {
+    "width": 7,
+    "height": 3,
+    "code": "eJxjZ2ZkZGRgBAMkCgABwAAd"
+  },
+  "unlocked_upgrades": {
+    "antimatter_plant": 5,
+    "arc_reactor": 5,
+    "biomass_plant": 5,
+    "black_hole_reactor": 5,
+    "chaos_core": 5,
+    "coal_plant": 5,
+    "cooler1": 5,
+    "cooler2": 5,
+    "cooler3": 5,
+    "cooler4": 7,
+    "cooler5": 8,
+    "cooler6": 10,
+    "cooler7": 6,
+    "divine_reactor": 5,
+    "doomStar_reactor": 5,
+    "flux_reactor": 5,
+    "fusion_reactor": 5,
+    "gas_plant": 5,
+    "generator": 6,
+    "generator2": 5,
+    "generator3": 7,
+    "generator4": 5,
+    "generator5": 8,
+    "generator6": 8,
+    "generator7": 4,
+    "geothermal_plant": 5,
+    "gravitron_plant": 5,
+    "heliothermal_plant": 5,
+    "hydro_plant": 5,
+    "hyper_space_core": 5,
+    "neuro_grid_reactor": 5,
+    "nuclear_reactor": 5,
+    "psionic_tower": 5,
+    "quantum_reactor": 5,
+    "sauron_eye": 5,
+    "solar_panel": 5,
+    "wind_turbine": 4,
+    "zero_point_reactor": 5
+  },
+  "buildable_tiles": 18,
+  "expected": {
+    "placements": [
+      {
+        "x": 0,
+        "y": 0,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 2,
+        "y": 0,
+        "building_id": "cooler7"
+      },
+      {
+        "x": 4,
+        "y": 0,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 6,
+        "y": 0,
+        "building_id": "cooler7"
+      },
+      {
+        "x": 0,
+        "y": 1,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 1,
+        "y": 1,
+        "building_id": "generator7"
+      },
+      {
+        "x": 2,
+        "y": 1,
+        "building_id": "wind_turbine"
+      },
+      {
+        "x": 4,
+        "y": 1,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 5,
+        "y": 1,
+        "building_id": "generator7"
+      },
+      {
+        "x": 6,
+        "y": 1,
+        "building_id": "wind_turbine"
+      },
+      {
+        "x": 0,
+        "y": 2,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 1,
+        "y": 2,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 2,
+        "y": 2,
+        "building_id": "cooler7"
+      },
+      {
+        "x": 4,
+        "y": 2,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 5,
+        "y": 2,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 6,
+        "y": 2,
+        "building_id": "cooler7"
+      }
+    ],
+    "power_output": 2.66e+22,
+    "island_count": 2
+  },
+  "annealed": {
+    "placements": [
+      {
+        "x": 0,
+        "y": 0,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 1,
+        "y": 0,
+        "building_id": "generator7"
+      },
+      {
+        "x": 2,
+        "y": 0,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 4,
+        "y": 0,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 5,
+        "y": 0,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 6,
+        "y": 0,
+        "building_id": "cooler7"
+      },
+      {
+        "x": 0,
+        "y": 1,
+        "building_id": "cooler7"
+      },
+      {
+        "x": 1,
+        "y": 1,
+        "building_id": "generator7"
+      },
+      {
+        "x": 2,
+        "y": 1,
+        "building_id": "neuro_grid_reactor"
+      },
+      {
+        "x": 4,
+        "y": 1,
+        "building_id": "cooler7"
+      },
+      {
+        "x": 5,
+        "y": 1,
+        "building_id": "generator7"
+      },
+      {
+        "x": 6,
+        "y": 1,
+        "building_id": "sauron_eye"
+      },
+      {
+        "x": 0,
+        "y": 2,
+        "building_id": "cooler7"
+      },
+      {
+        "x": 1,
+        "y": 2,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 2,
+        "y": 2,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 4,
+        "y": 2,
+        "building_id": "doomStar_reactor"
+      },
+      {
+        "x": 5,
+        "y": 2,
+        "building_id": "generator7"
+      },
+      {
+        "x": 6,
+        "y": 2,
+        "building_id": "doomStar_reactor"
+      }
+    ],
+    "power_output": 2.71103593220339e+22,
+    "island_count": 2
+  }
+}

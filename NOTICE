@@ -1,0 +1,40 @@
+Reactor 2 Optimizer
+Copyright (C) 2026 OGMods
+
+This project is an unofficial fan-made planning tool for the mobile game
+"Reactor 2: Nuclear Tycoon" by RSG Apps (https://rsgapps.com).
+
+
+1. Source code -- GPL-3.0-or-later
+
+All source code in this repository is licensed under the GNU General Public
+License, version 3 or (at your option) any later version, with the single
+exception set out in section 2. The full text is in the LICENSE file.
+
+
+2. Game assets and game data -- NOT covered by the GPL
+
+The following are the property of RSG Apps and are redistributed here WITH THE
+DEVELOPER'S PERMISSION, solely so that the tool can depict the game faithfully:
+
+    public/icons/           building and UI icons
+    public/data/            the sprite atlas (web_atlas.webp, web_atlas.json)
+    public/hex.webp         tile art
+    public/logo.webp        the logo
+    public/favicon.svg      the site icon, in its three forms
+    public/favicon-32.png
+    public/apple-touch-icon.png
+    the building statistics tables in
+      src/lib/data/buildings.ts  and  py_solver/data/buildings.py
+
+This is every image in public/; nothing in that directory is the project's own
+work.
+
+Copying this repository does not transfer any right to use these assets: the
+permission above was granted to this project, and it is not sublicensable. If
+you fork this project, or reuse its code in your own, you must either remove
+these files or obtain your own permission from RSG Apps.
+
+Game names, trademarks, artwork and game data remain the property of their
+respective owners. This project is not affiliated with, endorsed by, or
+sponsored by RSG Apps beyond the asset permission described above.

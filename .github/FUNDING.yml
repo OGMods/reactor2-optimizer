@@ -1,0 +1,7 @@
+# Adds the Sponsor button to the repository page. This is a separate surface
+# from the app's own Support link (components/header/DonateButton.svelte), and
+# the two deliberately lead different places: the repo's audience is
+# developers, who have GitHub accounts and cost no processing fee to sponsor;
+# the app's audience is players, most of whom have neither.
+github: [OGMods]
+custom: ["https://paypal.me/ogm0ds"]

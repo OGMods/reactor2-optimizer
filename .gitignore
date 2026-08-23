@@ -1,0 +1,37 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Python
+__pycache__/
+*.py[cod]
+py_solver/solves/
+
+# Local tooling and its data.
+tools/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# macOS: Finder metadata, and the AppleDouble sidecars it leaves on non-HFS
+# volumes. `._*` is not optional -- a `._.DS_Store` had already been staged
+# from a copy across a USB drive, and the .DS_Store rule does not cover it.
+.DS_Store
+._*
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

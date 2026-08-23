@@ -1,0 +1,24 @@
+# Line endings: LF in the repository, LF on checkout everywhere.
+#
+# core.autocrlf is set per-clone, so without this the same file arrives as CRLF
+# on one contributor's machine and LF on another's, and the next edit shows up
+# as a whole-file diff. Pinning it here takes the decision away from local
+# config. This repo is already LF throughout, so it changes nothing today.
+* text=auto eol=lf
+
+# Binary assets: never line-ending-converted, never diffed as text.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+
+# Generated and large: still LF-normalized, but collapsed in diffs and left
+# out of the repository's language breakdown.
+package-lock.json -diff linguist-generated
