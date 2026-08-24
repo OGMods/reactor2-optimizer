@@ -25,6 +25,7 @@ import {
 import { rebaseToUnlocks, unscoredPlacement } from "../data/placements";
 import { simulatePlacedBuildings } from "../simulation/simulator";
 import { blueprintKey } from "../encoding/blueprint";
+import { trackEvent } from "../utils/analytics";
 import {
   solverStorage,
   uiStorage,
@@ -675,9 +676,27 @@ class SolverState {
     this.lastRunDurationMs = null;
     this.#startClock();
 
+    // `pool` as well as `cores`, because the pool is capped at eight and the
+    // makespan the user was shown follows the pool, not the machine.
+    trackEvent("solve_run", {
+      mode: this.solveMode.id,
+      island: this.#runTemplateId,
+      tiles: countGrassTiles(layoutState.grid),
+      roster: Object.keys(configState.buildingUpgrades).length,
+      cores:
+        typeof navigator !== "undefined"
+          ? navigator.hardwareConcurrency || 0
+          : 0,
+      pool: defaultPoolSize(),
+    });
+
     /** True while the board this run is solving is still the one on screen. */
     const onScreen = () => this.#runTemplateId === layoutState.activeTemplateId;
     let finalVariants: OptimizationResult[] | null = null;
+    // Tracked separately from `optimizationError`, which is only written while
+    // the run's island is still on screen.
+    let runError: string | null = null;
+    let donePower = 0;
 
     try {
       // $state.snapshot is required before anything crosses postMessage:
@@ -726,11 +745,13 @@ class SolverState {
       finalVariants = await handle.promise;
       if (onScreen()) this.optimizationResult = finalVariants[0] ?? null;
     } catch (err: any) {
+      runError = err?.message || "Optimization failed.";
       if (onScreen()) {
-        this.optimizationError = err?.message || "Optimization failed.";
+        this.optimizationError = runError;
       }
       console.error("Optimization error:", err);
     } finally {
+      const stopped = this.isStopping;
       this.#stopClock();
       this.#stopWatchdog();
       const durationMs = performance.now() - this.#startedAt;
@@ -781,6 +802,7 @@ class SolverState {
           this.lastRunDurationMs = winningDurationMs;
           this.finishedAt = finishedAt;
         }
+        donePower = variants[selected]?.totalPower ?? 0;
       } else if (onScreen()) {
         /*
          * The run came back with nothing — it errored, or it was torn down
@@ -799,6 +821,21 @@ class SolverState {
         this.finishedAt = previousFinishedAt;
         this.elapsedMs = previousDurationMs ?? 0;
       }
+
+      // Every `solve_run` gets one of these, so a status other than `ok` is
+      // countable rather than inferred from a run that simply never reported.
+      const bound = this.estimatedMaxPower;
+      trackEvent("solve_done", {
+        mode: this.solveMode.id,
+        island: this.#runTemplateId,
+        status: runError ? "error" : finalVariants?.length ? "ok" : "empty",
+        stopped: stopped ? 1 : 0,
+        duration_ms: Math.round(durationMs),
+        power: Math.round(donePower),
+        bound: Math.round(bound),
+        bound_pct: bound > 0 ? Math.round((donePower / bound) * 100) : 0,
+        variants: this.variants.length,
+      });
     }
   }
 

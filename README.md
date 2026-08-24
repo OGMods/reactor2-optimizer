@@ -28,7 +28,7 @@ Workers so the board stays interactive while it thinks.
   until you choose to adopt it.
 - **Save as image.** The board on screen, whole and at full resolution, as a
   PNG — for the places a code cannot go. The power is in the filename
-  (`reactor2-island-3-12AA_345T.png`), so a folder of them sorts and compares
+  (`reactor2-island-3-12AA-345T.png`), so a folder of them sorts and compares
   without opening any. Zoom and pan do not affect the picture.
 - **Live figures for your own board too**, not just for solves: power, and a
   count of the buildings that are idle or overheating, which on the map look

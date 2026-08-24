@@ -1,5 +1,5 @@
 import type { CustomIsland } from "../types/building";
-import type { PlacementView } from "../types/ui";
+import type { ImageScale, PlacementView } from "../types/ui";
 import { DEFAULT_SOLVE_MODE, type SolveModeId } from "../worker/solveModes";
 import type { OptimizationResult } from "../solver/types";
 
@@ -63,6 +63,17 @@ export interface UiPrefs {
    * novelty costs.
    */
   haptics: boolean;
+  /**
+   * Whether usage collection is switched **off** — see
+   * `uiState.analyticsDisabled`. The negative, because gtag's own switch is
+   * `ga-disable-<id>` and the default is to collect.
+   *
+   * **Optional on purpose, like `animations` above.** Absent means the user
+   * has never said, and the app follows the browser's do-not-track signal.
+   */
+  analyticsDisabled?: boolean;
+  /** How far `saveLayoutImage` scales the exported PNG up. */
+  imageScale: ImageScale;
 }
 
 const DEFAULT_UI_PREFS: UiPrefs = {
@@ -71,6 +82,7 @@ const DEFAULT_UI_PREFS: UiPrefs = {
   statsCardCollapsed: false,
   solveMode: DEFAULT_SOLVE_MODE,
   haptics: true,
+  imageScale: 1,
 };
 
 /**

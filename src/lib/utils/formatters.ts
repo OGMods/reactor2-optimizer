@@ -85,7 +85,7 @@ export function formatNumber(n: number): string {
  * rather than the number:
  *
  * - **No `.`** — a dot in a filename reads as an extension separator, so the
- *   fraction becomes a second whole tier after an underscore. That also makes
+ *   fraction becomes a second whole tier after a hyphen. That also makes
  *   it *more* precise than the display figure rather than less: `12AA-345T`
  *   carries six digits where `12.3AA` carries three.
  * - **The minor tier is dropped when it is zero**, so a round figure is

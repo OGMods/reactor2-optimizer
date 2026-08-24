@@ -616,10 +616,45 @@ none of the Vibration API** — so nothing is ever confirmed by touch alone, and
 `SettingsModal`'s hint says so on a device that cannot do it rather than leaving
 the user to conclude the app is broken.
 
-Those two are the **only** preferences in a Settings dialog, deliberately: every
-other setting — run length, which board is drawn, whether the readout is folded —
-sits beside the thing it changes, because choosing it is part of doing the task.
-These are about the app rather than the board.
+**`analyticsDisabled` is the third row, and the only one that is not about how
+the app behaves for the user.** Google Analytics is opt-*out*: the stored field
+is the refusal, matching gtag's own `ga-disable-<id>` switch, and the row is
+presented as the affirmative — lit when collecting — because every switch in
+that column means "this is happening".
+
+**It is three states, like `animations`.** Absent means nobody has chosen, and
+then the browser answers: `doNotTrackRequested()` reads Global Privacy Control
+as well as `doNotTrack`, because DNT is gone from Safari and never had a UI in
+Chrome. Both are compared to `"1"` rather than coerced — `"0"` means *yes, you
+may*, and it is truthy. An explicit choice then wins in both directions.
+`analyticsOptedOut(choice)` holds that rule for the two callers that resolve it,
+`main.ts` at boot and `uiState` for the switch.
+
+Three things in `utils/analytics.ts` are what make the opt-out real: the tag is
+**not in `index.html`** (a `<head>` script sends its `page_view` before any
+preference has been read), it is fetched **on idle** after mount so it never
+competes with the atlas, and switching off sets the disable flag on a tag
+**already in the page**. `setAnalyticsEnabled` is idempotent and fetches at most
+once, which is what lets one function serve both the boot path and the switch.
+The measurement id is a constant, since it ships in the bundle anyway.
+`utils/analytics.test.ts` pins every branch — each fails either open (a page
+view for someone who said no) or closed (the tag off for everyone), and neither
+is visible in the app.
+
+**Four events beyond `page_view`**, each fired from the one place that knows
+the answer: `solve_run` and `solve_done` in `runOptimizer` (paired, so a status
+other than `ok` is countable rather than inferred from a run that never
+reported), `share_copy` in `copyShare`, and `board_failed` in `PixiCanvas`'s
+init catch — one event for both halves, since an atlas that never arrives and a
+WebGL context that never starts are the same empty board. `trackEvent` buffers
+until the tag lands, because it is fetched on idle and the app is usable well
+before that; nothing buffered before an opt-out is ever sent. A param is not
+reportable until it is registered as a custom dimension or metric in GA.
+
+Those three are the **only** preferences in a Settings dialog, deliberately:
+every other setting — run length, which board is drawn, whether the readout is
+folded — sits beside the thing it changes, because choosing it is part of doing
+the task. These are about the app rather than the board.
 
 **Settings and Setup are two things.** The panel is named **SETUP**, never
 *Configuration* — a synonym for *Settings* offers two differently-named doors and
@@ -667,12 +702,12 @@ link both need this app to read them, which is no use for a forum post; a pictur
 travels anywhere. It follows the same board Share does, and it is allowed in
 preview because it writes nothing the visitor owns.
 
-**The power is in the filename** — `reactor2-island-3-12AA_345T.png`, from
+**The power is in the filename** — `reactor2-island-3-12AA-345T.png`, from
 `layoutImageFilename`. A picture is the one form of a layout that carries no
 figures inside it, so a folder of these sorts and compares without opening any.
 `formatNumberForFilename` in `utils/formatters.ts` is the port of Python's
 `format_for_filename`, so the two spell the same figure the same way — dots
-turned into a second whole tier after an underscore, because a dot in a filename
+turned into a second whole tier after a hyphen, because a dot in a filename
 reads as an extension. The board is named by its **id** (`island3`, `custom2`)
 rather than its title: the id is already the "which island", and unlike the title
 it survives a rename.
@@ -682,9 +717,16 @@ container**, not the visible canvas. `getLocalBounds()` ignores the container's
 own transform, so what comes out is the whole board at its authored sprite scale
 — not the part the window happens to be showing, and not whatever zoom was last
 pinched to. `clearColor` is the board's own green, so the margin is board rather
-than a transparent halo that most viewers render black, and the resolution is 2x
-backed off only as far as `EXPORT_MAX_SIDE_PX` demands — a render texture past
-the GPU's cap comes back blank rather than large.
+than a transparent halo that most viewers render black.
+
+**The scale is a Settings preference** (`uiState.imageScale`) and is **passed
+in** rather than read by the renderer — the same split `setAnimated` makes. 2x
+is where the export used to be fixed, and it is now the *ceiling*: it puts a
+large board past 5MB, so 1x is the default and the reason the setting exists. `EXPORT_MAX_SIDE_PX` in `pixi/boardExport.ts` still
+wins outright over it, and is not floored at 1x: a render texture past the GPU's
+cap comes back blank rather than large, so the scale is backed off rather than
+the picture cropped. Settings names that cap in its hint, which is why the two
+constants live in a module of their own instead of inside `PixiCanvas`.
 
 **Two boards can exist at once** — the user's hand-placed buildings and the last
 solve's — and `visiblePlacements` is the single answer to which is on screen.

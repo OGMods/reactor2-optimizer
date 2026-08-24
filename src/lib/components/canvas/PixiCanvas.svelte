@@ -15,6 +15,12 @@
   import { ViewportControls } from "../../pixi/viewportControls";
   import { hapticTap } from "../../utils/haptics";
   import { dismissBootLoader } from "../../utils/bootLoader";
+  import { trackEvent } from "../../utils/analytics";
+  import type { ImageScale } from "../../types/ui";
+  import {
+    EXPORT_MAX_SIDE_PX,
+    EXPORT_PADDING_PX,
+  } from "../../pixi/boardExport";
 
   /*
    * The green the board sits on, as Pixi's numeric literal.
@@ -292,24 +298,6 @@
   }
 
   /**
-   * How much of the board's own green frames the exported picture, in board
-   * pixels. Enough that the outermost tiles are not cut flush against the
-   * edge; small enough that a one-island board is not mostly margin.
-   */
-  const EXPORT_PADDING_PX = 32;
-
-  /**
-   * The largest side an exported picture may have, in pixels.
-   *
-   * The extract renders into a single render texture, and both WebGL and
-   * WebGPU cap how big one may be — a 60x60 island at 2x would sail past the
-   * 4096 some mobile GPUs report and come back blank rather than large. The
-   * resolution is scaled down to fit rather than the picture being cropped:
-   * a smaller image of the whole board beats a sharp image of part of it.
-   */
-  const EXPORT_MAX_SIDE_PX = 4096;
-
-  /**
    * The board on screen, as a PNG.
    *
    * It captures the *grid container*, not the visible canvas, and the
@@ -323,10 +311,15 @@
    * `uiState.visiblePlacements`, so the export is the board the user is
    * looking at, solver's or their own, for the same reason Share is.
    *
+   * The scale is passed in rather than read here: it is a preference, and the
+   * renderer is told what to do with it — the same split `setAnimated` makes.
+   *
    * `null` when there is nothing to capture — before the atlas has loaded, or
    * when the browser refuses the blob.
    */
-  export async function exportBoardImage(): Promise<Blob | null> {
+  export async function exportBoardImage(
+    scale: ImageScale,
+  ): Promise<Blob | null> {
     if (!app || !gridContainer || !isAtlasLoaded) return null;
 
     const bounds = gridContainer.getLocalBounds();
@@ -339,12 +332,11 @@
       bounds.height + EXPORT_PADDING_PX * 2,
     );
 
-    // 2x for a crisp picture, backed off only as far as the texture cap
-    // demands. The cap wins outright rather than being floored at 1x: an
-    // oversized render texture comes back blank, and a board no shipped island
-    // reaches is still not a reason to hand back an empty picture.
+    // The cap wins outright over the chosen scale, and is not floored at 1x:
+    // an oversized render texture comes back blank, and a board no shipped
+    // island reaches is still not a reason to hand back an empty picture.
     const longest = Math.max(frame.width, frame.height);
-    const resolution = Math.min(2, EXPORT_MAX_SIDE_PX / longest);
+    const resolution = Math.min(scale, EXPORT_MAX_SIDE_PX / longest);
 
     const canvas = app.renderer.extract.canvas({
       target: gridContainer,
@@ -645,6 +637,7 @@
   }
 
   onMount(() => {
+    let atlasFailed = false;
     (async () => {
       /*
        * Started before the renderer rather than after it, so the atlas fetch
@@ -678,7 +671,12 @@
       });
       viewportControls.attach();
 
-      await atlasReady;
+      try {
+        await atlasReady;
+      } catch (err) {
+        atlasFailed = true;
+        throw err;
+      }
       isAtlasLoaded = true;
 
       buildGridDisplay();
@@ -723,6 +721,12 @@
        * dismissal is unconditional for that reason.
        */
       console.error("Canvas failed to start", err);
+      // The symptom is the same either way — an empty board — so one event
+      // covers both, with `stage` saying which half gave out.
+      trackEvent("board_failed", {
+        stage: atlasFailed ? "atlas" : "canvas",
+        reason: String(err?.message ?? err).slice(0, 100),
+      });
       dismissBootLoader();
     });
   });

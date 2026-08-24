@@ -1,9 +1,15 @@
 import type { PixiCanvas } from "../components";
-import type { PlacedBuilding, PlacementView } from "../types";
+import type { ImageScale, PlacedBuilding, PlacementView } from "../types";
 import type { BuildingCategory } from "../data";
 import { buildShareUrl, clearSharedCode } from "../encoding/shareLink";
 import { downloadBlob, toFileSlug } from "../utils/downloadFile";
 import { formatNumberForFilename } from "../utils/formatters";
+import {
+  analyticsOptedOut,
+  doNotTrackRequested,
+  setAnalyticsEnabled,
+  trackEvent,
+} from "../utils/analytics";
 import { uiStorage } from "../storage/storage";
 import { configState } from "./config.svelte";
 import { layoutState } from "./layout.svelte";
@@ -263,6 +269,74 @@ class UIState {
     if (this.#haptics === on) return;
     this.#haptics = on;
     uiStorage.savePrefs({ haptics: on });
+  }
+
+  /**
+   * Whether usage collection is off, or `null` for "follow the browser".
+   *
+   * The negative, matching gtag's `ga-disable-<id>`: the default is to
+   * collect, so the state worth storing is the refusal. Three states for the
+   * reason `animations` has them — do-not-track answers until someone chooses,
+   * and an explicit choice then wins in both directions.
+   *
+   * Settings inverts it for display: every switch in that column means "this
+   * is happening", and one inverted row would give `--neon` two readings.
+   */
+  #analyticsDisabled = $state<boolean | null>(
+    uiStorage.loadPrefs().analyticsDisabled ?? null,
+  );
+
+  /** The effective answer: the user's choice, or the browser's if they have none. */
+  get analyticsDisabled(): boolean {
+    return analyticsOptedOut(this.#analyticsDisabled);
+  }
+
+  /**
+   * Nobody has chosen *and* the browser is asking not to be tracked — the one
+   * case worth saying out loud, since the switch is off and they did not do it.
+   */
+  get analyticsFollowsDoNotTrack(): boolean {
+    return this.#analyticsDisabled === null && doNotTrackRequested();
+  }
+
+  /**
+   * Writes the preference and acts on it at once — the tag is already in the
+   * page, and a switch that only stopped collecting on the next load is not
+   * an opt-out.
+   *
+   * The guard is on the *stored* choice, so the first press always lands:
+   * `null` equals neither boolean, which is what pins the browser's answer
+   * into an explicit one.
+   */
+  setAnalyticsDisabled(off: boolean) {
+    if (this.#analyticsDisabled === off) return;
+    this.#analyticsDisabled = off;
+    uiStorage.savePrefs({ analyticsDisabled: off });
+    setAnalyticsEnabled(!off);
+  }
+
+  /**
+   * How far `saveLayoutImage` scales the exported PNG above the board's
+   * authored sprite size.
+   *
+   * 1x by default, where the export used to be fixed at 2x: that put a large
+   * board past 5MB, which is a lot of picture for something meant to be
+   * pasted into a forum post. 2x is still there for anyone who wants it.
+   */
+  #imageScale = $state<ImageScale>(
+    // Normalised, so a value stored before the ceiling came down cannot leave
+    // the control with nothing lit.
+    uiStorage.loadPrefs().imageScale === 2 ? 2 : 1,
+  );
+
+  get imageScale(): ImageScale {
+    return this.#imageScale;
+  }
+
+  setImageScale(scale: ImageScale) {
+    if (this.#imageScale === scale) return;
+    this.#imageScale = scale;
+    uiStorage.savePrefs({ imageScale: scale });
   }
 
   /**
@@ -666,7 +740,7 @@ class UIState {
         layoutState.activeTemplateId,
         this.visiblePower,
       );
-      const blob = await this.canvasRef?.exportBoardImage();
+      const blob = await this.canvasRef?.exportBoardImage(this.imageScale);
       if (!blob) return;
 
       downloadBlob(blob, filename);
@@ -691,6 +765,7 @@ class UIState {
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
+      trackEvent("share_copy", { form });
       this.copiedForm = form;
       // The dialog can be taller than a phone, so the button that was pressed
       // — and its own "Copied!" label — may have scrolled out of sight.

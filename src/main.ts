@@ -3,6 +3,8 @@ import "./app.css";
 import { default as App } from "./App.svelte";
 import { hydrateState } from "./lib/state";
 import { preloadAtlas } from "./lib/pixi/atlas";
+import { analyticsOptedOut, setAnalyticsEnabled } from "./lib/utils/analytics";
+import { uiStorage } from "./lib/storage/storage";
 
 /*
  * The sprite atlas is ~1MB and nothing below can start it any earlier.
@@ -42,5 +44,26 @@ try {
 const app = mount(App, {
   target: document.getElementById("app")!,
 });
+
+/*
+ * Analytics goes last, and then waits for the browser to be idle: everything
+ * above it is the board, and a measurement tag that competed with any of it
+ * would be reporting on an app it had itself made slower to start.
+ *
+ * Read from storage rather than from `uiState`, so the boot order does not
+ * depend on a singleton's construction. `analyticsOptedOut` is what applies
+ * do-not-track, so a visitor who opted out at the browser never fetches the
+ * tag at all.
+ */
+const startAnalytics = () =>
+  setAnalyticsEnabled(
+    !analyticsOptedOut(uiStorage.loadPrefs().analyticsDisabled ?? null),
+  );
+
+if (typeof requestIdleCallback === "function") {
+  requestIdleCallback(startAnalytics, { timeout: 4000 });
+} else {
+  setTimeout(startAnalytics, 2000);
+}
 
 export default app;

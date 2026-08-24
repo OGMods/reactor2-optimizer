@@ -1,6 +1,8 @@
 <script lang="ts">
   import { uiState } from "../../state";
-  import { Sparkles, Vibrate } from "lucide-svelte";
+  import { ChartColumn, ImageDown, Sparkles, Vibrate } from "lucide-svelte";
+  import type { ImageScale } from "../../types/ui";
+  import { EXPORT_MAX_SIDE_PX } from "../../pixi/boardExport";
   import ModalShell from "./ModalShell.svelte";
 
   const hasVibration =
@@ -46,6 +48,22 @@
       : uiState.haptics
         ? "A short buzz when a building is placed or cleared."
         : "Placing and clearing buildings stay silent.",
+  );
+
+  /*
+   * Says what is collected rather than what the switch is called: "analytics"
+   * alone invites the reader to assume the worst. The first branch does the
+   * double duty the motion hint does — it says the browser is what turned this
+   * off, and the value of honouring that signal is in the user knowing it was.
+   */
+  const IMAGE_SCALES: ImageScale[] = [1, 2];
+
+  let analyticsHint = $derived(
+    uiState.analyticsFollowsDoNotTrack
+      ? "Off: your browser asks sites not to track you."
+      : uiState.analyticsDisabled
+        ? "No usage data is sent."
+        : "Sends anonymous page views so I can improve the app.",
   );
 </script>
 
@@ -94,6 +112,61 @@
         >
           <span class="track"><span class="knob"></span></span>
         </button>
+      </div>
+
+      <!-- Affirmative, though stored as the negative: every switch in this
+           list is lit when the thing it names is happening. -->
+      <div class="setting">
+        <span class="icon"><ChartColumn size={16} /></span>
+
+        <span class="text">
+          <span class="name" id="setting-analytics">Usage analytics</span>
+          <span class="hint">{analyticsHint}</span>
+        </span>
+
+        <button
+          class="switch"
+          role="switch"
+          aria-checked={!uiState.analyticsDisabled}
+          aria-labelledby="setting-analytics"
+          onclick={() =>
+            uiState.setAnalyticsDisabled(!uiState.analyticsDisabled)}
+        >
+          <span class="track"><span class="knob"></span></span>
+        </button>
+      </div>
+
+      <!-- Stacked, not a control on the right: three options do not fit
+           beside a hint on a phone, and shrinking them would put the row
+           under the touch floor. -->
+      <div class="setting stacked">
+        <span class="icon"><ImageDown size={16} /></span>
+
+        <span class="text">
+          <span class="name" id="setting-image-scale">Saved image size</span>
+          <span class="hint">
+            How far <em>Save as image</em> scales the board up. 2× is sharper
+            and roughly four times the file; either way a large board is capped
+            at {EXPORT_MAX_SIDE_PX}px.
+          </span>
+        </span>
+
+        <div
+          class="segmented"
+          role="group"
+          aria-labelledby="setting-image-scale"
+        >
+          {#each IMAGE_SCALES as scale (scale)}
+            <button
+              class="segment"
+              class:active={uiState.imageScale === scale}
+              aria-pressed={uiState.imageScale === scale}
+              onclick={() => uiState.setImageScale(scale)}
+            >
+              {scale}×
+            </button>
+          {/each}
+        </div>
       </div>
     </div>
   </ModalShell>
@@ -150,6 +223,58 @@
    * ends up the size of the track, which is what keeps the flex `gap` measured
    * against what is visible.
    */
+  /* Icon and text on the first line, the control across the second. */
+  .setting.stacked {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.4rem 0.65rem;
+  }
+
+  .setting.stacked .segmented {
+    grid-column: 1 / -1;
+  }
+
+  .segmented {
+    display: flex;
+    gap: 0.25rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.2rem;
+  }
+
+  .segment {
+    flex: 1 1 0;
+    min-height: var(--ctl);
+    border: 1px solid transparent;
+    border-radius: calc(var(--radius-sm) - 2px);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: var(--fs-base);
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      color var(--dur-fast) ease,
+      background var(--dur-fast) ease,
+      border-color var(--dur-fast) ease;
+  }
+
+  .segment:hover {
+    color: var(--text);
+    background: var(--surface-raised);
+  }
+
+  .segment.active {
+    background: var(--neon-bg);
+    border-color: var(--neon-line);
+    color: var(--neon);
+  }
+
+  .segment:focus-visible {
+    outline: 2px solid var(--neon);
+    outline-offset: 2px;
+  }
+
   .switch {
     display: flex;
     align-items: center;
