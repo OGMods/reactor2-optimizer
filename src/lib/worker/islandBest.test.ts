@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { IslandBest } from "./islandBest";
-import type { IslandLayout, PlacedBuilding } from "../solver/types";
+import type { IslandLayout, PlacedBuilding } from "@reactor2/solver";
 
 /** One building on an island-local tile, carrying `power` and nothing else. */
 function placed(buildingId: string, x: number): PlacedBuilding {

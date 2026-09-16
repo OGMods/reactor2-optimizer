@@ -1,5 +1,5 @@
 /**
- * Isometric projection math. Peer: `py_solver/render/isometric.py`.
+ * Isometric projection math.
  *
  * Grid -> screen only. There is no inverse transform anywhere in the app:
  * hit-testing is done with per-tile diamond `hitArea` polygons in `gridPainter.ts`.

@@ -14,16 +14,22 @@
   },
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json && tsc -p tsconfig.test.json",
+    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json && tsc -p tsconfig.test.json && tsc -p packages/solver/tsconfig.json && tsc -p packages/solver/tsconfig.tools.json",
     "knip": "knip",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:solver": "npm run build --workspace @reactor2/solver",
+    "solve": "npm run solve --workspace @reactor2/solver --",
+    "fixtures": "npm run fixtures --workspace @reactor2/solver --"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
@@ -34,11 +40,13 @@
     "prettier-plugin-svelte": "^4.1.1",
     "svelte": "^5.56.8",
     "svelte-check": "^4.7.3",
+    "tsx": "^4.20.6",
     "typescript": "~6.0.2",
     "vite": "^8.2.0",
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@reactor2/solver": "*",
     "lucide-svelte": "^1.0.1",
     "pixi.js": "^8.19.0"
   }

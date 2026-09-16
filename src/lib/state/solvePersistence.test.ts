@@ -7,7 +7,7 @@
  * no longer describes: a layout that looks authoritative but was solved for
  * different terrain is worse than no layout, because nothing on screen says so.
  *
- * An app rule, like `terrainRules.test.ts` — the Python reference knows nothing
+ * An app rule, like `terrainRules.test.ts` — the solver package knows nothing
  * about storage.
  */
 import { beforeEach, describe, expect, it } from "vitest";
@@ -30,7 +30,7 @@ const { solverState } = await import("./solver.svelte");
 const { editorState } = await import("./editor.svelte");
 const { solverStorage } = await import("../storage/storage");
 const { isObstacleType } = await import("../types/grid");
-const { ISLAND_TEMPLATES } = await import("../data/maps");
+const { ISLAND_TEMPLATES } = await import("@reactor2/solver");
 
 /** A stand-in result: `restore()` only ever moves it around, never reads into it. */
 function fakeResult(totalPower: number): OptimizationResult {

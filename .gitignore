@@ -12,10 +12,8 @@ dist
 dist-ssr
 *.local
 
-# Python
-__pycache__/
-*.py[cod]
-py_solver/solves/
+# Solver CLI output: one blueprint code per run, named after what it found.
+solves/
 
 # Local tooling and its data.
 tools/

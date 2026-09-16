@@ -1,5 +1,9 @@
 import { asset } from "../utils";
-import { buildingCategory, levelValue, type BuildingCategory } from "../data";
+import {
+  buildingCategory,
+  levelValue,
+  type BuildingCategory,
+} from "@reactor2/solver";
 import type { BuildingDefinition, BuildingType } from "../types";
 
 /**

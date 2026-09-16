@@ -11,13 +11,13 @@
   import {
     effectiveAtValue,
     findBuilding,
+    formatNumber,
     levelIndexForValue,
-  } from "../../data";
+  } from "@reactor2/solver";
   import { placementStatus } from "../../data/placements";
   import {
     asset,
     formatDuration,
-    formatNumber,
     formatTileCoords,
     formatTimeAgo,
   } from "../../utils";

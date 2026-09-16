@@ -1,0 +1,21 @@
+{
+  /*
+   * The engine itself. `types` is deliberately EMPTY: the package has to keep
+   * running inside a Web Worker, and a stray `process.env` or `Buffer` picked
+   * up from @types/node would typecheck here and fail there. What the source
+   * may reach for is the DOM/ES intersection Node also implements —
+   * `CompressionStream`, `Blob`, `Response`, `btoa`, `MessageChannel`,
+   * `performance` — which is what `lib` below admits and nothing more.
+   *
+   * `tsconfig.tools.json` covers the CLI, the scripts and the tests, which do
+   * get Node.
+   */
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "types": [],
+    "noEmit": true,
+    "tsBuildInfoFile": "../../node_modules/.tmp/solver.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"]
+}

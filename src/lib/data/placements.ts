@@ -1,6 +1,6 @@
 import type { PlacedBuilding } from "../types";
-import { findBuilding, levelIndexForValue, levelValue } from "./buildings";
-import { wasteIsCovered } from "../solver/physics";
+import { findBuilding, levelValue } from "@reactor2/solver";
+import { wasteIsCovered } from "@reactor2/solver";
 
 /**
  * The value a building would be placed at right now: its tier at the player's
@@ -138,37 +138,6 @@ export function createPlacementAtLevel(
     y,
     def ? levelValue(def.levels[clamped]) : 0,
   );
-}
-
-/**
- * The tier table for a board: every building id on it, mapped to the upgrade
- * index its placements are standing at. This is what `encodeBlueprint` takes
- * as its `tiers` argument — spelled as a plain record here rather than imported
- * as `BlueprintTiers`, so the data layer stays ignorant of the wire format it
- * happens to feed.
- *
- * Read from each placement's own `baseValue` rather than from the roster, so
- * the table describes the buildings that are actually there. The two are the
- * same number right up until an upgrade is bought behind a standing building,
- * and at that moment the board is the one telling the truth — which is the same
- * reason the readout and the scorer both go through `effectiveAtValue`.
- *
- * One entry per id: every placement of a building shares a tier, because
- * `rebasePlacements` re-reads them all together. Where a board somehow carries
- * two, the first wins, which is the same arbitrary-but-stable answer the wire
- * format could hold anyway.
- */
-export function placementTiers(
-  placements: readonly PlacedBuilding[],
-): Record<string, number> {
-  const tiers: Record<string, number> = {};
-  for (const p of placements) {
-    if (p.buildingId in tiers) continue;
-    const def = findBuilding(p.buildingId);
-    if (!def) continue;
-    tiers[p.buildingId] = levelIndexForValue(def, p.baseValue);
-  }
-  return tiers;
 }
 
 /**

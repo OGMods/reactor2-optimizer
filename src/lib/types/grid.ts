@@ -1,20 +1,14 @@
 /**
- * The core tile model. Peer: `py_solver/solver/types.py` (`TileType` / `Tile`).
+ * Which tiles an editor may clear, and what a cleared one used to be.
  *
- * `lib/solver/types.ts` keeps its own structurally-identical copy on purpose —
- * the solver is a self-contained data-contract module. `solver/typeContract.test.ts`
- * asserts the two stay assignable.
+ * The tile model itself — `Tile`, `TileType`, and the rule that only `grass`
+ * is buildable — belongs to `@reactor2/solver`, which is the thing that has to
+ * agree with the game. It is re-exported here so app code can go on importing
+ * the whole model from `lib/types`.
  */
+import type { TileType } from "@reactor2/solver";
 
-export type TileType =
-  "water" | "grass" | "rock" | "tree1" | "tree2" | "pond" | "transformer";
-
-/** Only `grass` is buildable; every other type is an obstacle. */
-export interface Tile {
-  x: number;
-  y: number;
-  type: TileType;
-}
+export type { Tile, TileType } from "@reactor2/solver";
 
 /**
  * The clearable obstacles — everything that blocks building but is *on* the

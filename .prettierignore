@@ -9,13 +9,12 @@ dist-ssr/
 
 # Generated data, written by something other than a person. Formatting it
 # would be undone by the next regeneration and show up as a diff every time.
-# parity/fixtures/ is written by py_solver/parity/export_fixtures.py; the
+# packages/solver/fixtures/ is written by the solver's fixture exporter; the
 # atlas is packed by an external script that is not part of this repo.
 package-lock.json
-parity/fixtures/
+packages/solver/fixtures/
 public/data/web_atlas.json
 
-# Local tooling (gitignored) and Python build artifacts.
+# Local tooling (gitignored) and generated output.
 tools/
-__pycache__/
-py_solver/solves/
+solves/

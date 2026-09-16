@@ -6,7 +6,7 @@
     solverState,
     uiState,
   } from "../../state";
-  import { ISLAND_TEMPLATES, MAX_CUSTOM_ISLANDS } from "../../data/maps";
+  import { ISLAND_TEMPLATES, MAX_CUSTOM_ISLANDS } from "@reactor2/solver";
   import type { IslandTemplate } from "../../types/building";
   import { Plus, RotateCcw, Trash2 } from "lucide-svelte";
   import { onDestroy } from "svelte";

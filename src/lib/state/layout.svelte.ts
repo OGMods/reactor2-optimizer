@@ -10,20 +10,20 @@ import {
   BLANK_ISLAND_CODE,
   ISLAND_TEMPLATES,
   MAX_CUSTOM_ISLANDS,
-} from "../data/maps";
-import { BUILDINGS } from "../data";
+} from "@reactor2/solver";
 import {
-  createPlacement,
-  createPlacementAtLevel,
-  placementTiers,
-  rebaseToUnlocks,
-} from "../data/placements";
-import {
+  BUILDINGS,
   blueprintKey,
   decodeBlueprint,
   encodeBlueprint,
+  placementTiers,
   type DecodedBlueprint,
-} from "../encoding/blueprint";
+} from "@reactor2/solver";
+import {
+  createPlacement,
+  createPlacementAtLevel,
+  rebaseToUnlocks,
+} from "../data/placements";
 import { gridStorage, type SavedTemplateData } from "../storage/storage";
 import { simulatePlacedBuildings } from "../simulation/simulator";
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { solverState, uiState } from "../../state";
-  import { formatNumber } from "../../utils";
+  import { formatNumber } from "@reactor2/solver";
   import { Sparkles, Trash2 } from "lucide-svelte";
   import ModalShell from "./ModalShell.svelte";
   import { STAT_ICON } from "../statIcons";

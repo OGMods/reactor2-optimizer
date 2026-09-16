@@ -1,0 +1,21 @@
+{
+  /*
+   * The CLI, the fixture exporter and the test suite — everything that runs on
+   * Node rather than in the app. Kept apart from `tsconfig.json` so that the
+   * engine cannot quietly acquire a Node global by sharing a config with the
+   * things that legitimately use one.
+   */
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "types": ["node", "vitest/globals"],
+    "noEmit": true,
+    "tsBuildInfoFile": "../../node_modules/.tmp/solver.tools.tsbuildinfo"
+  },
+  "include": [
+    "bin/**/*.ts",
+    "scripts/**/*.ts",
+    "tests/**/*.ts",
+    "vite.build.config.ts"
+  ]
+}

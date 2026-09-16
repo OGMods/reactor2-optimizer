@@ -1,6 +1,6 @@
 <script lang="ts">
   import { configState, uiState } from "../../state";
-  import { BUILDINGS, buildingCategory } from "../../data";
+  import { BUILDINGS, buildingCategory } from "@reactor2/solver";
   import { Cpu, Zap, Snowflake, Lock, Unlock } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import BuildingUnlockCard from "./BuildingUnlockCard.svelte";

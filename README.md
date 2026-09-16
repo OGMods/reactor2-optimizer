@@ -87,58 +87,61 @@ npm install
 npm run dev
 ```
 
-| Command           | What it does                                                |
-| ----------------- | ----------------------------------------------------------- |
-| `npm run dev`     | Vite dev server                                             |
-| `npm run build`   | Production build into `dist/`                               |
-| `npm run preview` | Serve the built output                                      |
-| `npm run check`   | `svelte-check` + `tsc` over app, config and tests           |
-| `npm test`        | Vitest — unit tests plus the Python↔TypeScript parity suite |
-| `npm run knip`    | Report unused files, exports and dependencies               |
+| Command            | What it does                                                          |
+| ------------------ | --------------------------------------------------------------------- |
+| `npm run dev`      | Vite dev server                                                       |
+| `npm run build`    | Production build into `dist/`                                         |
+| `npm run preview`  | Serve the built output                                                |
+| `npm run check`    | `svelte-check` + `tsc` over the app, the configs and both test suites |
+| `npm test`         | Vitest — the app's tests and the solver package's                     |
+| `npm run knip`     | Report unused files, exports and dependencies                         |
+| `npm run solve`    | Solve a board from the terminal (`-- --help` for the flags)           |
+| `npm run fixtures` | Regenerate the solver's golden fixtures                               |
 
 ## Repository layout
 
 ```
+packages/solver/  @reactor2/solver — the engine, the roster, the codec, the CLI
 src/lib/
-  solver/       the search and simulation — no DOM, Svelte, Pixi or npm imports
   worker/       the Web Worker boundary: coordinator, pool, client, solve modes
   state/        Svelte 5 runes singletons (layout, config, solver, ui, ...)
   components/   UI, grouped by region (canvas, header, hud, inspector, sidebar)
   pixi/         atlas, isometric renderer, viewport controls
-  encoding/     the blueprint codec and share links
-  data/         building roster, island templates, upgrade resolution
-py_solver/      the Python reference implementation (see its own README)
-docs/           the game rules both solvers implement, and the parity contract
-parity/         golden fixtures the TypeScript suite replays
+  simulation/   scores a hand-placed board, by delegating to the solver
+  encoding/     share links
+  data/         the app's own record of a placed building
+docs/           the game rules, and how the solver package is put together
 public/         static assets served as-is; reach them via `asset()`, not `/...`
 .github/        CI and the GitHub Pages deployment
 ```
 
-`src/lib/solver/` is deliberately framework-free so it can run in a worker and
-be lifted out as a unit; a test enforces that boundary.
+## The solver is a package
 
-## The Python reference
+[`packages/solver/`](packages/solver/) is `@reactor2/solver`, an npm workspace
+with **no runtime dependencies**: the game's rules, its building tables, the
+blueprint codec and the placement search. The app imports it like any other
+dependency and runs it inside a Web Worker, so nothing in it may reach for the
+DOM, Svelte, Pixi or an npm package — a test enforces that boundary rather than
+trusting it.
 
-[`py_solver/`](py_solver/) is a standalone Python implementation of the same
-solver, and it is **upstream**: algorithm changes are prototyped there and then
-ported, and when the two disagree, Python is right. It is not part of the app —
-`npm install` ignores it and it never reaches `dist/` — but it travels with the
-repo because it is what the shipped solver is judged against.
+It also runs on its own. `npm run solve` solves a board from the terminal and
+prints a blueprint code you can paste into the app's Import dialog.
 
-`npm test` replays golden fixtures exported from it, so a port that drifts fails
-the build. [`docs/PARITY.md`](docs/PARITY.md) is the file-by-file mapping and the
-list of every intentional divergence between the two trees.
+[`docs/SOLVER.md`](docs/SOLVER.md) explains how it is put together, what the
+golden fixtures pin and why, and what must never be changed casually.
 
 ## Contributing
 
 Read [`CLAUDE.md`](CLAUDE.md) first — it is the architecture document, and it
 explains not just what the code does but why several non-obvious decisions are
-the way they are. Before touching either solver, read
-[`docs/game-logic.md`](docs/game-logic.md).
+the way they are. Before touching the solver, read
+[`docs/game-logic.md`](docs/game-logic.md) and
+[`docs/SOLVER.md`](docs/SOLVER.md).
 
 Keep `npm run check` at zero and `npm test` green. If you change solver
-behaviour, change it in `py_solver/` first, re-port it, and regenerate the parity
-fixtures.
+behaviour, regenerate the golden fixtures (`npm run fixtures`) and read the diff
+before committing it — it is the clearest statement of what your change actually
+did.
 
 ## License
 

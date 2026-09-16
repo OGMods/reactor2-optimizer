@@ -1,9 +1,9 @@
 import type { PixiCanvas } from "../components";
 import type { ImageScale, PlacedBuilding, PlacementView } from "../types";
-import type { BuildingCategory } from "../data";
+import type { BuildingCategory } from "@reactor2/solver";
 import { buildShareUrl, clearSharedCode } from "../encoding/shareLink";
 import { downloadBlob, toFileSlug } from "../utils/downloadFile";
-import { formatNumberForFilename } from "../utils/formatters";
+import { formatNumberForFilename } from "@reactor2/solver";
 import {
   analyticsOptedOut,
   doNotTrackRequested,
@@ -46,10 +46,9 @@ type ToastTone = "ok" | "warn";
  * **The power is in the name** because a picture is the one form of a layout
  * that carries no figures of its own — and it is the figure the whole exercise
  * is about, so a folder of these sorts and compares without opening any of
- * them. The Python reference already names its renders this way
- * (`py_solver/solves/`), and `formatNumberForFilename` is the port of the
- * spelling it uses, so an app export and a reference render name the same
- * board the same way.
+ * them. `formatNumberForFilename` comes from `@reactor2/solver`, which is what
+ * the CLI names its own output with, so a board saved from the app and one
+ * solved from the terminal sort beside each other.
  *
  * The board is named by its **id** rather than its title: ids are `island3`
  * and `custom2`, which is already the "which island" a name would have to

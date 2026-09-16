@@ -1,7 +1,7 @@
 import type { CustomIsland } from "../types/building";
 import type { ImageScale, PlacementView } from "../types/ui";
 import { DEFAULT_SOLVE_MODE, type SolveModeId } from "../worker/solveModes";
-import type { OptimizationResult } from "../solver/types";
+import type { OptimizationResult } from "@reactor2/solver";
 
 export interface SavedTemplateData {
   /** Blueprint code — terrain and hand-placed buildings, see `lib/encoding/blueprint.ts`. */

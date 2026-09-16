@@ -4,11 +4,11 @@ import {
   DEFAULT_TIME_BUDGET_S,
   planSolve,
   type IslandPlan,
-} from "../solver/solver";
+} from "@reactor2/solver";
 import { buildSolveVariants } from "./variants";
 import { IslandBest } from "./islandBest";
-import { countGrassTiles } from "../solver/island";
-import type { IslandSolution } from "../solver/placementSearch";
+import { countGrassTiles } from "@reactor2/solver";
+import type { IslandSolution } from "@reactor2/solver";
 import type {
   BuildingDefinition,
   IslandWorkerErrorResponse,
@@ -18,7 +18,7 @@ import type {
   PlacedBuilding,
   SolveOptions,
   Tile,
-} from "../solver/types";
+} from "@reactor2/solver";
 
 interface WorkerSlot {
   worker: Worker;
@@ -63,7 +63,7 @@ export function defaultPoolSize(): number {
 }
 
 /**
- * Runs one island-search per worker, mirroring the process pool the Python
+ * Runs one island-search per worker, mirroring the process pool the reference
  * pipeline uses: islands cannot influence each other, so wall-clock time
  * becomes ~max(island budget) instead of the sum of them, and every island
  * still gets its full proportional share of the budget.

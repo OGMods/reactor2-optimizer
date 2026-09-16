@@ -4,7 +4,7 @@
     BUILDINGS,
     buildingCategory,
     type BuildingCategory,
-  } from "../../data";
+  } from "@reactor2/solver";
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import BuildingPaletteItem from "./BuildingPaletteItem.svelte";

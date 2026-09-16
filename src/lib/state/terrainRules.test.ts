@@ -7,15 +7,15 @@
  *   3. So a clearance must be reversible, or rule 2 is a one-way trap whose
  *      only undo is Reset, which also discards every building placed.
  *
- * These live here rather than in the parity suite: they are app rules, not
- * anything the Python reference knows about.
+ * These live here rather than in the solver package's suite: they are app
+ * rules, not anything the engine knows about.
  */
 import { describe, expect, it } from "vitest";
 import { layoutState } from "./layout.svelte";
 import { editorState } from "./editor.svelte";
 import { isObstacleType } from "../types/grid";
-import { ISLAND_TEMPLATES } from "../data/maps";
-import { decodeBlueprint } from "../encoding/blueprint";
+import { ISLAND_TEMPLATES } from "@reactor2/solver";
+import { decodeBlueprint } from "@reactor2/solver";
 
 describe("restore cleared obstacles", () => {
   it("round-trips a cleared obstacle on a shipped island", async () => {

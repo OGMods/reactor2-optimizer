@@ -1,6 +1,6 @@
 <script lang="ts">
   import { layoutState, uiState } from "../../state";
-  import { MAX_CUSTOM_ISLANDS } from "../../data/maps";
+  import { MAX_CUSTOM_ISLANDS } from "@reactor2/solver";
   import { AlertCircle, Download, Loader2 } from "lucide-svelte";
   import ModalShell from "./ModalShell.svelte";
 

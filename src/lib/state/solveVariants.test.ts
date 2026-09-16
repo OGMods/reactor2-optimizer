@@ -7,7 +7,7 @@
  * half: pooling them across runs, remembering which one the user picked, and
  * getting them back from storage without keeping ten scored boards in it.
  *
- * An app rule, like `solvePersistence.test.ts` — the Python reference solves
+ * An app rule, like `solvePersistence.test.ts` — the engine solves
  * for one layout and has nothing to say about any of it.
  */
 import { beforeEach, describe, expect, it } from "vitest";
