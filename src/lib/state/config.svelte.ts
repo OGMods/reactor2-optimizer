@@ -2,7 +2,7 @@ import {
   BUILDINGS,
   getEffectiveBuildings,
   rosterCanProducePower,
-} from "../data";
+} from "@reactor2/solver";
 import { buildingStorage } from "../storage/storage";
 
 /**

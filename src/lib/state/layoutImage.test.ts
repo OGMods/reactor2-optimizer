@@ -2,10 +2,10 @@
  * What a board saved as a picture is called.
  *
  * A PNG is the one form of a layout that carries no figures inside it, so the
- * name is where the power has to go — the same call `py_solver` makes for the
- * renders it writes into `solves/`. `utils/formatters.test.ts` pins the
- * spelling of the figure against that Python peer; this pins the name built
- * around it.
+ * name is where the power has to go — the same call the solver CLI makes for
+ * the blueprints it writes into `solves/`. The solver package's
+ * `formatters.test.ts` pins the spelling of the figure; this pins the name
+ * built around it.
  */
 import { describe, expect, it } from "vitest";
 

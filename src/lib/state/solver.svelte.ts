@@ -13,18 +13,18 @@ import {
   type SolveMode,
   type SolveModeId,
 } from "../worker/solveModes";
-import { BUILDINGS } from "../data";
-import { getEffectiveBuildings } from "../data/effectiveBuildings";
-import { isDistinctLayout, powerTies } from "../solver/alternates";
+import { BUILDINGS } from "@reactor2/solver";
+import { getEffectiveBuildings } from "@reactor2/solver";
+import { isDistinctLayout, powerTies } from "@reactor2/solver";
 import {
   canCoolDirectProducer,
   countGrassTiles,
   estimateTotalMaxPower,
   splitGridIntoIslands,
-} from "../solver/island";
+} from "@reactor2/solver";
 import { rebaseToUnlocks, unscoredPlacement } from "../data/placements";
 import { simulatePlacedBuildings } from "../simulation/simulator";
-import { blueprintKey } from "../encoding/blueprint";
+import { blueprintKey } from "@reactor2/solver";
 import { trackEvent } from "../utils/analytics";
 import {
   solverStorage,

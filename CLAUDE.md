@@ -8,7 +8,7 @@ A Svelte 5 + Vite + PixiJS web app for laying out buildings on a grid for a
 reactor/power-grid idle game, with a built-in optimizer that computes a
 near-optimal placement of reactors/generators/coolers. The game's rules are
 specified in `docs/game-logic.md` — read it before touching anything under
-`src/lib/solver/`.
+`packages/solver/`, and `docs/SOLVER.md` for how that package is put together.
 
 ## Commands
 
@@ -16,10 +16,19 @@ specified in `docs/game-logic.md` — read it before touching anything under
 npm run dev      # start Vite dev server
 npm run build    # production build to dist/
 npm run preview  # preview the production build
-npm run check    # svelte-check (app) + tsc (vite.config.ts) + tsc (tests)
+npm run check    # svelte-check (app) + tsc (config, app tests, solver package)
 npm run knip     # find unused files/exports/deps
-npm test         # vitest: unit tests + Python↔TS parity suite
+npm test         # vitest: the app's tests and the solver package's
+npm run solve    # solve a board from the terminal (`-- --help`)
+npm run fixtures # regenerate the solver's golden fixtures
+npm run build:solver  # build the publishable @reactor2/solver dist/
 ```
+
+**The solver is a separate npm workspace**, `@reactor2/solver` in
+`packages/solver/`. It has no runtime dependencies, the app imports it by name,
+and `exports` points at its TypeScript source — so `npm run dev` needs no build
+step and `npm run build:solver` exists only so the package stays publishable
+(CI runs it). `docs/SOLVER.md` is the authority on what is inside it.
 
 `npm run check` and `npm run knip` are both clean — **keep them that way**.
 `check` fails on unused locals and parameters as well as type errors.
@@ -28,16 +37,20 @@ Three things worth knowing when either starts complaining:
 
 - **`BUILDING_TABLE` is `as const`**, so its element type is a union of 38
   literal object types and `.find()` over that union hides any property some
-  member lacks. `lib/data/buildings.ts` exports it through a
+  member lacks. `packages/solver/src/data/buildings.ts` exports it through a
   `readonly BuildingDefinition[]` annotation so consumers get the uniform
   four-variant union and narrow on `type`.
-- **`knip.json` declares `src/lib/solver/index.ts` an entry point**, because it
-  is the liftable module's public surface and nothing in the app imports it (the
-  app reaches into `solver/solver.ts` directly). `@lintignore` in a doc comment
+- **`knip.json` declares an entry point per workspace** — the app's `main.ts`
+  and `index.html`, the package's `src/index.ts` plus its `bin/`, `scripts/` and
+  `tests/`, none of which anything imports. `@lintignore` in a doc comment
   excuses a single deliberately-public export with no in-app caller. Anything
   else knip reports is real.
 - **Test files are excluded from `tsconfig.app.json`** (so Node globals stay out
-  of browser code) and typechecked via `tsconfig.test.json`.
+  of browser code) and typechecked via `tsconfig.test.json`. The package has the
+  same split twice over: `tsconfig.json` covers `src/` with `types: []`, so the
+  engine cannot pick up a Node global and fail inside a worker, and
+  `tsconfig.tools.json` covers `bin/`, `scripts/` and `tests/`, which do get
+  Node.
 
 ## Project conventions
 
@@ -48,13 +61,13 @@ assume them.
   rendered — the grid steppers on a shipped island, the terrain brushes over the
   solver's board, `PlacementViewToggle` with no solve, the variants row during a
   run. Screen space on a phone is scarce and a row of inert buttons explains
-  nothing. The one exception is `BoardActions`' Undo/Redo, which are *disabled*:
+  nothing. The one exception is `BoardActions`' Undo/Redo, which are _disabled_:
   they must stay findable before there is anything to undo, and a control that
   comes and goes would move Run out from under the user's thumb.
 - **Measured, not assumed.** Every piece of chrome the canvas has to work around
   publishes its real size — `uiState.headerBottom`, `hudHeight`, `sidebarWidth`,
   `sheetPeekHeight` (`ConfigSidebar` binds `clientHeight` on its `.sheet-top`,
-  which *is* what peek shows; `SHEET_PEEK_FALLBACK_PX` covers the one frame
+  which _is_ what peek shows; `SHEET_PEEK_FALLBACK_PX` covers the one frame
   before the measurement lands). All of them change at runtime, so any
   hard-coded guess is wrong on some device.
 - **Two presses for anything that destroys unrecoverable work.** See
@@ -67,21 +80,22 @@ A building is one of **four roles** — `cooler`, `reactor`, `generator`,
 each, carrying one record per upgrade tier. The game's own catalogue files
 reactors and direct producers under a single `heat_producer` category and the
 sidebar still shows them on one tab, so `buildingCategory()` in
-`lib/data/buildings.ts` maps the four roles back to the three UI groups — the
+`data/buildings.ts` in the solver package maps the four roles back to the three
+UI groups — the
 only place that three-way grouping is used.
 
 **A generator does not convert heat at a fixed ratio.** Each tier authors its
 own `HeatPerTick` / `EnergyPerTick` / `WasteHeatPerTick`, and the generator
 scales the latter two by how full it is. `energy / heat` lands near 0.75 without
 being 0.75, because the three fields are rounded to 3 significant figures
-independently. `lib/solver/physics.ts` owns that conversion, the relative
+independently. `solver/physics.ts` owns that conversion, the relative
 cooling tolerance (`wasteIsCovered`) and `snapToAuthoredPrecision`;
 `GENERATOR_ENERGY_RATIO` / `GENERATOR_WASTE_RATIO` survive in `constants.ts`
 only as the fallback for a roster that authors neither.
 
 `EffectiveBuilding` — what crosses the worker boundary — is where the role's
 waste rule has already been applied, leaving three plain numbers:
-`effectiveValue`, `energy`, `waste`. `lib/data/effectiveBuildings.ts` is the one
+`effectiveValue`, `energy`, `waste`. `data/effectiveBuildings.ts` is the one
 place that resolves them, so a panel cannot disagree with the layout it
 describes. It answers two questions that must not be confused:
 `getEffectiveBuildings` reads the player's _unlock level_ ("what may the solver
@@ -91,14 +105,11 @@ board readout both use the latter, so the ceilings the card prints are the tier
 the building actually ran at — the two diverge the moment an upgrade is bought
 behind a standing building.
 
-**Both catalogues are generated, so don't hand-edit either.** An external
-extraction script in `tools/` (gitignored — it reads the game's own files and
-does not ship) emits the `BUILDING_TABLE` block in `lib/data/buildings.ts` and
-the `BUILDINGS` block in `py_solver/data/buildings.py` from one extracted
-roster, so the port and its reference cannot disagree about a number. It splices
-only those two declarations; the prose, the helpers and `UNLOCKED_UPGRADES` are
-hand-owned and survive regeneration. A number edited by hand in one tree and not
-the other is a parity bug no test will catch.
+**The catalogue is generated, so don't hand-edit it.** An external extraction
+script in `tools/` (gitignored — it reads the game's own files and does not
+ship) emits the `BUILDING_TABLE` block in `packages/solver/src/data/buildings.ts`
+from the extracted roster. It splices only that declaration; the prose and the
+helpers around it are hand-owned and survive regeneration.
 
 The tables carry the game's **authored ScriptableObject doubles**, not the
 3-significant-figure numbers its UI shows and not the extractor's rounded JSON
@@ -109,11 +120,15 @@ The tables carry the game's **authored ScriptableObject doubles**, not the
 
 ### Folder map
 
-`src/lib/` splits into `solver/` (worker-safe, no DOM/Svelte/Pixi/npm), `worker/`
-(the boundary), `data/`, `types/`, `pixi/`, `utils/`, `storage/`, `simulation/`,
-`encoding/`, `state/` and `components/` — the last grouped by region (`canvas/`,
-`header/`, `hud/`, `inspector/`, `sidebar/`, `modals/`), plus two shared modules
-at its root: `confirmArm.svelte.ts` and `statIcons.ts`.
+The game's own half — the engine, the building tables, the blueprint codec and
+the number ladder — lives in `packages/solver/`; see `docs/SOLVER.md`.
+
+`src/lib/` is the app around it: `worker/` (the boundary), `types/`, `pixi/`,
+`utils/`, `storage/`, `simulation/`, `encoding/` (share links), `data/` (the
+app's own record of a placed building), `state/` and `components/` — the last
+grouped by region (`canvas/`, `header/`, `hud/`, `inspector/`, `sidebar/`,
+`modals/`), plus two shared modules at its root: `confirmArm.svelte.ts` and
+`statIcons.ts`.
 
 `components/index.ts` exports only what `App.svelte` mounts; a component only
 ever rendered by a sibling is imported directly by its parent. Each folder's
@@ -151,10 +166,11 @@ cascade.
 
 ### Blueprint is the format
 
-`encoding/blueprint.ts` is deflate + base64url, one byte per tile, carrying
-terrain **and** buildings in a single payload with the grid's dimensions in the
-first two bytes. The shipped island templates (`data/maps.ts`), the user's saved
-edits (`localStorage`) and the Share button all use it. It needs
+`encoding/blueprint.ts` in the solver package is deflate + base64url, one byte
+per tile, carrying terrain **and** buildings in a single payload with the grid's
+dimensions in the first two bytes. The shipped island templates (`data/maps.ts`),
+the user's saved edits (`localStorage`), the Share button and the CLI's output
+all use it. It needs
 `CompressionStream`, so encode and decode are **async** — which is why loading a
 grid is an awaited step rather than something a constructor can do.
 
@@ -191,7 +207,7 @@ Two rules follow, and they are not symmetric:
 
 **A share code has a second form: a link.** `encoding/shareLink.ts` owns the
 `?bp=` parameter's name so nothing else knows it, builds the URL from the live
-`location` (this app ships to a GitHub Pages subpath *and* to localhost, so a
+`location` (this app ships to a GitHub Pages subpath _and_ to localhost, so a
 configured base would be wrong in one), and strips the parameter on the way out
 via `replaceState`. The dialog offers both forms and **copies neither on open**:
 there is no way to guess which the user came for, and taking their clipboard to
@@ -202,9 +218,9 @@ see the state layer.
 
 - **UI shell** — Svelte 5 components + runes state classes: paint a grid, manage
   a catalog of unlocked buildings.
-- **Solver engine** (`src/lib/solver/`) — framework-agnostic TypeScript that
-  takes a grid + roster and returns an optimized layout. It never runs on the
-  main thread.
+- **Solver engine** (`@reactor2/solver`) — a framework-agnostic package that
+  takes a grid + roster and returns an optimized layout. In the app it never
+  runs on the main thread.
 
 They talk **only** through `SolverWorkerClient` (`worker/workerClient.ts`), which
 owns a `SolverCoordinator`, which owns a pool of `islandWorker.ts` workers, one
@@ -216,46 +232,41 @@ island per worker. All three live in `worker/` so the solver stays liftable.
 written literally inline — Vite statically detects that exact pattern. Don't
 refactor the URL into a variable.
 
-### Solver: a port of the Python reference
+### Solver: a package, not a folder
 
-`src/lib/solver/` is a line-for-line port of the standalone Python solver in
-`py_solver/`, which is committed. **That tree is upstream**: algorithm changes
-happen there first and are re-ported; when the two disagree, Python wins. Its own
-`CLAUDE.md` is the authority on *why* the search is shaped as it is.
-`docs/PARITY.md` holds the file-by-file mapping, every intentional divergence and
-the porting checklist — don't reproduce it here.
+`packages/solver/` is `@reactor2/solver` — the engine, the authored building
+tables, the blueprint codec, the number ladder, a CLI and its own test suite. It
+declares **no runtime dependencies** and the app consumes it through the
+workspace link. `docs/SOLVER.md` is the authority on how it is put together and
+what must not be changed casually; don't reproduce that here.
 
-`py_solver` needs Python 3 and `pip install -r py_solver/requirements.txt`
-(Pillow, for the debug renderer only); the solver and its tests are pure stdlib.
-`npm install` has nothing to do with it and it never ships to `dist/`. Only its
-generated output is ignored: `py_solver/solves/` (rendered PNGs) and
-`__pycache__/`.
+Until recently the shipped solver was a line-for-line port of a Python reference
+in `py_solver/`, which was upstream. That tree is **retired** — the port had
+become about 9x faster at the thing that decides solve quality, since every
+stage is wall-clock budgeted and V8 simply fits more annealing steps into the
+same 30 seconds. Its whole test suite and its CLI's argument surface moved here
+with it. Comments that mention "the retired Python reference" are explaining why
+something is shaped the way it is, not pointing at code you can go and read.
 
-The port is faithful in behaviour but not in data structures — it indexes tiles
-in the game's processing order once instead of re-sorting, reuses a scratch
-buffer, and adds a `Pacer` because a worker must return to the event loop.
-`docs/PARITY.md` lists every divergence; two things there bind you regardless:
-`rng.ts` is mulberry32 and bit-identical to `solver/rng.py`, so **don't swap in
-`Math.random()`**, and `DistributionScratch` **must never change a number**.
+Two things from that history still bind you: `rng.ts` is mulberry32 with pinned
+golden streams, so **don't swap in `Math.random()`** and never re-record those
+goldens, and `DistributionScratch` **must never change a number**.
 
-`solver/types.ts` is a **self-contained data-contract file**: it keeps its own
-`Tile`, `TileType`, `BuildingType` and `BuildingDefinition` rather than importing
-`src/lib/types/`, which is what lets the solver be lifted out as a unit. Code
-inside `solver/` imports `./types`; app code imports `src/lib/types/`.
-`solver/typeContract.test.ts` asserts the two stay mutually assignable, so drift
-fails `npm run check` instead of failing at the worker boundary.
-`PlacedBuilding`, `OptimizationResult` and `OptimizationSummary` are **not**
-duplicated — `types/index.ts` re-exports them from the solver.
+`solver/types.ts` is the **data contract**: `Tile`, `TileType`, `BuildingType`,
+`BuildingDefinition`, and everything that crosses the worker boundary. The app
+does not redeclare any of it — `src/lib/types/` re-exports from the package, so
+there is one definition and nothing to keep in sync.
 
 ### The worker-safety boundary
 
-`src/lib/solver/` must stay importable into a Web Worker. It may import only from
-itself and from `src/lib/data/` (pure definition tables). No `worker/`, `pixi/`,
-`storage/`, `encoding/`, `state/`, `components/`, `simulation/`, no npm package,
-no `.svelte`. `solver/workerSafety.test.ts` enforces this by scanning imports, so
-the boundary survives without an ESLint toolchain (the project has none).
+Everything under `packages/solver/src/` must stay importable into a Web Worker:
+no npm package (the manifest declares none) and no `.svelte`. Inside it, a
+second rule keeps the layering one-way — `src/solver/` may reach only into
+itself and `src/data/`, never into the codec or the formatters.
+`tests/workerSafety.test.ts` enforces both by scanning imports, so the boundary
+survives without an ESLint toolchain (the project has none).
 
-The rule is *worker-safe*, not *environment-free*: `pacer.ts` uses
+The rule is _worker-safe_, not _environment-free_: `pacer.ts` uses
 `MessageChannel`, `setTimeout` and `performance.now()` on purpose — those are
 globals, not imports.
 
@@ -275,9 +286,9 @@ is the entry point. `planSolve()` does the shared setup:
    right-sizing**. The starred pair repeats until the deadline: repair's slice is
    reserved before the layout exists and converges long before its cap, so what
    it hands back becomes another short walk rather than idle time. The reasoning
-   for each stage is in the file header and `py_solver/CLAUDE.md`; the short
+   for each stage is in the file header and `docs/SOLVER.md`; the short
    version is that seeding builds self-sufficient hubs and systematically misses
-   layouts where hubs *share* a cooler or reactor, and the other stages cover
+   layouts where hubs _share_ a cooler or reactor, and the other stages cover
    that from different directions.
 4. `simulate.ts` evaluates a fixed placement — the hot path, called millions of
    times per solve — using `distribution.ts` (FairShare + an Edmonds-Karp
@@ -288,8 +299,8 @@ is the entry point. `planSolve()` does the shared setup:
 nicest to build is a judgement the solver cannot make, so `alternates.ts` watches
 the walk and collects stable layouts matching its best power. The collector is a
 passive observer — nothing in it feeds back into the search — and
-`replayIslandDeterministic` (the parity path) passes none, so fixtures are
-untouched. `docs/PARITY.md` divergence 7 is the authority.
+`replayIslandDeterministic` (the fixture path) passes none, so the goldens are
+untouched. `docs/SOLVER.md` is the authority.
 
 **A tie has to be a different board, not a different string.** An entry joins the
 shortlist only if it is `MIN_ALTERNATE_DISTANCE` tiles — five — from every layout
@@ -297,7 +308,7 @@ already kept, counting an empty tile as an occupant of its own, so one
 substituted building is 1 apart and one relocated building is 2. Deduplicating by
 shape alone let a converged walk fill the list with near-copies of itself, and
 cycling through them looked like nothing was happening. The bar is on being a
-*second* answer, never on being an answer — a layout that beats the shortlist
+_second_ answer, never on being an answer — a layout that beats the shortlist
 empties it first, so it is always kept whatever it looks like. Every gate that
 admits a layout applies the same rule: the collector during the walk,
 `finalizeAlternates` (pruning and right-sizing rewrite the board, so distances
@@ -324,7 +335,7 @@ load-bearing and look like details:
   maximum flow, different split, and the split decides which buildings clear
   their cooling.
 - Supply and demand are counted **down** rather than accumulated up, because
-  `cap - sent` is not bit-identical to a decremented remainder and the parity
+  `cap - sent` is not bit-identical to a decremented remainder and the golden
   fixtures assert exactly.
 
 **`simulation/simulator.ts` implements none of the rules.** It scores hand-placed
@@ -358,38 +369,36 @@ places has to actually run. `stabilize()` drops zero-power producers
 unconditionally and repeats, since removing one hands its heat to its neighbours.
 
 The part that binds you when editing the search: the annealing walk may pass
-*through* unstable layouts but records only stable ones as best, and **"pruning
+_through_ unstable layouts but records only stable ones as best, and **"pruning
 never reduces power" is not a valid invariant**. The valid ones are "the returned
-layout is stable" and "pruning a *stable* layout never reduces power".
+layout is stable" and "pruning a _stable_ layout never reduces power".
 
 ### Verifying a solver change
 
-Start with `npm test` — the parity suite replays golden fixtures exported by
-`py_solver/parity/export_fixtures.py`. Note its two layers: the `expected` layer
-(annealing off) is asserted **exactly** and has no floating-point excuse, while
-the `annealed` layer is tolerance-checked because `Math.pow`/`Math.exp` differ
-from CPython's libm by 1 ULP, which is enough to diverge the walk
-(`docs/PARITY.md` divergence 5).
+Start with `npm test`. Three parts of it are what actually catch a regression:
 
-Fixtures live in **one** place — `parity/fixtures/` at the repo root — and the Python
-exporter writes straight to it. `npm test` must never read `py_solver/`, which
-would make a Python checkout a build dependency of the web app. Regenerate with:
+- **`tests/fixtures.test.ts`** replays the golden fixtures in
+  `packages/solver/fixtures/`. Two layers: `expected` (annealing off) is
+  asserted **exactly** and has no floating-point excuse, while `annealed` is
+  tolerance-checked because `Math.pow`/`Math.exp` are not required to be
+  correctly rounded and a V8 upgrade can move one by an ULP — enough to diverge
+  the walk permanently.
+- **`tests/goldenLayouts.test.ts`** pins the proven optima for islands of 3–9
+  tiles. **These numbers must never go down.**
+- **`tests/distribution.test.ts`** pins the flow rules against measurements from
+  the live game and against an independent max-flow oracle.
 
-```bash
-cd py_solver && python3 -m parity.export_fixtures
-```
-
-Beyond that the Python reference has a fuller suite — simulation parity (expected
-to match **bit for bit**, not approximately), the golden-layout optima for islands
-of 3–9 tiles (**proven optima; they must never go down**), and a whole-map run.
-Re-run all three after changing anything under `src/lib/solver/`; `py_solver`'s
-own docs carry the commands. Note both solvers are stochastic and map 1 swings
-~2% run to run, so compare several runs, not one.
+Regenerate the fixtures with `npm run fixtures` and **read the diff** — it is the
+clearest statement of what a solver change actually did. Re-running against an
+unchanged solver reproduces every file byte for byte; CI checks that, so a
+non-deterministic solve path fails there rather than becoming folklore.
 
 Only seed construction and `simulateIsland` are deterministic, so those are what
 to compare when refactoring. `rngSeed` pins the annealing walk's move sequence,
-but stage deadlines are wall-clock, so seeding narrows run-to-run variance rather
-than eliminating it.
+but stage deadlines are wall-clock, so seeding narrows run-to-run variance
+rather than eliminating it. For a whole-board check use the CLI
+(`npm run solve -- --map 1 --attempts 10 --time 20`): the search is stochastic
+and map 1 swings ~2% run to run, so compare several runs, not one.
 
 ## State layer (`src/lib/state/`, Svelte 5 runes)
 
@@ -409,7 +418,7 @@ solver   -> config, layout    ui       -> config, layout, solver, viewport
 model, constructed first, and everything else reads from it. Three things used to
 violate that: it wrote `activeTemplateId` onto `uiState`, it recentered the canvas
 on template load, and `paintTile` read the brush off the editor. The first two
-made the grid and UI singletons mutually dependent *during construction*, which
+made the grid and UI singletons mutually dependent _during construction_, which
 worked only because module import order happened to cooperate. Now the template
 id lives in `layoutState`, recentering is the caller's job, and the editing verbs
 live on `editorState`, which calls `layoutState.setTile()`. `layoutState` exposes
@@ -440,8 +449,8 @@ sequence number so a burst of paints cannot land out of order.
 
 The roster: which buildings are unlocked and to what level. **Presence of a key
 in `buildingUpgrades` is what "unlocked" means**; locking deletes the key rather
-than storing a flag. The building *catalog* is not here — it is static data, so
-import `BUILDINGS` from `lib/data`.
+than storing a flag. The building _catalog_ is not here — it is static data, so
+import `BUILDINGS` from `@reactor2/solver`.
 
 ### `solverState` (`solver.svelte.ts`)
 
@@ -487,30 +496,30 @@ on a separate, monotonic track and never files them as answers.
 
 **A re-run has to earn its place.** `runOptimizer({ keepBest })` captures the
 shortlist on screen and puts the new result back only if it scores higher; a
-defended layout keeps its *own* run's duration and timestamp, because it is still
+defended layout keeps its _own_ run's duration and timestamp, because it is still
 that solve and the card prints both. The search is stochastic and the budget
 short, so a second run genuinely can come back worse — which is why the choice is
 put to the user (`uiState.requestSolve`) rather than assumed.
 
 Two things about "the layout on screen" are load-bearing:
 
-- **The bar is the *best* layout held, not the one being previewed.**
+- **The bar is the _best_ layout held, not the one being previewed.**
   `variantIndex` is wherever the user's eye happens to be, and a shortlist is not
   always level: `rescoreResult` re-rates fixed shapes at a new roster and can rank
-  them apart. Measured against the previewed entry, a run that beats only *that*
-  one replaces the whole shortlist, higher layouts included. The *selection*
+  them apart. Measured against the previewed entry, a run that beats only _that_
+  one replaces the whole shortlist, higher layouts included. The _selection_
   still stays where the user put it.
 - **A run that comes back with nothing puts the held layout back.** What is on
-  screen at that moment is the last thing the dead run *streamed* — a search still
+  screen at that moment is the last thing the dead run _streamed_ — a search still
   moving, usually a fraction of the power it was drawn over. `runOptimizer`'s
   `finally` re-hangs `variants[variantIndex]` with the clock that came with it, or
   empties the panel if there was never one. `previousVariants` is likewise only
-  taken when there *is* a shortlist behind the result: a bare streamed snapshot is
+  taken when there _is_ a shortlist behind the result: a bare streamed snapshot is
   not something to defend, and defending it would hand the next run a bar of
   nearly zero.
 
 **A solve is a shortlist, not a layout.** `variants` holds up to
-`MAX_SOLVE_VARIANTS` (ten) boards at the *same* power, and `variantIndex` is the
+`MAX_SOLVE_VARIANTS` (ten) boards at the _same_ power, and `variantIndex` is the
 one the canvas draws. Cycling (`showVariant`, which wraps both ways) only
 previews and writes nothing; `applyVariant` is the commitment and
 `appliedVariant` is what a reload returns to. Thumbing through ten layouts must
@@ -535,7 +544,7 @@ one, which is what it was.
 **Completed solves are persisted per island** (`solverStorage`, key
 `solver_result`: one record per template id, oldest evicted past
 `MAX_STORED_SOLVES`) and re-hung by `restore()`, which `hydrateState()` awaits
-*after* `layoutState.hydrate()` — deciding whether a stored result is still valid
+_after_ `layoutState.hydrate()` — deciding whether a stored result is still valid
 means reading the board it was solved against. Validity is a stored signature:
 the terrain (`blueprintKey(grid)`, no placements) and the roster. Hand-placed
 buildings are deliberately outside it because the solver ignores them, so
@@ -582,9 +591,9 @@ hover), `prefersReducedMotion`, and the live viewport `height` the sheet's deten
 maths reads.
 
 **Width and pointer are independent axes and must stay that way**: a touchscreen
-laptop at 1400px gets the docked sidebar *and* tap-to-inspect, and deriving
+laptop at 1400px gets the docked sidebar _and_ tap-to-inspect, and deriving
 either from the other hands it the wrong half of each. Motion is a third,
-independent of both, and unlike the others it only ever sets a *default* — see
+independent of both, and unlike the others it only ever sets a _default_ — see
 `uiState.animations`.
 
 ### `uiState` (`ui.svelte.ts`)
@@ -603,7 +612,7 @@ only ever one inspector on screen.
 `#animations` is `true | false | null`, and `null` — nobody has chosen — is what a
 fresh install has. The getter resolves it against
 `viewportState.prefersReducedMotion`, so until someone opens Settings the system
-answers for them *and keeps answering* if they change it at the OS level. An
+answers for them _and keeps answering_ if they change it at the OS level. An
 explicit choice then wins for good, which is the standard reading of a system
 preference: a default, not a veto. `UiPrefs.animations` is optional in storage for
 the same reason — absent is not `false`.
@@ -617,7 +626,7 @@ none of the Vibration API** — so nothing is ever confirmed by touch alone, and
 the user to conclude the app is broken.
 
 **`analyticsDisabled` is the third row, and the only one that is not about how
-the app behaves for the user.** Google Analytics is opt-*out*: the stored field
+the app behaves for the user.** Google Analytics is opt-_out_: the stored field
 is the refusal, matching gtag's own `ga-disable-<id>` switch, and the row is
 presented as the affirmative — lit when collecting — because every switch in
 that column means "this is happening".
@@ -625,8 +634,8 @@ that column means "this is happening".
 **It is three states, like `animations`.** Absent means nobody has chosen, and
 then the browser answers: `doNotTrackRequested()` reads Global Privacy Control
 as well as `doNotTrack`, because DNT is gone from Safari and never had a UI in
-Chrome. Both are compared to `"1"` rather than coerced — `"0"` means *yes, you
-may*, and it is truthy. An explicit choice then wins in both directions.
+Chrome. Both are compared to `"1"` rather than coerced — `"0"` means _yes, you
+may_, and it is truthy. An explicit choice then wins in both directions.
 `analyticsOptedOut(choice)` holds that rule for the two callers that resolve it,
 `main.ts` at boot and `uiState` for the switch.
 
@@ -657,7 +666,7 @@ folded — sits beside the thing it changes, because choosing it is part of doin
 the task. These are about the app rather than the board.
 
 **Settings and Setup are two things.** The panel is named **SETUP**, never
-*Configuration* — a synonym for *Settings* offers two differently-named doors and
+_Configuration_ — a synonym for _Settings_ offers two differently-named doors and
 no way to guess which holds what. The split is real: the panel holds the **solve's inputs** (which island, which buildings, how
 long a run may take), all of which change what comes back from a run, while
 Settings holds preferences about **the app** that no solve can see.
@@ -670,7 +679,7 @@ user gesture.
 
 **The bottom line of the screen is `uiState.showToast`, and it is general** —
 not hard-wired to any one caller. `tone` is not decoration: `ok` confirms something that
-happened, `warn` says something did *not* and why. A second call replaces the
+happened, `warn` says something did _not_ and why. A second call replaces the
 first rather than queueing — this is the bottom line of a phone, and a backlog
 there is a backlog nobody reads.
 
@@ -683,7 +692,7 @@ back a blank board with nothing on screen saying why. `rosterCanProducePower` in
 roster: a direct producer is self-contained and needs only cooling; a generator
 needs a reactor, because heat comes from nowhere else; and either counts only if
 its waste has a cooler to go to. It tests `waste <= 0` rather than
-`wasteIsCovered`, because the question is whether cooling *exists*, not whether a
+`wasteIsCovered`, because the question is whether cooling _exists_, not whether a
 given layout covers a given building — that needs a board and is
 `simulateIsland`'s job. `data/rosterPower.test.ts` pins every branch, since each
 is a way the guard fails open (a wasted five-minute run) or closed (a refusal on
@@ -692,12 +701,12 @@ a roster that would have worked).
 There are two messages, because the two failures want different things done about
 them: nothing unlocked at all, versus a roster with a part missing. Both name
 Setup, because on a phone that is behind a button and a closed sheet. The guard
-sits *after* the stop branch — pressing STOP must work whatever the roster says —
+sits _after_ the stop branch — pressing STOP must work whatever the roster says —
 and Run stays live rather than going disabled, since a dead primary action
 explains nothing.
 
 **A layout leaves the app a third way: as a picture.** `saveLayoutImage()` (the
-overflow menu's *Save as image*) downloads the board as a PNG. A share code and a
+overflow menu's _Save as image_) downloads the board as a PNG. A share code and a
 link both need this app to read them, which is no use for a forum post; a picture
 travels anywhere. It follows the same board Share does, and it is allowed in
 preview because it writes nothing the visitor owns.
@@ -705,10 +714,10 @@ preview because it writes nothing the visitor owns.
 **The power is in the filename** — `reactor2-island-3-12AA-345T.png`, from
 `layoutImageFilename`. A picture is the one form of a layout that carries no
 figures inside it, so a folder of these sorts and compares without opening any.
-`formatNumberForFilename` in `utils/formatters.ts` is the port of Python's
-`format_for_filename`, so the two spell the same figure the same way — dots
-turned into a second whole tier after a hyphen, because a dot in a filename
-reads as an extension. The board is named by its **id** (`island3`, `custom2`)
+`formatNumberForFilename` comes from `@reactor2/solver`, which is what the CLI
+names its own output with, so a board saved from the app and one solved from the
+terminal spell the same figure the same way — dots turned into a second whole
+tier after a hyphen, because a dot in a filename reads as an extension. The board is named by its **id** (`island3`, `custom2`)
 rather than its title: the id is already the "which island", and unlike the title
 it survives a rename.
 
@@ -721,7 +730,7 @@ than a transparent halo that most viewers render black.
 
 **The scale is a Settings preference** (`uiState.imageScale`) and is **passed
 in** rather than read by the renderer — the same split `setAnimated` makes. 2x
-is where the export used to be fixed, and it is now the *ceiling*: it puts a
+is where the export used to be fixed, and it is now the _ceiling_: it puts a
 large board past 5MB, so 1x is the default and the reason the setting exists. `EXPORT_MAX_SIDE_PX` in `pixi/boardExport.ts` still
 wins outright over it, and is not floored at 1x: a render texture past the GPU's
 cap comes back blank rather than large, so the scale is backed off rather than
@@ -761,7 +770,7 @@ themselves `idx + 1` — the two must agree or the same building reads as two
 different tiers in two places. It resolves through `levelIndexForValue` (the
 inverse of `placementBaseValue`) from the placement's own `baseValue` rather than
 from the roster, the same rule the figures beneath it follow: it names the tier
-the building was *placed* at and the scorer ran it at. Reading the roster instead
+the building was _placed_ at and the scorer ran it at. Reading the roster instead
 would print a level the ceilings under it contradict. It sits under the name
 rather than beside it because on one line the two competed for a phone's width
 and the name had to ellipsize; stacked as a column (`.tile-id`), neither yields —
@@ -787,7 +796,7 @@ the map a building doing nothing looks exactly like one that works. Each row
 renders only when non-zero, so a board where everything runs says nothing at all.
 
 They are counted for **both** panels: "a solved layout is stable by
-construction" holds only for a layout the solver has *just* returned, and
+construction" holds only for a layout the solver has _just_ returned, and
 `rescoreResult` deliberately does not re-optimise, so a tier bought or locked
 behind a standing solve can leave it unstable, and the card has to say so rather
 than printing a power figure whose buildings have quietly shut down.
@@ -814,7 +823,7 @@ board would land on the other.
 figures and inspected tile together — capped by `.corner-cards` at the viewport
 less header and HUD, with `min-height: 0` so it can shrink into that cap.
 
-*One* scroller, not two. Splitting them was the first attempt, so that "what did I
+_One_ scroller, not two. Splitting them was the first attempt, so that "what did I
 just tap" would not scroll away — but flexbox takes the whole shortfall out of
 whatever can shrink, so a fixed tile section (~120px) crushed the figures to a few
 pixels, and a scrollbar a few pixels tall is unusable. The head stays out of the
@@ -831,7 +840,7 @@ controls), because there it lies across the map being played. The state is a
 persisted preference (`statsCardCollapsed`), and folding never hides the inspected
 tile — that section is outside the fold — nor the failure counts: the collapsed
 header carries a pill with the combined count ahead of the power figure, red as
-soon as anything is overheating and amber otherwise. Folding puts the *figures*
+soon as anything is overheating and amber otherwise. Folding puts the _figures_
 away, not the fact that the board has a problem. A pill rather than bare text
 because two numbers side by side with nothing between them read as one.
 
@@ -839,7 +848,7 @@ because two numbers side by side with nothing between them read as one.
 says: a tile brings a sprite, a name, a chip and up to three stat rows, and
 unfolded under a solve's figures that is most of a phone spent covering the board
 whose tile was just tapped. It is **derived, never written** — dismissing the tile
-puts the card back exactly as the player left it, where folding *by* setting
+puts the card back exactly as the player left it, where folding _by_ setting
 `statsCardCollapsed` would have rewritten their preference on the way past.
 
 Player-facing coordinates are flipped: `formatTileCoords` prints
@@ -881,20 +890,20 @@ path to the first frame.
 `indicator_idle`, and `STATUS_FRAME` in `gridPainter.ts` maps a
 `PlacementStatus` onto the last three.
 
-**A building that is not working breathes.** The pad says *what* is wrong in
-colour; the pulse says *that* something is, and motion is what the eye finds
+**A building that is not working breathes.** The pad says _what_ is wrong in
+colour; the pulse says _that_ something is, and motion is what the eye finds
 without being told where to look. `STATUS_PULSE` and the raised-cosine
 `pulseAlpha` live in `pixi/statusPulse.ts`, split out so `statusPulse.test.ts` can
 pin them without dragging PixiJS into a test. Four things are load-bearing:
 
 - **`active` is absent from the table, not mapped to a no-op.** A board where
-  everything works is *completely* still, which is what makes movement mean
+  everything works is _completely_ still, which is what makes movement mean
   something — and it keeps the ticker free, since the registry is empty.
 - **Overheating pulses faster and deeper than idle** (900ms to 0.35 alpha, against
   2200ms to 0.55) — the same ranking the colours carry.
 - **The curve starts at 1 and falls**, so a building that has just appeared fades
   in from full opacity rather than blinking on at its dimmest, which reads as a
-  glitch. Every sprite is given the *same* elapsed time rather than its own phase,
+  glitch. Every sprite is given the _same_ elapsed time rather than its own phase,
   so the board dips in step; staggered phases read as decoration.
 - **The registry is keyed by tile and cleared in `renderTileVisuals`.** That
   method destroys and rebuilds a tile's sprites, so an entry left behind is a
@@ -905,7 +914,7 @@ drawing every frame, so a second `requestAnimationFrame` loop would buy nothing.
 
 **The renderer does not decide whether to animate; it is told.** `GridRenderer`
 has `setAnimated(on)` and no media query of its own, because the effective answer
-is the user's Settings choice *or* `prefers-reduced-motion` when they have made
+is the user's Settings choice _or_ `prefers-reduced-motion` when they have made
 none, and picking between those is the state layer's job. An `$effect` in
 `PixiCanvas` pushes it — an effect rather than a one-time call, because both
 halves are live and a board already on screen has to settle or start breathing
@@ -946,7 +955,7 @@ Eight rules are invisible until they are wrong. Each is pinned by a test in
 - **A pinch that ends with one finger down re-anchors on it** (`syncPinchAnchors`
   does the same when a third finger lands or leaves), or the next move resolves
   against a stale origin and the board snaps back by everything the pinch did.
-- **A pinch anchors on the world point under the *previous* midpoint.** The
+- **A pinch anchors on the world point under the _previous_ midpoint.** The
   current one cancels algebraically, so the board zooms without panning.
 - **`pointerdown` takes `setPointerCapture` on the wrapper**, or a drag onto the
   floating chrome leaks a pointer into `activePointers` forever and the next
@@ -959,7 +968,7 @@ Eight rules are invisible until they are wrong. Each is pinned by a test in
   `settle`), applied to an absolute position rather than an increment so the
   damping is re-derived each frame rather than compounded.
 - **The double-tap is armed in `startPan`, not `pointerdown`** (`armDoubleTap:
-  false` on a writing press), and commits on the second tap's *up*.
+false` on a writing press), and commits on the second tap's _up_.
 - **`hasOtherPointer(id)` must be asked by id.** Pixi's handler runs a bubble
   earlier, so a count reads the state before this finger landed, and the second
   finger of a pinch places a building.
@@ -973,12 +982,12 @@ Eight rules are invisible until they are wrong. Each is pinned by a test in
 that writes on contact takes panning away for as long as a tool is held — which on
 a phone is most of the time. Dragging with a building selected laid a row of
 buildings instead of moving the map, and a pinch buzzed, placed something and
-*then* zoomed.
+_then_ zoomed.
 
 `plannedAction(button)` is the shape of the fix: it returns the write a press
 performs as **a function of the tile** (`TileAction`, `true` if it wrote), or
-`null` when the press writes nothing and is therefore a pan. *When* and *how
-often* that runs is the gesture's business, and there are three answers:
+`null` when the press writes nothing and is therefore a pan. _When_ and _how
+often_ that runs is the gesture's business, and there are three answers:
 
 - **A tap writes on the lift.** A touch press arms the action (`pendingEdit`) and
   starts a pan; the write lands if the finger comes up within `TAP_SLOP_PX` of
@@ -989,7 +998,7 @@ often* that runs is the gesture's business, and there are three answers:
   `dragAction`, so every tile the drag crosses is written. Deferring to the lift
   alone would have cost the drag — a painted row became a tap each — and a hold is
   the standard way to say "no, I meant this one". It costs the pan nothing,
-  because a pan begins by *moving*.
+  because a pan begins by _moving_.
 - **A mouse or a pen runs it on contact**, and drags from there. Those pointers
   have a middle-button drag and a wheel to navigate with, and cannot pinch.
 
@@ -1000,7 +1009,7 @@ still down a buzz reads as the board taking hold rather than as an after-the-fac
 report. The drag that follows writes in silence: a buzz per tile across a painted
 row is a rattle, and says nothing the first has not.
 
-Two consequences. `TileAction` is what lets a press capture *its own* action
+Two consequences. `TileAction` is what lets a press capture _its own_ action
 rather than the hover handler re-deciding — a right-button erase-drag would
 otherwise come back as whatever the left button paints. And because a touch press
 has written nothing when a second finger lands, the pinch case needs no undo at
@@ -1019,7 +1028,7 @@ by `isPrimary`, so the rule does not depend on listener registration order.
 **The stroke is still opened at `pointerdown`**, on every non-read-only press, and
 both a deferred edit and a held drag write into the one their own press opened —
 so one gesture is one undo entry whichever pointer made it and however many tiles
-it crossed. That is also why `plannedAction` holds *every* branch that can change
+it crossed. That is also why `plannedAction` holds _every_ branch that can change
 the board: it keeps the enclosing `beginStroke` a guarantee by construction rather
 than a list to keep up to date.
 
@@ -1027,15 +1036,15 @@ than a list to keep up to date.
 the tap that made it, so without this the only ways to be rid of one are to tap the
 same tile again — on a board that has probably since been panned away — or to open
 the sheet. Three rules keep it from firing on gestures that are not that tap, and
-all three live on `pendingDismiss` being a *position* rather than a boolean: it is
-committed on the lift within `TAP_SLOP_PX` (the empty green is *the* place to grab
+all three live on `pendingDismiss` being a _position_ rather than a boolean: it is
+committed on the lift within `TAP_SLOP_PX` (the empty green is _the_ place to grab
 the board and pan it); a second finger disarms it; and it arms only when there is a
 card, so on a board with nothing pinned this is inert and the double-tap zoom on
 the empty green is untouched.
 
 Whether the press hit a tile is `pressHitTile`, written by the tile handler and
 read by the wrapper's own `pointerdown`. Pixi dispatches from a listener on the
-canvas — a *child* of the wrapper — so the tile handler has always run by then.
+canvas — a _child_ of the wrapper — so the tile handler has always run by then.
 That ordering is bubbling rather than registration order, which is what makes it
 safe to depend on; `ViewportControls` keeps its own `handledByTile` for the same
 question because it asks from a wrapper listener, where the order against this
@@ -1044,7 +1053,7 @@ component's would be a coin toss.
 ## The board is framed in what the chrome leaves free
 
 `ViewportControls.recenter()` takes an `inset` — the header along the top, the HUD
-along the bottom, the docked sidebar down the left — and both fits *and* centres
+along the bottom, the docked sidebar down the left — and both fits _and_ centres
 the board inside the band those leave. The canvas is full-bleed and everything
 else floats over it, so without the inset the board was sized against, and centred
 in, the whole window.
@@ -1062,7 +1071,7 @@ Four things about this are easy to get wrong:
   over it.
 - **`PixiCanvas` re-frames once at startup**, when those measurements first land,
   because the effects publishing them need not have run before the atlas finishes
-  loading. It does *not* re-frame when the HUD grows a palette row — that would
+  loading. It does _not_ re-frame when the HUD grows a palette row — that would
   yank the board out from under a player mid-tap.
 - **It does re-frame when the docked panel folds**, because folding hands 380px
   back and the HUD row tracks the same edge. But only while the framing is still
@@ -1076,7 +1085,7 @@ Four things about this are easy to get wrong:
 
 **The readout is an inset only when it is a band.** On a phone it goes full-bleed
 under the header, so it is chrome over the board: excluded from the inset,
-Center View frames the board *behind* it. On a wide screen the same card is 250px
+Center View frames the board _behind_ it. On a wide screen the same card is 250px
 in the top-right corner, where the board may happily run underneath it.
 
 Three things about how it is read:
@@ -1110,13 +1119,13 @@ terrain authoring: **placing and removing buildings**, and **erasing an
 obstacle** — `eraseTile` only ever writes grass over a rock/tree/pond, so it
 cannot reshape a map.
 
-The reason to keep this rule is that a shipped island *is* the puzzle. If it can
+The reason to keep this rule is that a shipped island _is_ the puzzle. If it can
 be repainted, "solve island 3" becomes "draw an easier island 3", and a share code
 for `island3` can describe a board no other player can reach.
 
 **Clearing an obstacle is reversible.** `layoutState` keeps the loaded template's
 pristine tile types (`#pristineTypes`) alongside `#pristineKey` — the key is a
-one-way hash that can say *that* the board changed but not *what* used to be on a
+one-way hash that can say _that_ the board changed but not _what_ used to be on a
 tile, and restoring needs the original type. `restorableObstacles` is every tile
 whose pristine type was an obstacle and which is now bare grass;
 `restoreObstacle()` puts one back and refuses anything else, so a stale click
@@ -1165,7 +1174,7 @@ component. `state/terrainRules.test.ts` pins that against the shipped codes.
 `layoutState` keeps a bounded stack of whole-board snapshots (`BoardSnapshot`,
 `MAX_HISTORY` of 30) and every verb that writes the board — `setTile`,
 `addPlacement`, `removePlacement`, `clearPlacements`, `resize` — records the board
-as it stood *before* the change. The only other way back from a mis-tapped
+as it stood _before_ the change. The only other way back from a mis-tapped
 building is the readout's Reset, which throws away every other building with it:
 a larger mistake offered as the cure for a small one. It earns
 its keep on a phone, where the board is isometric, the tiles are small and a thumb
@@ -1179,7 +1188,7 @@ Four rules, each pinned by `state/boardHistory.test.ts`:
   inverted.
 - **A gesture is one undo.** `beginStroke()` / `endStroke()` open a coalescing
   window that `PixiCanvas` wraps around every press, so a drag across twelve tiles
-  is one entry, and a tap that replaces a building (a remove *and* an add) is also
+  is one entry, and a tap that replaces a building (a remove _and_ an add) is also
   one. Opened for every press rather than at each writing branch, so each way a
   press can change the board is covered by construction; a stroke that writes
   nothing records nothing.
@@ -1223,7 +1232,7 @@ adoption that is refused (island cap, two transformers) puts the flag back and
 leaves them reading. `state/previewMode.test.ts` pins every refusal.
 
 The state lives on `layoutState` rather than `uiState` because it is a property of
-the *document*: this board is not saved, not editable, and not the player's.
+the _document_: this board is not saved, not editable, and not the player's.
 
 ### Grid data model
 
@@ -1262,7 +1271,7 @@ centres across the full width, so below roughly 1200px they overlap and
 `--z-sheet` outranks `--z-hud`.
 
 **The sheet starts `closed`.** With Run in the HUD, peek would buy a strip of
-*setup* — none of which is the first move, and all of which costs the map about
+_setup_ — none of which is the first move, and all of which costs the map about
 150px.
 
 **And the HUD stands down for as long as the sheet is open** — `App.svelte`
@@ -1295,9 +1304,9 @@ board to do it, so `PixiCanvas` drops to pan-and-inspect there.
 Everything that edits goes with it: `HudToolbar` renders no palettes and no tool
 row, which takes the HUD from 180px to 118px. An `$effect` there also calls
 `editorState.clearHand()`, because a brush held from a moment earlier would be
-invisible *and* still selected, with `PixiCanvas` refusing its taps for reasons
+invisible _and_ still selected, with `PixiCanvas` refusing its taps for reasons
 nothing on screen explains. **Undo and Redo are absent** too — they act on the
-board the *user* builds, so on the solver's an undo would land silently on the
+board the _user_ builds, so on the solver's an undo would land silently on the
 other board while the press read as broken. Gone rather than greyed, because this
 is a mode rather than a momentarily empty history.
 
@@ -1337,7 +1346,7 @@ One more thing about that row on a phone: it is full-bleed and centres its tools
 with `justify-content: safe center` rather than packing them left, because on a
 shipped island the terrain brushes are not rendered and the row can be as few as
 three buttons. The `safe` keyword is what makes centring usable instead of a trap
-— when the row *does* overflow, plain `center` spills it equally off both ends and
+— when the row _does_ overflow, plain `center` spills it equally off both ends and
 the first tool becomes unreachable, since a scroll container cannot scroll back
 past its start edge. `safe center` falls back to `flex-start` in exactly that
 case, and a browser too old to parse it drops the declaration and gets the old
@@ -1378,7 +1387,7 @@ Two things follow. The roster's category tab bar is **sticky** at the top of the
 scroller, since it otherwise scrolls off after the third card and changing
 category means scrolling back the length of the list. It is the only thing pinned: Unlock/Lock All sit just below it and
 scroll away with the cards, because pinning is for the control you reach for
-*while* reading a list and those two are a bulk edit made once. Its background must
+_while_ reading a list and those two are a bulk edit made once. Its background must
 be **opaque** (`--surface-panel-solid`): the sheet is 97% and the panel 88%, so
 either would leave cards faintly legible through the bar.
 
@@ -1401,7 +1410,7 @@ only ever adds, and the way back is the button beside it.
 
 **The HUD's Setup button opens the sheet at `full`, not `half`.** Half kept the
 top of the board visible at a cost of 340px of list — but the HUD and every tool
-unmount for as long as the sheet is open at *any* detent, so what that bought was
+unmount for as long as the sheet is open at _any_ detent, so what that bought was
 a view of a board nothing could touch. Setup is a task you finish and leave; the
 grabber still drags it back down.
 
@@ -1448,7 +1457,7 @@ URL at build time.
 That covers every reference Vite can see — imported modules, and `url()` in
 component CSS, which it rebases on its own. It does **not** cover a URL assembled
 as a string at runtime: Vite cannot see it, so a literal `"/icons/x.webp"` ships
-with the leading slash and resolves against the *domain* root. On a subpath that is
+with the leading slash and resolves against the _domain_ root. On a subpath that is
 a 404, and for `/data/web_atlas.json` it meant no sprite atlas and therefore a
 blank board — the whole app broken on the only host it is deployed to, while
 `npm run dev` looked perfect because a dev server is served from `/`.
@@ -1474,7 +1483,7 @@ helpers.
 the header, HUD, palettes and inspector all sat at `10` and stacked by whatever
 order `App.svelte` happened to mount them in. Two layers sit at a token minus one,
 and both are the same lesson. `PreviewBanner` is `calc(var(--z-header) - 1)`: it is
-header chrome and shares the token, but it mounts *after* the header, and at an
+header chrome and shares the token, but it mounts _after_ the header, and at an
 equal z-index DOM order decides — which put a status line over everything the
 header opens. The overflow menu is a plain absolutely-positioned child of a bar
 with a z-index of its own, so it is sealed inside that stacking context and cannot
@@ -1489,7 +1498,7 @@ its `full` detent, so it has to cover a top-anchored header.
 inside it. That list only grows, and unbounded it simply ran off the bottom of the
 screen — and since the page cannot scroll (`html, body { overflow: hidden }`) and
 the menu is absolutely positioned, rows past the fold were not awkward to reach but
-*unreachable*.
+_unreachable_.
 
 ### The ladders
 
@@ -1509,7 +1518,7 @@ sub-layout of their own.
 
 `--text-dim` is `#7d8da4` rather than the `#64748b` it looks like it wants to be:
 it is the colour of nineteen small labels, and the darker value is 3.4:1 against a
-panel — under WCAG AA. Measure against the *lightest* backdrop a panel makes
+panel — under WCAG AA. Measure against the _lightest_ backdrop a panel makes
 (roughly `#112226`), not `--surface-void`, because light text loses contrast on
 the lighter one.
 
@@ -1533,12 +1542,12 @@ them, so a player who has learnt that language must not meet it again on a butto
 that has nothing to do with it. `--status-idle` is `#facc15`, matched to the
 `indicator_idle` pad so the tile and the card describing it are one yellow rather
 than two. A control earns colour by being selected, or
-destructive, or neither — and *neither* is most of the header.
+destructive, or neither — and _neither_ is most of the header.
 
 Two things follow in the CSS. `:global(.tool-btn.active)` in `HudToolbar` is the
 single active rule for every tool button — `.erase-btn.active` is the one
 override, two classes so it outranks, and red because it is the one tool that
-destroys. And a control earns colour by being selected or destructive; *neither*
+destroys. And a control earns colour by being selected or destructive; _neither_
 is most of the header.
 
 One hue sits outside the law and says so in the file: `--heart`, for the donate
@@ -1552,14 +1561,14 @@ built app in a real browser, and neither shows up until a player unlocks a full
 roster — which is to say, in normal play but never in a quick smoke test:
 
 - **`.scroll-body` needs `min-height: 0`.** A flex item's automatic minimum size is
-  its *content* size, so `flex: 1` alone cannot shrink a list below the height of
+  its _content_ size, so `flex: 1` alone cannot shrink a list below the height of
   every card in it. Without it a full 38-building roster refuses to shrink and
   overflows the sheet. `.sidebar-panel` clips its own overflow, which is why only
   the phone ever showed it.
 - **`.app-shell` uses `overflow: clip`, not `overflow: hidden`.** The mobile sheet
   is hidden by translating it a full sheet-height down, and a transformed element
-  still contributes **scrollable overflow**. `hidden` makes a box unscrollable *by
-  the user* but leaves it a scroll container, and the browser will scroll one itself
+  still contributes **scrollable overflow**. `hidden` makes a box unscrollable _by
+  the user_ but leaves it a scroll container, and the browser will scroll one itself
   to bring a focused element into view — so tapping a control in the roster slid
   the whole app up with no scrollbar to put it back. `clip` creates no scroll
   container at all. The `hidden` declaration stays above it as the
@@ -1567,7 +1576,7 @@ roster — which is to say, in normal play but never in a quick smoke test:
 
 Two more the layout depends on:
 
-- **`100dvh`, not `100vh`.** `vh` freezes at the viewport's *largest* size, so on
+- **`100dvh`, not `100vh`.** `vh` freezes at the viewport's _largest_ size, so on
   iOS Safari the HUD sat under the collapsed URL bar.
 - **`index.html` asks for `viewport-fit=cover`.** Without it every
   `env(safe-area-inset-*)` resolves to `0px` and the safe-area padding silently does

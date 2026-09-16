@@ -1,6 +1,6 @@
 <script lang="ts">
   import { editorState, uiState, viewportState } from "../../state";
-  import type { BuildingCategory } from "../../data";
+  import type { BuildingCategory } from "@reactor2/solver";
   import {
     ArrowLeft,
     Cpu,

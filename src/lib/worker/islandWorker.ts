@@ -1,9 +1,9 @@
-import { solveIsland } from "../solver/placementSearch";
+import { solveIsland } from "@reactor2/solver";
 import type {
   IslandWorkerRequest,
   IslandWorkerResponse,
   IslandWorkerErrorResponse,
-} from "../solver/types";
+} from "@reactor2/solver";
 
 let stopRequested = false;
 let activeTaskId: string | null = null;

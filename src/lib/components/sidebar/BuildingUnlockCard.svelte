@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { formatNumber } from "../../utils/formatters";
+  import { formatNumber } from "@reactor2/solver";
   import { asset } from "../../utils/assetUrl";
   import type { BuildingDefinition } from "../../types";
   import { headlineValue, statForType } from "../statIcons";

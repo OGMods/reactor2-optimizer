@@ -2,7 +2,7 @@ import type {
   Tile,
   BuildingDefinition,
   OptimizationResult,
-} from "../solver/types";
+} from "@reactor2/solver";
 import { SolverCoordinator } from "./solverCoordinator";
 
 interface PendingEntry {

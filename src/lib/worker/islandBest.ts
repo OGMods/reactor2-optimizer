@@ -1,10 +1,6 @@
-import {
-  isDistinctLayout,
-  powerTies,
-  MAX_ALTERNATES,
-} from "../solver/alternates";
-import type { IslandSolution } from "../solver/placementSearch";
-import type { IslandLayout, PlacedBuilding } from "../solver/types";
+import { isDistinctLayout, powerTies, MAX_ALTERNATES } from "@reactor2/solver";
+import type { IslandSolution } from "@reactor2/solver";
+import type { IslandLayout, PlacedBuilding } from "@reactor2/solver";
 
 /**
  * The answer for one island, gathered from however many attempts it was given.

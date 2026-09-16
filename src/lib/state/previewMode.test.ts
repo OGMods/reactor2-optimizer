@@ -15,9 +15,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { layoutState } from "./layout.svelte";
 import { editorState } from "./editor.svelte";
-import { encodeBlueprint } from "../encoding/blueprint";
+import { encodeBlueprint } from "@reactor2/solver";
 import { buildShareUrl, readSharedCode } from "../encoding/shareLink";
-import { findBuilding, levelValue } from "../data/buildings";
+import { findBuilding, levelValue } from "@reactor2/solver";
 import type { Tile } from "../types";
 
 /** The tier the author had, and the (lower) tier the reader has unlocked. */

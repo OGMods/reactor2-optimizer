@@ -9,12 +9,12 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SolverCoordinator } from "./solverCoordinator";
-import { BUILDINGS } from "../data";
+import { BUILDINGS } from "@reactor2/solver";
 import type {
   IslandWorkerRequest,
   PlacedBuilding,
   Tile,
-} from "../solver/types";
+} from "@reactor2/solver";
 
 /** Enough of a roster for `planSolve` to have something to place. */
 const UPGRADES = { cooler1: 0, nuclear_reactor: 0, generator: 0 };

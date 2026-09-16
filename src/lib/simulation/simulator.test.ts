@@ -24,16 +24,16 @@
  */
 import { describe, it, expect } from "vitest";
 import { simulatePlacedBuildings } from "./simulator";
-import { buildIslandContext } from "../solver/context";
-import { splitGridIntoIslands } from "../solver/island";
-import { simulateIsland } from "../solver/simulate";
-import { Rng } from "../solver/rng";
+import { buildIslandContext } from "@reactor2/solver";
+import { splitGridIntoIslands } from "@reactor2/solver";
+import { simulateIsland } from "@reactor2/solver";
+import { Rng } from "@reactor2/solver";
 import type {
   BuildingDefinition,
   EffectiveBuilding,
   Placement,
   Tile,
-} from "../solver/types";
+} from "@reactor2/solver";
 
 const HELIO = 250000,
   G2 = 1.31e6,

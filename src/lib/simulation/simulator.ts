@@ -1,7 +1,7 @@
-import { buildIslandContext, type IslandContext } from "../solver/context";
-import { simulateIsland } from "../solver/simulate";
-import type { Placement } from "../solver/types";
-import { effectiveAtValue } from "../data/effectiveBuildings";
+import { buildIslandContext, type IslandContext } from "@reactor2/solver";
+import { simulateIsland } from "@reactor2/solver";
+import type { Placement } from "@reactor2/solver";
+import { effectiveAtValue } from "@reactor2/solver";
 import { unscoredPlacement } from "../data/placements";
 import type { BuildingDefinition, PlacedBuilding, Tile } from "../types";
 

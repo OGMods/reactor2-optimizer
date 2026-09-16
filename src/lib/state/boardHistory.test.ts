@@ -11,12 +11,12 @@
  *   3. A previewed board has no history, because it is not the visitor's to
  *      edit — the same rule every other write path in preview follows.
  *
- * App rules, so they live here rather than in the parity suite; the Python
- * reference knows nothing about an editor.
+ * App rules, so they live here rather than in the solver package's suite: the
+ * engine knows nothing about an editor.
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { layoutState } from "./layout.svelte";
-import { ISLAND_TEMPLATES } from "../data/maps";
+import { ISLAND_TEMPLATES } from "@reactor2/solver";
 
 /** A hand-placed building, scored to zero — `recalculate` re-derives it. */
 function placementAt(x: number, y: number, buildingId = "generator") {

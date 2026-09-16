@@ -1,0 +1,42 @@
+{
+  "name": "@reactor2/solver",
+  "version": "1.0.0",
+  "description": "The Reactor 2: Nuclear Tycoon layout engine — the game's rules, its building roster, and a near-optimal placement search over them.",
+  "license": "GPL-3.0-or-later",
+  "author": "OGMods",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OGMods/reactor2-optimizer.git",
+    "directory": "packages/solver"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "bin": {
+      "reactor2-solve": "./dist/bin/solve.js"
+    },
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./package.json": "./package.json"
+    }
+  },
+  "scripts": {
+    "build": "vite build -c vite.build.config.ts && tsc -p tsconfig.build.json",
+    "solve": "tsx bin/solve.ts",
+    "fixtures": "tsx scripts/exportFixtures.ts",
+    "prepublishOnly": "npm run build"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  /*
+   * Declarations for the published `dist/`. Vite emits the JavaScript (see
+   * vite.config.ts); this emits the `.d.ts` beside it and nothing else.
+   */
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "tsBuildInfoFile": "../../node_modules/.tmp/solver.build.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"]
+}

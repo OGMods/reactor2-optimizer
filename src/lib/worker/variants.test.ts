@@ -8,9 +8,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { buildSolveVariants } from "./variants";
-import type { IslandPlan } from "../solver/solver";
-import type { IslandSolution } from "../solver/placementSearch";
-import type { IslandLayout, PlacedBuilding, Tile } from "../solver/types";
+import type { IslandPlan } from "@reactor2/solver";
+import type { IslandSolution } from "@reactor2/solver";
+import type { IslandLayout, PlacedBuilding, Tile } from "@reactor2/solver";
 
 const ORIGINAL_WIDTH = 4;
 

@@ -1,5 +1,12 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["src/lib/solver/index.ts"],
+  "workspaces": {
+    ".": {
+      "entry": ["index.html"]
+    },
+    "packages/solver": {
+      "entry": ["bin/workerBootstrap.mjs", "scripts/*.ts", "tests/*.test.ts"]
+    }
+  },
   "tags": ["-lintignore"]
 }

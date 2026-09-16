@@ -1,7 +1,7 @@
-import { buildOptimizationResult, type IslandPlan } from "../solver/solver";
-import { layoutKey, powerTies } from "../solver/alternates";
-import type { IslandSolution } from "../solver/placementSearch";
-import type { OptimizationResult } from "../solver/types";
+import { buildOptimizationResult, type IslandPlan } from "@reactor2/solver";
+import { layoutKey, powerTies } from "@reactor2/solver";
+import type { IslandSolution } from "@reactor2/solver";
+import type { OptimizationResult } from "@reactor2/solver";
 
 /**
  * Turns per-island shortlists into whole-board layouts that all put out the
