@@ -91,6 +91,56 @@ export function simulateIsland(
     };
   }
 
+  // A role-isolation rule rates a building by what its neighbours *are*, so it
+  // cannot be folded into a tile and cannot be resolved at the moment a
+  // building is placed — one write re-rates up to eight other tiles. It is
+  // resolved here instead, where a whole layout is in hand, into a buffer held
+  // by the island rather than allocated per call.
+  //
+  // The scan is over the affected role's tiles only, and reads `placement`
+  // rather than the buffer it is filling: the test is on what a neighbour *is*,
+  // which no rating changes, so there is no order to get right.
+  let layout = placement;
+  const isolation = ctx.isolation;
+  if (isolation !== null) {
+    const rated = ctx.ratedLayout;
+    for (let t = 0; t < n; t++) rated[t] = placement[t];
+
+    const affected =
+      isolation.role === "generator"
+        ? generatorTiles
+        : isolation.role === "cooler"
+          ? coolerTiles
+          : isolation.role === "reactor"
+            ? reactorTiles
+            : dpTiles;
+    const count =
+      isolation.role === "generator"
+        ? numGenerators
+        : isolation.role === "cooler"
+          ? numCoolers
+          : isolation.role === "reactor"
+            ? numReactors
+            : numDps;
+
+    for (let i = 0; i < count; i++) {
+      const t = affected[i];
+      const neighbors = ctx.neighbors[t];
+      let crowded = false;
+      for (let k = 0; k < neighbors.length; k++) {
+        const other = placement[neighbors[k]];
+        if (other !== null && other.type === isolation.role) {
+          // One neighbour costs exactly what five do — the rule is a two-way
+          // test, not a count.
+          crowded = true;
+          break;
+        }
+      }
+      rated[t] = ctx.rateIsolated(placement[t]!, crowded);
+    }
+    layout = rated;
+  }
+
   const d = ctx.dist;
   const heatIn = ctx.heatIn;
   const heatOut = ctx.heatOut;
@@ -104,10 +154,10 @@ export function simulateIsland(
 
   if (numReactors > 0 && numGenerators > 0) {
     for (let i = 0; i < numReactors; i++) {
-      d.supplierCap[i] = placement[reactorTiles[i]]!.effectiveValue;
+      d.supplierCap[i] = layout[reactorTiles[i]]!.effectiveValue;
     }
     for (let j = 0; j < numGenerators; j++) {
-      d.consumerCap[j] = placement[generatorTiles[j]]!.effectiveValue;
+      d.consumerCap[j] = layout[generatorTiles[j]]!.effectiveValue;
     }
     runDistribution(
       reactorTiles,
@@ -126,7 +176,7 @@ export function simulateIsland(
   // the conversion is per tier and is not a fixed 75/25. See `physics.ts`.
   for (let j = 0; j < numGenerators; j++) {
     const t = generatorTiles[j];
-    generatorPowerAndWaste(placement[t]!, heatIn[t], conversion);
+    generatorPowerAndWaste(layout[t]!, heatIn[t], conversion);
     powerOf[t] = conversion.power;
     wasteOf[t] = conversion.waste;
   }
@@ -135,7 +185,7 @@ export function simulateIsland(
   // unscaled.
   for (let k = 0; k < numDps; k++) {
     const t = dpTiles[k];
-    const b = placement[t]!;
+    const b = layout[t]!;
     powerOf[t] = b.energy;
     wasteOf[t] = b.waste;
   }
@@ -161,7 +211,7 @@ export function simulateIsland(
 
   if (numWaste > 0) {
     for (let i = 0; i < numCoolers; i++) {
-      d.supplierCap[i] = placement[coolerTiles[i]]!.effectiveValue;
+      d.supplierCap[i] = layout[coolerTiles[i]]!.effectiveValue;
     }
     for (let j = 0; j < numWaste; j++) {
       d.consumerCap[j] = wasteOf[wasteTiles[j]];
@@ -179,13 +229,13 @@ export function simulateIsland(
 
   for (let i = 0; i < numReactors; i++) {
     const t = reactorTiles[i];
-    const b = placement[t]!;
+    const b = layout[t]!;
     placements[out++] = row(t, ctx, b, 0, heatOut[t], 0, 0, 0, 0);
   }
 
   for (let j = 0; j < numGenerators; j++) {
     const t = generatorTiles[j];
-    const b = placement[t]!;
+    const b = layout[t]!;
     const waste = wasteOf[t];
     const cooling = coolingIn[t];
     // All-or-nothing: a producer whose waste outruns the cooling routed to it
@@ -197,7 +247,7 @@ export function simulateIsland(
 
   for (let k = 0; k < numDps; k++) {
     const t = dpTiles[k];
-    const b = placement[t]!;
+    const b = layout[t]!;
     const waste = wasteOf[t];
     const cooling = coolingIn[t];
     const power = wasteIsCovered(waste, cooling) ? powerOf[t] : 0.0;
@@ -207,7 +257,7 @@ export function simulateIsland(
 
   for (let i = 0; i < numCoolers; i++) {
     const t = coolerTiles[i];
-    const b = placement[t]!;
+    const b = layout[t]!;
     placements[out++] = row(t, ctx, b, 0, 0, 0, 0, heatOut[t], 0);
   }
 

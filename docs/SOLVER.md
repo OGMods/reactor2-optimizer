@@ -107,7 +107,7 @@ Two things about the shapes are load-bearing:
 - **`role_isolation` depends on the layout, the other shapes do not.** A terrain bonus is fixed
   per tile and can be folded into the board; a generator's isolation multiplier changes every
   time the search moves a neighbour, so a placed building's figures have to be resolved per
-  layout.
+  layout — which `simulateIsland` does, below.
 
 `terrain_affinity` is the one rule implemented. `terrainScales` resolves it into a per-tile
 multiplier when the context is built — nothing about a layout can change which tiles qualify — and
@@ -140,6 +140,23 @@ to one class so it cannot straddle the coast. **Neither paid for itself** — bo
 the unchanged search across three seeds, because `powerPerTile` orders a greedy claim that the
 later stages rewrite, so skewing it toward the coast mostly changes which tiles are claimed first.
 Don't re-attempt either without a wider measurement.
+
+`role_isolation` is resolved in `simulateIsland`, the one place a whole layout is in hand. It
+copies the placement into `ctx.ratedLayout` — held by the island, not allocated per call — re-rates
+the affected role's tiles and reads every figure through that. Two details are load-bearing: the
+neighbour scan reads the *original* placement, since the test is on what a neighbour **is** and no
+rating changes that, so there is no order to get right; and `ctx.rateIsolated` is a lookup over two
+variants per roster entry rather than a multiply, for the same snap-is-a-string-round-trip reason
+`rate` is.
+
+**This anomaly is close to power-neutral on the shipped maps, and that is the rule rather than the
+search.** x2.5 scales a generator's *intake*, which is a capacity: fed by the reactors it already
+had, a bonused generator fills to 40% and produces exactly what it did before. Only the penalty
+bites, and the penalty is avoidable by keeping generators apart. Map 3 at 15s comes back 1.4075e23
+against a 1.4202e23 baseline, where the baseline layout *re-rated* under the anomaly is 1.2849e23 —
+so the search recovers most of the penalty and there is no gain to find. Sizing the composition
+retarget from the isolated rating, which is the only stage that can propose the different mix the
+bonus would need, was measured and changed nothing.
 
 **The bound takes the anomaly too.** `estimateTotalMaxPower` rates each island at its best tile
 (`islandMaxScale`), because a bound computed on the plain roster is one a bonused layout walks

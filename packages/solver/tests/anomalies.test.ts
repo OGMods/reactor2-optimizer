@@ -109,6 +109,158 @@ describe("scaling a resolved building", () => {
   });
 });
 
+describe("role isolation reaching the board", () => {
+  /*
+   * The one rule whose multiplier depends on the layout rather than on the
+   * board, so it is resolved per simulation instead of per tile. The test is on
+   * what a neighbour *is*, never on what it is doing — an idle, booting or
+   * overheated generator costs its neighbour the penalty just the same.
+   *
+   * The roster gives the reactor far more heat than the generator can take, so
+   * the generator is never starved: with a reactor only as large as the
+   * generator's authored intake, a x2.5 intake bonus buys nothing at all and
+   * every case below would read as 1.0.
+   */
+  const singularity = getAnomaly("singularity_isolation");
+  const roster = basicRoster({
+    reactorValue: 500,
+    coolerValue: 200,
+    dpValue: 120,
+    dpWasteRatio: 0.2,
+  });
+  const CODES: Record<string, EffectiveBuilding> = {
+    r: roster[0],
+    g: roster[1],
+    c: roster[2],
+    d: roster[3],
+  };
+
+  /** A 7x5 board of grass walled in by rock, so no tile of it is on an edge. */
+  const BOARD = [
+    "RRRRRRR",
+    "RGGGGGR",
+    "RGGGGGR",
+    "RGGGGGR",
+    "RRRRRRR",
+  ];
+
+  /**
+   * Scores `spec` — `[x, y, code]` in board coordinates — and returns each
+   * building's own power, keyed "x,y". Run twice per case, under the anomaly
+   * and under none, so what is compared is one layout against itself.
+   */
+  const powers = (spec: [number, number, string][], anomaly = singularity) => {
+    const ctx = buildIslandContext(makeGrid(BOARD), undefined, anomaly);
+    const at = new Map<string, number>();
+    for (let t = 0; t < ctx.n; t++) at.set(`${ctx.xs[t]},${ctx.ys[t]}`, t);
+
+    const placement: Placement = new Array(ctx.n).fill(null);
+    for (const [x, y, code] of spec) placement[at.get(`${x},${y}`)!] = CODES[code];
+
+    const out = new Map<string, number>();
+    for (const row of simulateIsland(placement, ctx, true).placements)
+      out.set(`${row.x},${row.y}`, row.powerGenerated);
+    return out;
+  };
+
+  it("rates a generator with no generator beside it at the bonus", () => {
+    const spec: [number, number, string][] = [
+      [1, 1, "r"],
+      [2, 1, "g"],
+      [3, 1, "c"],
+    ];
+
+    const base = powers(spec, getAnomaly("none")).get("2,1")!;
+    expect(base).toBeGreaterThan(0);
+    expect(powers(spec).get("2,1")).toBeCloseTo(base * 2.5, 6);
+  });
+
+  it("penalises both generators the moment they touch", () => {
+    // Two generators side by side, each with its own reactor and cooler. The
+    // rule is mutual and two-way, so both drop together.
+    const spec: [number, number, string][] = [
+      [1, 1, "r"],
+      [2, 1, "g"],
+      [3, 1, "g"],
+      [4, 1, "r"],
+      [2, 2, "c"],
+      [3, 2, "c"],
+    ];
+
+    const base = powers(spec, getAnomaly("none"));
+    const crowded = powers(spec);
+
+    expect(base.get("2,1")).toBeGreaterThan(0);
+    expect(crowded.get("2,1")).toBeCloseTo(base.get("2,1")! * 0.8, 6);
+    expect(crowded.get("3,1")).toBeCloseTo(base.get("3,1")! * 0.8, 6);
+  });
+
+  it("costs no more for a second neighbour than for the first", () => {
+    // Three generators in a row, each with a reactor above it and a cooler
+    // below. The middle one touches two generators and the outer ones touch
+    // one; all three take exactly x0.8 — the rule is a test, not a count.
+    const spec: [number, number, string][] = [
+      [2, 1, "r"],
+      [3, 1, "r"],
+      [4, 1, "r"],
+      [2, 2, "g"],
+      [3, 2, "g"],
+      [4, 2, "g"],
+      [2, 3, "c"],
+      [3, 3, "c"],
+      [4, 3, "c"],
+    ];
+
+    const base = powers(spec, getAnomaly("none"));
+    const crowded = powers(spec);
+
+    for (const key of ["2,2", "3,2", "4,2"]) {
+      expect(base.get(key)).toBeGreaterThan(0);
+      expect(crowded.get(key), key).toBeCloseTo(base.get(key)! * 0.8, 6);
+    }
+  });
+
+  it("does not let a direct producer trigger the penalty", () => {
+    /*
+     * A wind turbine is a power source and not a Generator, so a generator
+     * beside one keeps its bonus — and takes none itself. Modelled by the roles
+     * the buildings are rather than by the catalogue's grouping, which files
+     * turbines with the reactors.
+     */
+    const spec: [number, number, string][] = [
+      [1, 1, "r"],
+      [2, 1, "g"],
+      [3, 1, "d"],
+      [2, 2, "c"],
+      [3, 2, "c"],
+    ];
+
+    const base = powers(spec, getAnomaly("none"));
+    const under = powers(spec);
+
+    expect(under.get("2,1")).toBeCloseTo(base.get("2,1")! * 2.5, 6);
+    // And the turbine beside it is rated exactly as authored.
+    expect(under.get("3,1")).toBeCloseTo(base.get("3,1")!, 6);
+  });
+
+  it("leaves coolers and reactors alone however tightly they are packed", () => {
+    const spec: [number, number, string][] = [
+      [1, 1, "d"],
+      [2, 1, "d"],
+      [1, 2, "c"],
+      [2, 2, "c"],
+    ];
+
+    const base = powers(spec, getAnomaly("none"));
+    const under = powers(spec);
+
+    for (const key of ["1,1", "2,1"]) {
+      expect(base.get(key)).toBeGreaterThan(0);
+      expect(under.get(key), key).toBeCloseTo(base.get(key)!, 6);
+    }
+  });
+});
+
 describe("a terrain bonus reaching the board", () => {
   /*
    * Tidal Ascendancy is the only rule in the game where an unbuildable tile

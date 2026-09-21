@@ -4,6 +4,7 @@ import { CHEBYSHEV_DIRECTIONS, spatialKeyCompare } from "./constants";
 import { computeWaterAdjacency } from "./island";
 import type {
   AnomalyDefinition,
+  BuildingType,
   EffectiveBuilding,
   Tile,
   TileType,
@@ -147,6 +148,35 @@ export interface IslandContext {
    * once and then handed back.
    */
   rate(tile: number, building: EffectiveBuilding): EffectiveBuilding;
+  /**
+   * The role-isolation rule in force, or `null` under every other anomaly.
+   *
+   * This one cannot be folded into a tile the way a terrain bonus can: a
+   * building's rating is a function of *what its neighbours are*, so placing
+   * one re-rates up to eight other tiles and the answer changes with every move
+   * the search makes. It is resolved per layout instead, by `simulateIsland`,
+   * which is the one place a whole layout is in hand.
+   */
+  readonly isolation: RoleIsolation | null;
+  /**
+   * `building` rated for a tile that does, or does not, touch another building
+   * of the isolated role.
+   *
+   * A lookup rather than a multiply, for the reason `rate` is: the scaled
+   * waste is a snapped difference and the snap is a string round-trip. There
+   * are only two variants of each roster entry, so they are built once per
+   * island and handed back for the rest of the solve.
+   */
+  rateIsolated(building: EffectiveBuilding, crowded: boolean): EffectiveBuilding;
+  /**
+   * A whole-layout scratch buffer, reused by `simulateIsland` when a rule has
+   * to resolve a layout before scoring it.
+   *
+   * One array per island rather than one per call: the search runs millions of
+   * simulations, and this is the same argument every other buffer here is held
+   * for.
+   */
+  readonly ratedLayout: (EffectiveBuilding | null)[];
   readonly xs: Int32Array;
   readonly ys: Int32Array;
   /** Chebyshev-adjacent buildable tiles of each tile, ascending index order. */
@@ -166,6 +196,13 @@ export interface IslandContext {
   readonly dpTiles: Int32Array;
   readonly coolerTiles: Int32Array;
   readonly wasteTiles: Int32Array;
+}
+
+/** The resolved `role_isolation` rule: which role, and its two multipliers. */
+export interface RoleIsolation {
+  readonly role: BuildingType;
+  readonly isolated: number;
+  readonly crowded: number;
 }
 
 /**
@@ -316,6 +353,14 @@ export function buildIslandContext(
   // once per island rather than once per placement. Keyed on the base object
   // because the roster is shared by every tile and its entries are stable for
   // the whole solve.
+  const isolation: RoleIsolation | null =
+    anomaly.rule === "role_isolation"
+      ? {
+          role: anomaly.role,
+          isolated: anomaly.isolated,
+          crowded: anomaly.crowded,
+        }
+      : null;
   const rated = new Map<number, Map<EffectiveBuilding, EffectiveBuilding>>();
   // Every scaled variant back to the roster entry it came from, so `rate` can
   // be applied to a building that already carries a rating. The search swaps
@@ -324,31 +369,58 @@ export function buildIslandContext(
   // and the layout would quietly be worth 2.8x.
   const baseOf = new Map<EffectiveBuilding, EffectiveBuilding>();
 
+  /**
+   * `building` at `scale`, built once per distinct pair.
+   *
+   * Idempotent: a building arriving with a rating already on it is taken back
+   * to its roster entry first, so this is a function of the scale rather than
+   * of how many times it has been applied. The search swaps buildings between
+   * tiles and restores them when a move is rejected, so it hands back objects
+   * it was given — without this, a restore would scale a scaled building.
+   */
+  const scaledBy = (
+    building: EffectiveBuilding,
+    scale: number,
+  ): EffectiveBuilding => {
+    const base = baseOf.get(building) ?? building;
+    if (scale === 1) return base;
+
+    let byBuilding = rated.get(scale);
+    if (byBuilding === undefined) {
+      byBuilding = new Map();
+      rated.set(scale, byBuilding);
+    }
+    let scaled = byBuilding.get(base);
+    if (scaled === undefined) {
+      scaled = scaleEffectiveBuilding(base, scale);
+      byBuilding.set(base, scaled);
+      baseOf.set(scaled, base);
+    }
+    return scaled;
+  };
+
   return {
     n,
     anomaly,
     uniformRating,
+    isolation,
+    ratedLayout: new Array<EffectiveBuilding | null>(n).fill(null),
+    rateIsolated(
+      building: EffectiveBuilding,
+      crowded: boolean,
+    ): EffectiveBuilding {
+      if (isolation === null) return building;
+      return scaledBy(
+        building,
+        crowded ? isolation.crowded : isolation.isolated,
+      );
+    },
     rate(tile: number, building: EffectiveBuilding): EffectiveBuilding {
       if (tileScale === null) return building;
       // Idempotent: a building arriving with another tile's rating is taken
       // back to its roster entry first, so this is a function of the tile
       // rather than of how many times it has been applied.
-      const base = baseOf.get(building) ?? building;
-      const scale = tileScale[tile];
-      if (scale === 1) return base;
-
-      let byBuilding = rated.get(scale);
-      if (byBuilding === undefined) {
-        byBuilding = new Map();
-        rated.set(scale, byBuilding);
-      }
-      let scaled = byBuilding.get(base);
-      if (scaled === undefined) {
-        scaled = scaleEffectiveBuilding(base, scale);
-        byBuilding.set(base, scaled);
-        baseOf.set(scaled, base);
-      }
-      return scaled;
+      return scaledBy(building, tileScale[tile]);
     },
     xs,
     ys,

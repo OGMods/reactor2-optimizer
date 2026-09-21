@@ -272,13 +272,34 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   changes which tier a *placement* resolves to (`rebasePlacements`), while an
   anomaly changes none of them — the same building at the same tier is simply
   rated differently — so it needs the re-score alone.
-- **Tidal Ascendancy is implemented; Cryo Nexus and Singularity Isolation are
+- **Tidal Ascendancy and Singularity Isolation are implemented; Cryo Nexus is
   not.** The anomaly is threaded the whole way — `SolveOptions.anomalyId` /
   `SolveRunOptions.anomalyId`, the worker request, and `IslandContext.anomaly` —
-  and the terrain half of it is resolved into `IslandContext.rate`. The two
-  remaining rules need more than a per-tile multiplier: Singularity's depends on
-  a building's neighbours, so it changes as the search moves them, and Cryo's is
-  the board-level problem above. Nothing on screen says a solve ignored one.
+  and each rule is resolved wherever its inputs are settled. Cryo is the
+  board-level problem above and nothing on screen says a solve ignored it.
+
+  **Singularity is resolved per layout, in `simulateIsland`, and it has to be.**
+  A generator's rating is a function of what its neighbours *are*, so placing
+  one re-rates up to eight other tiles — it cannot be folded into a tile like a
+  terrain bonus, and it cannot be settled at the write. `simulateIsland` copies
+  the layout into `ctx.ratedLayout` (held by the island, not allocated per
+  call), re-rates the affected role's tiles, and reads its figures through that.
+  The neighbour scan reads the *original* placement, since the test is on what a
+  neighbour is and no rating changes that — so there is no order to get right.
+
+  **The bonus is on a capacity, which is why the rule is close to power-neutral
+  here.** x2.5 scales a generator's *intake*, and a generator fed by the
+  reactors it already had simply fills to 40% and produces exactly what it did
+  before; the bonus is worth something only alongside more adjacent reactor
+  heat. The penalty is real and avoidable, so the search's job under this
+  anomaly is mostly to keep generators apart. Map 3 at 15s: 1.4202e23 baseline,
+  1.4075e23 under Singularity, against 1.2849e23 for the *baseline layout*
+  re-rated — so the search recovers most of the penalty and finds no gain.
+  Map 1 comes back identical to three significant figures either way.
+
+  Sizing the composition retarget from the isolated rating — the one stage that
+  can propose a different mix, and the mix is what the bonus would need — was
+  measured and changed nothing on three seeds. It is not in the tree.
 
   **A terrain bonus is resolved per tile, once, when the context is built.**
   Nothing about a layout can change which tiles qualify, so `terrainScales`
