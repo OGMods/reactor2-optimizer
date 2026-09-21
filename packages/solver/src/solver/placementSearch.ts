@@ -114,6 +114,28 @@ function emptyPlacement(n: number): Placement {
   return new Array<EffectiveBuilding | null>(n).fill(null);
 }
 
+/**
+ * Writes a building onto a tile, rated for that tile.
+ *
+ * The one way a building enters a placement, so that a terrain bonus cannot be
+ * missed at one of three dozen sites — and a miss would be silent, since the
+ * layout would simply be worth less than it is. `ctx.rate` is the identity
+ * under every rule but a terrain bonus, and idempotent under that one, so this
+ * is equally correct for a fresh placement, a swap between two tiles, and the
+ * restore that undoes a rejected move.
+ *
+ * Clearing a tile stays a plain `= null`: a null carries no rating, so there is
+ * nothing to resolve and nothing to get wrong.
+ */
+function put(
+  placement: Placement,
+  ctx: IslandContext,
+  tile: number,
+  building: EffectiveBuilding | null,
+): void {
+  placement[tile] = building === null ? null : ctx.rate(tile, building);
+}
+
 function copyInto(dst: Placement, src: Placement): void {
   for (let i = 0; i < dst.length; i++) dst[i] = src[i];
 }
@@ -427,22 +449,22 @@ function bestSharedReactorFit(
         const coolerPositions = leftover.slice(0, c);
 
         const touched: number[] = [];
-        scratch[tile] = topReactor;
+        put(scratch, ctx, tile, topReactor);
         touched.push(tile);
         for (const n of extraTopPositions) {
-          scratch[n] = topReactor;
+          put(scratch, ctx, n, topReactor);
           touched.push(n);
         }
         for (const n of extraSecondPositions) {
-          scratch[n] = secondReactor;
+          put(scratch, ctx, n, secondReactor);
           touched.push(n);
         }
         for (const n of genPositions) {
-          scratch[n] = generator;
+          put(scratch, ctx, n, generator);
           touched.push(n);
         }
         for (const n of coolerPositions) {
-          scratch[n] = cooler;
+          put(scratch, ctx, n, cooler);
           touched.push(n);
         }
 
@@ -635,7 +657,7 @@ function constructSeed(
     const claimed: number[] = [];
     if (best.kind === "hub") {
       const { generator, reactor, r, c } = best.hub!;
-      placement[best.tile] = generator;
+      put(placement, ctx, best.tile, generator);
       claimed.push(best.tile);
       for (let i = 0; i < r; i++) {
         placement[best.neighbors[i]] = reactor;
@@ -652,16 +674,16 @@ function constructSeed(
         claimed.push(shared.reactorTiles[i]);
       }
       for (const n of shared.genPositions) {
-        placement[n] = topGenerator;
+        put(placement, ctx, n, topGenerator);
         claimed.push(n);
       }
       for (const n of shared.coolerPositions) {
-        placement[n] = topCooler;
+        put(placement, ctx, n, topCooler);
         claimed.push(n);
       }
     } else {
       const { dp, c } = best.dp!;
-      placement[best.tile] = dp;
+      put(placement, ctx, best.tile, dp);
       claimed.push(best.tile);
       for (let i = 0; i < c; i++) {
         placement[best.neighbors[i]] = topCooler;
@@ -972,10 +994,10 @@ async function hillClimb(
           const tile = adj[rng.int(adj.length)];
           const old = current[tile];
           if (old !== topCooler) {
-            current[tile] = topCooler;
+            put(current, ctx, tile, topCooler);
             const trial = simulateIsland(current, ctx);
             if (!accept(trial.totalPower, trial.placements))
-              current[tile] = old;
+              put(current, ctx, tile, old);
             continue;
           }
         }
@@ -990,10 +1012,10 @@ async function hillClimb(
           const tile = adj[rng.int(adj.length)];
           const old = current[tile];
           if (old !== topGenerator) {
-            current[tile] = topGenerator;
+            put(current, ctx, tile, topGenerator);
             const trial = simulateIsland(current, ctx);
             if (!accept(trial.totalPower, trial.placements))
-              current[tile] = old;
+              put(current, ctx, tile, old);
             continue;
           }
         }
@@ -1015,13 +1037,13 @@ async function hillClimb(
       const val2 = current[tile2];
       if (val1 === val2) continue;
 
-      current[tile1] = val2;
-      current[tile2] = val1;
+      put(current, ctx, tile1, val2);
+      put(current, ctx, tile2, val1);
 
       const trial = simulateIsland(current, ctx);
       if (!accept(trial.totalPower, trial.placements)) {
-        current[tile1] = val1;
-        current[tile2] = val2;
+        put(current, ctx, tile1, val1);
+        put(current, ctx, tile2, val2);
       }
       continue;
     }
@@ -1031,7 +1053,7 @@ async function hillClimb(
     const replacement = randomCandidate(pools, rng);
     if (replacement === old) continue;
 
-    current[tile] = replacement;
+    put(current, ctx, tile, replacement);
     const trial = simulateIsland(current, ctx);
     if (!accept(trial.totalPower, trial.placements)) current[tile] = old;
   }
@@ -1229,7 +1251,7 @@ async function arrangeComposition(
         if (held === null || !surplus.has(held.id)) continue;
         current[tile] = null;
         const power = simulateIsland(current, ctx).totalPower;
-        current[tile] = held;
+        put(current, ctx, tile, held);
         if (power > bestPower) {
           bestPower = power;
           bestMove = tile;
@@ -1241,7 +1263,7 @@ async function arrangeComposition(
       const building = byId.get(targetId)!;
       for (let tile = 0; tile < ctx.n; tile++) {
         if (current[tile] !== null) continue;
-        current[tile] = building;
+        put(current, ctx, tile, building);
         const power = simulateIsland(current, ctx).totalPower;
         current[tile] = null;
         if (power > bestPower) {
@@ -1253,9 +1275,9 @@ async function arrangeComposition(
         for (let tile = 0; tile < ctx.n; tile++) {
           const held = current[tile];
           if (held === null || !surplus.has(held.id)) continue;
-          current[tile] = building;
+          put(current, ctx, tile, building);
           const power = simulateIsland(current, ctx).totalPower;
-          current[tile] = held;
+          put(current, ctx, tile, held);
           if (power > bestPower) {
             bestPower = power;
             bestMove = tile;
@@ -1263,7 +1285,7 @@ async function arrangeComposition(
         }
       }
       if (bestMove < 0) return null;
-      current[bestMove] = building;
+      put(current, ctx, bestMove, building);
     }
 
     const now = performance.now();
@@ -1316,8 +1338,8 @@ async function arrangeComposition(
 
       const valA = current[a];
       const valB = current[b];
-      current[a] = valB;
-      current[b] = valA;
+      put(current, ctx, a, valB);
+      put(current, ctx, b, valA);
 
       const trial = simulateIsland(current, ctx);
       if (
@@ -1328,15 +1350,15 @@ async function arrangeComposition(
         bestSwap = [a, b];
       }
 
-      current[a] = valA;
-      current[b] = valB;
+      put(current, ctx, a, valA);
+      put(current, ctx, b, valB);
     }
 
     if (bestSwap === null) break;
     const [a, b] = bestSwap;
     const held = current[a];
-    current[a] = current[b];
-    current[b] = held;
+    put(current, ctx, a, current[b]);
+    put(current, ctx, b, held);
   }
 
   return current;
@@ -1418,7 +1440,7 @@ async function greedyPolish(
       for (const building of candidates) {
         if (building === held) continue;
 
-        current[tile] = building;
+        put(current, ctx, tile, building);
         const trial = simulateIsland(current, ctx);
         if (
           trial.totalPower - bestPower > bestGain &&
@@ -1428,12 +1450,12 @@ async function greedyPolish(
           bestTile = tile;
           bestBuilding = building;
         }
-        current[tile] = held;
+        put(current, ctx, tile, held);
       }
     }
 
     if (bestTile < 0) break;
-    current[bestTile] = bestBuilding;
+    put(current, ctx, bestTile, bestBuilding);
     bestPower += bestGain;
   }
 
@@ -1497,7 +1519,7 @@ function pruneDeadWeight(
       bestPower = trial.totalPower;
       rows = trial.placements;
     } else {
-      current[tile] = held;
+      put(current, ctx, tile, held);
     }
   }
 
@@ -1608,7 +1630,7 @@ export function downgradeOversized(
     // Everything the search places comes from this roster; a layout holding
     // anything else is not one this pass can reason about.
     if (building === undefined) return { rows, power };
-    current[row.idx] = building;
+    put(current, ctx, row.idx, building);
     occupied.push(row.idx);
   }
   occupied.sort((a, b) => a - b);
@@ -1628,11 +1650,17 @@ export function downgradeOversized(
       const load = tileLoad(building, rowAt.get(tile)!);
 
       for (const candidate of ladder) {
+        // Rated for this tile before it is compared to anything: `building` is
+        // what the tile is running and `load` is what the layout measured it
+        // doing, both in this tile's units, and the ladder is the plain roster.
+        // Ascending order survives the rating, since one tile scales every
+        // candidate by the same factor.
+        const rated = ctx.rate(tile, candidate);
         // Ascending, so nothing smaller is left to try.
-        if (candidate.effectiveValue >= building.effectiveValue) break;
-        if (!covers(candidate.effectiveValue, load)) continue;
+        if (rated.effectiveValue >= building.effectiveValue) break;
+        if (!covers(rated.effectiveValue, load)) continue;
 
-        current[tile] = candidate;
+        put(current, ctx, tile, rated);
         const trial = simulateIsland(current, ctx);
 
         if (
@@ -1647,7 +1675,7 @@ export function downgradeOversized(
           break;
         }
 
-        current[tile] = building;
+        put(current, ctx, tile, building);
       }
     }
   }
@@ -1754,7 +1782,12 @@ export async function replayIslandDeterministic(
 ): Promise<IslandSolution> {
   // No anomaly, and never one: the fixtures are a determinism harness for the
   // search itself, and a rule change is a different question asked of it.
-  const ctx = buildIslandContext(island.grid, island.buildable);
+  const ctx = buildIslandContext(
+    island.grid,
+    island.buildable,
+    undefined,
+    island.waterAdjacent,
+  );
   if (ctx.n === 0) return { placements: [], powerOutput: 0.0 };
 
   const reactors = effectiveBuildings
@@ -1817,7 +1850,12 @@ export async function solveIsland(
   rngSeed?: number,
   anomaly?: AnomalyDefinition,
 ): Promise<IslandSolution> {
-  const ctx = buildIslandContext(island.grid, island.buildable, anomaly);
+  const ctx = buildIslandContext(
+    island.grid,
+    island.buildable,
+    anomaly,
+    island.waterAdjacent,
+  );
   if (ctx.n === 0) return { placements: [], powerOutput: 0.0 };
 
   const reactors = effectiveBuildings

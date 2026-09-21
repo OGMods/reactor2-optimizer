@@ -24,6 +24,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { simulatePlacedBuildings } from "./simulator";
+import { getAnomaly } from "@reactor2/solver";
 import { buildIslandContext } from "@reactor2/solver";
 import { splitGridIntoIslands } from "@reactor2/solver";
 import { simulateIsland } from "@reactor2/solver";
@@ -31,6 +32,7 @@ import { Rng } from "@reactor2/solver";
 import type {
   BuildingDefinition,
   EffectiveBuilding,
+  PlacedBuilding,
   Placement,
   Tile,
 } from "@reactor2/solver";
@@ -346,5 +348,78 @@ describe("hand-placed scorer matches the solver", () => {
     }
 
     expect(compared).toBeGreaterThan(150);
+  });
+});
+
+describe("the readout rates a board under the same rules the search does", () => {
+  /*
+   * The whole reason this module delegates: a terrain bonus is resolved per
+   * tile when a board is scored, so if the scorer behind the readout did not
+   * take the anomaly, a shore layout would print its authored figures while the
+   * solver's identical layout printed bonused ones — the two disagreeing about
+   * the same board, which is the one thing this arrangement exists to prevent.
+   */
+  const tidal = getAnomaly("tidal_ascendancy");
+
+  /** A reactor, generator and cooler in a row, with their tiles. */
+  const chain = (x: number, y: number): Spec => [
+    [x, y, "reactor", VALUES.reactor],
+    [x + 1, y, "generator", VALUES.generator],
+    [x + 2, y, "cooler", VALUES.cooler],
+  ];
+
+  /** A board walled in by rock, so no tile of it is on the board's edge. */
+  const inlandGrid = (w: number, h: number): Tile[][] =>
+    Array.from({ length: h }, (_, y) =>
+      Array.from({ length: w }, (_, x) => ({
+        x,
+        y,
+        type:
+          x === 0 || y === 0 || x === w - 1 || y === h - 1
+            ? ("rock" as const)
+            : ("grass" as const),
+      })),
+    );
+
+  const powerOf = (rows: PlacedBuilding[]) =>
+    rows.reduce((sum, r) => sum + r.powerGenerated, 0);
+
+  it("bonuses a shore layout and leaves an inland one alone", () => {
+    // Every tile of a bare board is on its edge, and off the edge is water.
+    const shore = simulatePlacedBuildings(
+      grassGrid(5, 1),
+      DEFS,
+      place(chain(0, 0)),
+      undefined,
+      tidal,
+    );
+    const inland = simulatePlacedBuildings(
+      inlandGrid(7, 3),
+      DEFS,
+      place(chain(2, 1)),
+      undefined,
+      tidal,
+    );
+
+    expect(powerOf(inland)).toBeGreaterThan(0);
+    expect(powerOf(shore)).toBeCloseTo(powerOf(inland) * 1.67, 6);
+  });
+
+  it("changes nothing when no anomaly is passed", () => {
+    // The default, and every board in the rest of this file.
+    const withNone = simulatePlacedBuildings(
+      grassGrid(5, 1),
+      DEFS,
+      place(chain(0, 0)),
+    );
+    const inland = simulatePlacedBuildings(
+      inlandGrid(7, 3),
+      DEFS,
+      place(chain(2, 1)),
+      undefined,
+      tidal,
+    );
+
+    expect(powerOf(withNone)).toBeCloseTo(powerOf(inland), 6);
   });
 });

@@ -201,6 +201,7 @@
 
     const rosterChanged = signature !== previousRoster;
     const prestigeChanged = prestige !== previousPrestige;
+    const anomalyChanged = anomaly !== previousAnomaly;
     previousRoster = signature;
     previousAnomaly = anomaly;
     previousPrestige = prestige;
@@ -211,6 +212,10 @@
     // tier is worth — so the board is re-rated rather than re-based, and
     // `setPrestige` re-scores on its own.
     if (prestigeChanged) layoutState.setPrestige(prestige);
+    // Pushed for the same reason and by the same route: a terrain bonus is
+    // resolved per tile when the board is scored, so the readout has to be
+    // rating the board under the timeline the search is.
+    if (anomalyChanged) layoutState.setAnomaly(configState.activeAnomaly);
     solverState.rescoreResult();
   });
 </script>

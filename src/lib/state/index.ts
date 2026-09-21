@@ -47,8 +47,10 @@ import { solverState } from "./solver.svelte";
  */
 export async function hydrateState(): Promise<void> {
   // Before the board exists, so the first score every placement gets is already
-  // under the player's research rather than a frame of unresearched figures.
+  // under the player's research and timeline rather than a frame of
+  // unresearched figures under no anomaly.
   layoutState.setPrestige(configState.prestige);
+  layoutState.setAnomaly(configState.activeAnomaly);
   await layoutState.hydrate(configState.buildingUpgrades);
 
   const shared = readSharedCode();

@@ -16,8 +16,10 @@ import {
   blueprintKey,
   decodeBlueprint,
   encodeBlueprint,
+  getAnomaly,
   placementTiers,
   prestigeScales,
+  type AnomalyDefinition,
   type BlueprintRules,
   type DecodedBlueprint,
   type PrestigeScales,
@@ -1076,6 +1078,7 @@ class LayoutState {
       // the board unresearched, which is the honest reading of silence and
       // never the reader's own.
       this.isPreview ? this.#previewPrestige : this.#prestige,
+      this.placementAnomaly,
     );
   }
 
@@ -1124,6 +1127,33 @@ class LayoutState {
   setPrestige(scales: PrestigeScales) {
     if (this.#prestige === scales) return;
     this.#prestige = scales;
+    this.recalculate();
+  }
+
+  /**
+   * The anomaly every placement is rated under. Held rather than read, for the
+   * same reason as `#prestige`.
+   */
+  #anomaly: AnomalyDefinition = getAnomaly(undefined);
+
+  /**
+   * The anomaly the board **on screen** is rated under — the author's on a
+   * previewed board, the player's otherwise.
+   *
+   * A previewed board sits the player's timeline out exactly as it sits their
+   * research out: the code says which anomaly built it, and a code that does
+   * not say rates it under none. Taking the reader's own would rate someone
+   * else's shoreline under rules it was never laid out for.
+   */
+  get placementAnomaly(): AnomalyDefinition {
+    return this.isPreview
+      ? getAnomaly(this.#previewRules?.anomalyId ?? undefined)
+      : this.#anomaly;
+  }
+
+  setAnomaly(anomaly: AnomalyDefinition) {
+    if (this.#anomaly === anomaly) return;
+    this.#anomaly = anomaly;
     this.recalculate();
   }
 }

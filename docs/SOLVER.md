@@ -109,6 +109,33 @@ Two things about the shapes are load-bearing:
   time the search moves a neighbour, so a placed building's figures have to be resolved per
   layout.
 
+`terrain_affinity` is the one rule implemented. `terrainScales` resolves it into a per-tile
+multiplier when the context is built — nothing about a layout can change which tiles qualify — and
+`IslandContext.rate(tile, building)` is then a lookup, so the rule costs the search nothing.
+`uniformRating` is true under every other anomaly and `rate` is the identity.
+
+Two things about where it is applied:
+
+- **At the write, not the read.** A step of the walk writes one or two tiles and then simulates the
+  island, which reads every occupied tile's three figures — so resolving at the write is some 25x
+  less work, and `simulateIsland` stays exactly as it was. `put()` is the only way a building
+  enters a placement, so the bonus cannot be missed at one of three dozen sites; a miss would be
+  silent, the layout simply being worth less than it is. Resolution is a lookup rather than a
+  multiply because a scaled building's waste is `snapToAuthoredPrecision(heat - energy)`, and that
+  snap is a string round-trip.
+- **`rate` is idempotent.** The search swaps buildings between tiles and restores them when a move
+  is rejected, so it hands back objects it was already given; without this a restore would scale a
+  scaled building. `downgradeOversized` is the one place that also has to rate a *candidate* before
+  comparing it, since the ladder is the plain roster while the building it is replacing and the
+  load it measured are both in the tile's units.
+
+**A terrain bonus is a harder search, not just a bigger number.** A shore generator makes x1.67 the
+waste while an inland cooler still covers x1, so a cluster straddling the coast goes offline — a
+layout optimised under the base rules can score *lower* re-rated under Tidal, and the search has to
+keep each cluster on one side of the shoreline. On Magma Rift a 6s run lands under the baseline and
+a 30s run lands 8% above it. The seeding heuristics still pick candidates by unscaled roster
+figures, which is where that gap lives.
+
 `shared_cooling` is the odd one out entirely, and it is the one that costs this package
 something. **Its pool is the whole board** — the game's "island" is the map, Gale Hills and Ash
 Bay, and "cooling does not carry over to other islands" means it does not carry to a different

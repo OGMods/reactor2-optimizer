@@ -1,7 +1,12 @@
 import { buildIslandContext, type IslandContext } from "@reactor2/solver";
 import { simulateIsland } from "@reactor2/solver";
 import type { Placement } from "@reactor2/solver";
-import { effectiveAtValue, type PrestigeScales } from "@reactor2/solver";
+import {
+  effectiveAtValue,
+  getAnomaly,
+  type AnomalyDefinition,
+  type PrestigeScales,
+} from "@reactor2/solver";
 import { unscoredPlacement } from "../data/placements";
 import type { BuildingDefinition, PlacedBuilding, Tile } from "../types";
 
@@ -30,8 +35,12 @@ import type { BuildingDefinition, PlacedBuilding, Tile } from "../types";
  * mutates a tile in place, so the grid array's identity alone would go on
  * matching a board that has changed underneath it.
  */
-let cached: { grid: Tile[][]; signature: number; ctx: IslandContext } | null =
-  null;
+let cached: {
+  grid: Tile[][];
+  signature: number;
+  anomaly: AnomalyDefinition;
+  ctx: IslandContext;
+} | null = null;
 
 function terrainSignature(grid: Tile[][]): number {
   let h = 0x811c9dc5;
@@ -46,13 +55,27 @@ function terrainSignature(grid: Tile[][]): number {
   return h;
 }
 
-function contextFor(grid: Tile[][]): IslandContext {
+function contextFor(
+  grid: Tile[][],
+  anomaly: AnomalyDefinition,
+): IslandContext {
   const signature = terrainSignature(grid);
-  if (cached && cached.grid === grid && cached.signature === signature) {
+  if (
+    cached &&
+    cached.grid === grid &&
+    cached.signature === signature &&
+    // Part of the key, not a detail: a terrain bonus is resolved per tile when
+    // the context is built, so a cached one carries the rules it was built
+    // under and would go on rating the board under a timeline it has left.
+    cached.anomaly === anomaly
+  ) {
     return cached.ctx;
   }
-  const ctx = buildIslandContext(grid);
-  cached = { grid, signature, ctx };
+  // No shore mask: this is the whole board, so its window has no edge the board
+  // does not, and `buildIslandContext` resolves one that treats off the board
+  // as water. See `computeWaterAdjacency`.
+  const ctx = buildIslandContext(grid, undefined, anomaly);
+  cached = { grid, signature, anomaly, ctx };
   return ctx;
 }
 
@@ -66,6 +89,7 @@ export function simulatePlacedBuildings(
   buildings: readonly BuildingDefinition[],
   placedBuildings: PlacedBuilding[],
   prestige?: PrestigeScales,
+  anomaly: AnomalyDefinition = getAnomaly(undefined),
 ): PlacedBuilding[] {
   // Copies, with every derived figure reset: this returns a fresh set of rows
   // rather than writing through to the caller's, and a figure left over from a
@@ -78,7 +102,7 @@ export function simulatePlacedBuildings(
     return results;
   }
 
-  const ctx = contextFor(grid);
+  const ctx = contextFor(grid, anomaly);
   if (ctx.n === 0) return results;
 
   // Tile index by position, so a placement's (x, y) finds its slot.
@@ -98,7 +122,10 @@ export function simulatePlacedBuildings(
     if (t === undefined) continue;
     // Two placements on one tile is not a state the editor can produce; if a
     // save carries one anyway, the later one stands.
-    placement[t] = effectiveAtValue(def, pb.baseValue, prestige);
+    // Rated for the tile it sits on, the same way the search rates what it
+    // places: under a shore bonus the two would otherwise print different
+    // figures for the identical board.
+    placement[t] = ctx.rate(t, effectiveAtValue(def, pb.baseValue, prestige));
     rowOf[t] = i;
   }
 

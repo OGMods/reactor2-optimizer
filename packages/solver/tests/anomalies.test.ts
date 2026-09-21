@@ -18,7 +18,11 @@ import {
 } from "../src/data/anomalies";
 import { scaleEffectiveBuilding } from "../src/data/effectiveBuildings";
 import { wasteIsCovered } from "../src/solver/physics";
-import type { EffectiveBuilding } from "../src/solver/types";
+import { buildIslandContext } from "../src/solver/context";
+import { simulateIsland } from "../src/solver/simulate";
+import { makeGrid } from "../src/grid";
+import { basicRoster, cooler } from "./helpers";
+import type { EffectiveBuilding, Placement } from "../src/solver/types";
 
 const generator: EffectiveBuilding = {
   id: "gen",
@@ -100,5 +104,112 @@ describe("scaling a resolved building", () => {
       generator.energy / generator.effectiveValue,
       12,
     );
+  });
+});
+
+describe("a terrain bonus reaching the board", () => {
+  /*
+   * Tidal Ascendancy is the only rule in the game where an unbuildable tile
+   * does anything, and the only one resolved per tile rather than per roster or
+   * per layout. Which tiles qualify is fixed by the terrain, so the context
+   * settles it once and `rate` is a lookup — the reason a shore bonus costs the
+   * search nothing.
+   */
+  const tidal = getAnomaly("tidal_ascendancy");
+
+  /** The context for a board, with off-board treated as water throughout. */
+  const contextFor = (rows: string[], anomaly = tidal) =>
+    buildIslandContext(makeGrid(rows), undefined, anomaly);
+
+  it("rates a shore tile up and an inland tile as authored", () => {
+    // A 5x3 of grass ringed by nothing: every tile but the middle row's
+    // interior touches the board's edge, and the edge is water.
+    const ctx = contextFor(["GGGGG", "GGGGG", "GGGGG"]);
+    const base = cooler(100);
+    const inland = ctx.tiles.find((t) => ctx.rate(t, base) === base)!;
+
+    expect(ctx.uniformRating).toBe(false);
+    expect(ctx.rate(ctx.tiles[0], base).effectiveValue).toBe(167);
+    expect(ctx.rate(inland, base).effectiveValue).toBe(100);
+    // The authored tier value never moves, whatever the tile.
+    expect(ctx.rate(ctx.tiles[0], base).baseValue).toBe(100);
+  });
+
+  it("rates every tile of a wholly inland island the same", () => {
+    // Walled in by rock, well away from the board's edge. Nothing qualifies, so
+    // the context says so and every tile skips the lookup.
+    const ctx = contextFor([
+      "RRRRRRR",
+      "RRRRRRR",
+      "RRGGGRR",
+      "RRRRRRR",
+      "RRRRRRR",
+    ]);
+
+    expect(ctx.uniformRating).toBe(true);
+    const base = cooler(100);
+    expect(ctx.rate(ctx.tiles[0], base)).toBe(base);
+  });
+
+  it("is idempotent, so a building may be moved between tiles", () => {
+    /*
+     * The search swaps two buildings and restores them when the move is
+     * rejected, which hands `rate` objects it has already rated. Without this
+     * the restore would scale a scaled building and the layout would quietly be
+     * worth 2.8x.
+     */
+    const ctx = contextFor(["GGGGG", "GGGGG", "GGGGG"]);
+    const base = cooler(100);
+    const inland = ctx.tiles.find((t) => ctx.rate(t, base) === base)!;
+    const shore = ctx.tiles[0];
+
+    const onShore = ctx.rate(shore, base);
+    expect(onShore.effectiveValue).toBe(167);
+    // Shore -> shore, twice over.
+    expect(ctx.rate(shore, onShore)).toBe(onShore);
+    // Shore -> inland gives the authored building back, not 167 x 1.67.
+    expect(ctx.rate(inland, onShore)).toBe(base);
+    // And back again.
+    expect(ctx.rate(shore, ctx.rate(inland, onShore))).toBe(onShore);
+  });
+
+  it("leaves every tile alone under an anomaly that is not terrain-based", () => {
+    for (const id of ["none", "cryo_nexus", "singularity_isolation"]) {
+      const ctx = contextFor(["GGGGG", "GGGGG"], getAnomaly(id));
+      expect(ctx.uniformRating, id).toBe(true);
+    }
+  });
+
+  it("scores a shore layout above the same layout inland", () => {
+    /*
+     * The rule end to end. The same three buildings, the same arrangement, on
+     * a board where they are coastal and on one where they are not — and the
+     * bonus is not free power, because the cooler has to be bonused too for the
+     * generator's larger waste to stay covered.
+     */
+    const roster = basicRoster();
+    const layoutOn = (rows: string[]) => {
+      const ctx = buildIslandContext(makeGrid(rows), undefined, tidal);
+      const placement: Placement = new Array(ctx.n).fill(null);
+      const [r, g, c] = [roster[0], roster[1], roster[2]];
+      placement[ctx.tiles[0]] = ctx.rate(ctx.tiles[0], r);
+      placement[ctx.tiles[1]] = ctx.rate(ctx.tiles[1], g);
+      placement[ctx.tiles[2]] = ctx.rate(ctx.tiles[2], c);
+      return simulateIsland(placement, ctx).totalPower;
+    };
+
+    // Three tiles in a column against the board's left edge: all shore.
+    const shore = layoutOn(["GRRRR", "GRRRR", "GRRRR"]);
+    // The same column, walled in by rock and away from every edge.
+    const inland = layoutOn([
+      "RRRRR",
+      "RRGRR",
+      "RRGRR",
+      "RRGRR",
+      "RRRRR",
+    ]);
+
+    expect(inland).toBeGreaterThan(0);
+    expect(shore).toBeCloseTo(inland * 1.67, 6);
   });
 });

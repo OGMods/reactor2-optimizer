@@ -272,12 +272,41 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   changes which tier a *placement* resolves to (`rebasePlacements`), while an
   anomaly changes none of them — the same building at the same tier is simply
   rated differently — so it needs the re-score alone.
-- **The solver accepts an anomaly and does not yet act on one.** It is threaded
-  the whole way — `SolveOptions.anomalyId` / `SolveRunOptions.anomalyId`, the
-  worker request, and `IslandContext.anomaly`, which is where the stages will
-  read it because every stage already holds a context. The model, the board
-  window the rules need, the catalogue and the UI are in; the rules are not, and
-  nothing on screen says a solve ignored one.
+- **Tidal Ascendancy is implemented; Cryo Nexus and Singularity Isolation are
+  not.** The anomaly is threaded the whole way — `SolveOptions.anomalyId` /
+  `SolveRunOptions.anomalyId`, the worker request, and `IslandContext.anomaly` —
+  and the terrain half of it is resolved into `IslandContext.rate`. The two
+  remaining rules need more than a per-tile multiplier: Singularity's depends on
+  a building's neighbours, so it changes as the search moves them, and Cryo's is
+  the board-level problem above. Nothing on screen says a solve ignored one.
+
+  **A terrain bonus is resolved per tile, once, when the context is built.**
+  Nothing about a layout can change which tiles qualify, so `terrainScales`
+  settles it at construction and `ctx.rate(tile, building)` is a lookup — which
+  is why the rule costs the search nothing. `uniformRating` is true under every
+  other anomaly and `rate` is then the identity.
+
+  It is called where a building is **written onto a tile**, never where its
+  figures are read: a step of the walk writes one or two tiles and then
+  simulates the island, which reads every occupied tile, so the write is some
+  25x less work and `simulateIsland` stays untouched. `put()` in
+  `placementSearch.ts` is the only way a building enters a placement, so the
+  bonus cannot be missed at one of three dozen sites — and a miss would be
+  silent, since the layout would simply be worth less than it is.
+
+  **`rate` is idempotent**, which is what makes that safe: the search swaps
+  buildings between tiles and restores them when a move is rejected, handing
+  back objects it was already given. Without it a restore would scale a scaled
+  building and the layout would quietly be worth 2.8x.
+
+  **A bonus is genuinely not free power here, and it shows.** A shore generator
+  makes x1.67 the waste while an inland cooler still covers x1, so a cluster
+  straddling the shoreline goes offline — a layout optimised under the base
+  rules can score *lower* re-rated under Tidal. The search has to learn to keep
+  a cluster on one side of the coast, which is a harder problem than the uniform
+  one: on Magma Rift a 6s run comes back under the baseline and a 30s run comes
+  back 8% above it. The seeding heuristics still reason in unscaled roster
+  figures, which is where that gap lives.
 
   The anomaly crosses the worker boundary **as an id**, resolved again on the
   far side, so the message stays a string rather than a table entry that has to

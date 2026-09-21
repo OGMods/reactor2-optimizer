@@ -475,6 +475,7 @@ class SolverState {
       BUILDINGS,
       placements,
       configState.prestige,
+      configState.activeAnomaly,
     );
 
     let totalPower = 0;

@@ -1,6 +1,13 @@
 import { getAnomaly } from "../data/anomalies";
+import { scaleEffectiveBuilding } from "../data/effectiveBuildings";
 import { CHEBYSHEV_DIRECTIONS, spatialKeyCompare } from "./constants";
-import type { AnomalyDefinition, Tile } from "./types";
+import { computeWaterAdjacency } from "./island";
+import type {
+  AnomalyDefinition,
+  EffectiveBuilding,
+  Tile,
+  TileType,
+} from "./types";
 
 /**
  * Scratch buffers reused by every `runDistribution` call on one island.
@@ -110,11 +117,36 @@ export interface IslandContext {
    * to answer (a shore bonus, a shared cooling pool) will want it exactly here,
    * beside the tile index and the adjacency they are defined over.
    *
-   * **Nothing reads it yet.** The rules are not implemented — see
-   * `docs/game-logic.md`. It is threaded so that implementing them is a change
-   * to the stages and not to every signature between here and the worker.
+   * The per-tile half of it is already resolved into `rate`; the rules that
+   * depend on a layout rather than a tile read it here.
    */
   readonly anomaly: AnomalyDefinition;
+  /**
+   * True when every tile on this island rates a building the same way, which is
+   * every anomaly but a terrain bonus.
+   *
+   * Hoisted out of `rate` so the common case is a single boolean rather than a
+   * per-tile array read, and so a stage can skip the call entirely where that
+   * reads better.
+   */
+  readonly uniformRating: boolean;
+  /**
+   * What `building` is worth **on this tile**, which is the building itself
+   * unless a terrain bonus applies to it.
+   *
+   * Called where a building is written onto a tile rather than where its
+   * figures are read, and that is the whole performance argument: a step of the
+   * walk writes one or two tiles and then simulates the island, which reads
+   * every occupied tile's three figures. Resolving at the write is some
+   * twenty-five times less work, and it leaves `simulateIsland` — the hot path,
+   * and the definition of what a layout scores — untouched.
+   *
+   * Scaling has to be resolved rather than computed here because a scaled
+   * building's waste is `snapToAuthoredPrecision(heat - energy)`, and that snap
+   * is a string round-trip. Each distinct (tile class, building) pair is built
+   * once and then handed back.
+   */
+  rate(tile: number, building: EffectiveBuilding): EffectiveBuilding;
   readonly xs: Int32Array;
   readonly ys: Int32Array;
   /** Chebyshev-adjacent buildable tiles of each tile, ascending index order. */
@@ -137,6 +169,73 @@ export interface IslandContext {
 }
 
 /**
+ * The per-tile stat multiplier a terrain bonus produces, or `null` when every
+ * tile on this island rates the same.
+ *
+ * Indexed by context tile index, so it lines up with `xs` / `ys` and with the
+ * placement array rather than with the window.
+ *
+ * Resolved once per island because nothing about a layout can change it: which
+ * tiles qualify is decided by terrain alone. It is the cheapest possible shape
+ * for the rule and the reason a terrain bonus costs the search nothing.
+ *
+ * `null` rather than an array of ones so the common case — every anomaly but
+ * this one — is a single check instead of a per-tile read.
+ */
+function terrainScales(
+  localGrid: Tile[][],
+  anomaly: AnomalyDefinition,
+  xs: Int32Array,
+  ys: Int32Array,
+  n: number,
+  waterAdjacent?: Uint8Array,
+): Float64Array | null {
+  if (anomaly.rule !== "terrain_affinity") return null;
+
+  const height = localGrid.length;
+  const width = localGrid[0]?.length ?? 0;
+  // Off the board counts as water, so the shore mask answers the water half and
+  // is the only half that can see past the window. Computed here when the
+  // caller handed over a whole board rather than an island window.
+  const shore = anomaly.terrain.includes("water")
+    ? (waterAdjacent ?? computeWaterAdjacency(localGrid))
+    : undefined;
+  // Everything else is ordinary terrain, which cannot lie outside the window:
+  // no rock or tree exists off the board.
+  const other = new Set<TileType>(
+    anomaly.terrain.filter((type) => type !== "water"),
+  );
+
+  const scales = new Float64Array(n);
+  let anyScaled = false;
+
+  for (let i = 0; i < n; i++) {
+    const x = xs[i];
+    const y = ys[i];
+    let qualifies = shore !== undefined && shore[y * width + x] === 1;
+
+    if (!qualifies && other.size > 0) {
+      for (const [dx, dy] of CHEBYSHEV_DIRECTIONS) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+        if (other.has(localGrid[ny][nx].type)) {
+          qualifies = true;
+          break;
+        }
+      }
+    }
+
+    scales[i] = qualifies ? anomaly.multiplier : 1;
+    if (qualifies) anyScaled = true;
+  }
+
+  // An island wholly inland under a shore bonus rates like any other: say so,
+  // and every tile of it skips the lookup.
+  return anyScaled ? scales : null;
+}
+
+/**
  * Builds the tile index and adjacency for one island's buildable tiles.
  *
  * `buildable` is an `IslandSubGrid`'s mask, indexed `y * width + x` over the
@@ -145,11 +244,20 @@ export interface IslandContext {
  * and is grass, and without the mask those tiles would join this island's
  * index. Omitted, every grass tile counts — which is what a caller handing over
  * a whole grid of its own means.
+ *
+ * `waterAdjacent` is the same window's shore mask, and a terrain bonus needs
+ * it: off the board counts as water, and an island window is clamped to the
+ * board, so a tile on the board's own edge has no off-board neighbour inside
+ * the window to find. Omitted, it is computed from `localGrid` with everything
+ * outside it treated as water — which is exactly right for a caller handing
+ * over the whole board, and too generous for one handing over an island window,
+ * so `IslandSubGrid` carries a mask and both island callers pass it.
  */
 export function buildIslandContext(
   localGrid: Tile[][],
   buildable?: Uint8Array,
   anomaly: AnomalyDefinition = getAnomaly(undefined),
+  waterAdjacent?: Uint8Array,
 ): IslandContext {
   const gridWidth = localGrid[0]?.length ?? 0;
   const coords: [number, number][] = [];
@@ -195,9 +303,53 @@ export function buildIslandContext(
     neighbors[i] = Int32Array.from(found);
   }
 
+  const tileScale = terrainScales(
+    localGrid,
+    anomaly,
+    xs,
+    ys,
+    n,
+    waterAdjacent,
+  );
+  const uniformRating = tileScale === null;
+  // One cache per distinct scale, so a building is built at a given rating
+  // once per island rather than once per placement. Keyed on the base object
+  // because the roster is shared by every tile and its entries are stable for
+  // the whole solve.
+  const rated = new Map<number, Map<EffectiveBuilding, EffectiveBuilding>>();
+  // Every scaled variant back to the roster entry it came from, so `rate` can
+  // be applied to a building that already carries a rating. The search swaps
+  // buildings between tiles and restores them afterwards, so it hands back
+  // objects it was given — without this, a swap would scale a scaled building
+  // and the layout would quietly be worth 2.8x.
+  const baseOf = new Map<EffectiveBuilding, EffectiveBuilding>();
+
   return {
     n,
     anomaly,
+    uniformRating,
+    rate(tile: number, building: EffectiveBuilding): EffectiveBuilding {
+      if (tileScale === null) return building;
+      // Idempotent: a building arriving with another tile's rating is taken
+      // back to its roster entry first, so this is a function of the tile
+      // rather than of how many times it has been applied.
+      const base = baseOf.get(building) ?? building;
+      const scale = tileScale[tile];
+      if (scale === 1) return base;
+
+      let byBuilding = rated.get(scale);
+      if (byBuilding === undefined) {
+        byBuilding = new Map();
+        rated.set(scale, byBuilding);
+      }
+      let scaled = byBuilding.get(base);
+      if (scaled === undefined) {
+        scaled = scaleEffectiveBuilding(base, scale);
+        byBuilding.set(base, scaled);
+        baseOf.set(scaled, base);
+      }
+      return scaled;
+    },
     xs,
     ys,
     neighbors,
