@@ -660,17 +660,17 @@ function constructSeed(
       put(placement, ctx, best.tile, generator);
       claimed.push(best.tile);
       for (let i = 0; i < r; i++) {
-        placement[best.neighbors[i]] = reactor;
+        put(placement, ctx, best.neighbors[i], reactor);
         claimed.push(best.neighbors[i]);
       }
       for (let i = r; i < r + c; i++) {
-        placement[best.neighbors[i]] = topCooler;
+        put(placement, ctx, best.neighbors[i], topCooler);
         claimed.push(best.neighbors[i]);
       }
     } else if (best.kind === "shared") {
       const shared = best.shared!;
       for (let i = 0; i < shared.reactorTiles.length; i++) {
-        placement[shared.reactorTiles[i]] = shared.reactorTiers[i];
+        put(placement, ctx, shared.reactorTiles[i], shared.reactorTiers[i]);
         claimed.push(shared.reactorTiles[i]);
       }
       for (const n of shared.genPositions) {
@@ -686,7 +686,7 @@ function constructSeed(
       put(placement, ctx, best.tile, dp);
       claimed.push(best.tile);
       for (let i = 0; i < c; i++) {
-        placement[best.neighbors[i]] = topCooler;
+        put(placement, ctx, best.neighbors[i], topCooler);
         claimed.push(best.neighbors[i]);
       }
     }

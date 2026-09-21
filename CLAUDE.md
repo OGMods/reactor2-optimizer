@@ -305,8 +305,14 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   *lower* re-rated under Tidal. The search has to keep a cluster on one side of
   the coast, which is a harder problem than the uniform one. On Magma Rift at
   20s, `--anomaly tidal_ascendancy` returns 181AC against the baseline's 142AC.
-  The seeding heuristics still pick candidates by unscaled roster figures, which
-  is the remaining gap.
+  The seeding heuristics pick candidates by unscaled roster figures. Two ways of
+  making them tile-aware were measured and **neither paid for itself**: ranking
+  a candidate hub by its fit times the tile's multiplier, and restricting a
+  hub's tiles to one class so it cannot straddle the coast. Both came back at or
+  below the unchanged search over three seeds. `powerPerTile` orders a greedy
+  claim that later stages rewrite, so skewing it toward the coast mostly moves
+  which tiles get claimed first. Don't re-attempt either without a wider
+  measurement than three seeds at 15s.
 
   **`estimateTotalMaxPower` takes the anomaly, and has to.** A terrain bonus
   rates some tiles above the roster, so a bound computed on the plain roster is

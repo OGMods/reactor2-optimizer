@@ -134,7 +134,12 @@ waste while an inland cooler still covers x1, so a cluster straddling the coast 
 layout optimised under the base rules scores *lower* re-rated under Tidal, and the search has to
 keep each cluster on one side of the shoreline. On Magma Rift at 20s,
 `npm run solve -- --map 3 --anomaly tidal_ascendancy` returns 181AC against the baseline's 142AC.
-The seeding heuristics still pick candidates by unscaled roster figures, which is the remaining gap.
+The seeding heuristics pick candidates by unscaled roster figures, and two ways of changing that
+were measured: ranking a hub by its fit times the tile's multiplier, and restricting a hub's tiles
+to one class so it cannot straddle the coast. **Neither paid for itself** — both landed at or below
+the unchanged search across three seeds, because `powerPerTile` orders a greedy claim that the
+later stages rewrite, so skewing it toward the coast mostly changes which tiles are claimed first.
+Don't re-attempt either without a wider measurement.
 
 **The bound takes the anomaly too.** `estimateTotalMaxPower` rates each island at its best tile
 (`islandMaxScale`), because a bound computed on the plain roster is one a bonused layout walks

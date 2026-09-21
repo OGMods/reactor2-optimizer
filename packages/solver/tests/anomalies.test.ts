@@ -21,6 +21,8 @@ import { wasteIsCovered } from "../src/solver/physics";
 import { buildIslandContext } from "../src/solver/context";
 import { simulateIsland } from "../src/solver/simulate";
 import { makeGrid } from "../src/grid";
+import { splitGridIntoIslands } from "../src/solver/island";
+import { solveIsland } from "../src/solver/placementSearch";
 import { basicRoster, cooler } from "./helpers";
 import type { EffectiveBuilding, Placement } from "../src/solver/types";
 
@@ -178,6 +180,50 @@ describe("a terrain bonus reaching the board", () => {
       const ctx = contextFor(["GGGGG", "GGGGG"], getAnomaly(id));
       expect(ctx.uniformRating, id).toBe(true);
     }
+  });
+
+  it("reports a power the same layout re-rates to", async () => {
+    /*
+     * The agreement between the solver and everything that reads its output.
+     * A solve returns placements naming a building and an authored tier; the
+     * app rebuilds them with `effectiveAtValue` and rates each for its tile, so
+     * if that round trip does not land on the figure the solver reported, the
+     * board and the panel describing it disagree — and under a terrain bonus
+     * the gap is 67% on every shore tile rather than a rounding.
+     */
+    const roster = basicRoster({ dpValue: 120, dpWasteRatio: 0.2 });
+    const island = splitGridIntoIslands(
+      makeGrid(["GGGGGG", "GGGGGG", "GGGGGG"]),
+      true,
+      tidal,
+    )[0];
+    const ctx = buildIslandContext(
+      island.grid,
+      island.buildable,
+      tidal,
+      island.waterAdjacent,
+    );
+    const byId = new Map(roster.map((b) => [b.id, b]));
+
+    const solution = await solveIsland(island, roster, 0.5, undefined, 11, tidal);
+    expect(solution.placements.length).toBeGreaterThan(0);
+
+    // Tile index by the island-local coordinates the report carries.
+    const tileAt = new Map<string, number>();
+    for (let t = 0; t < ctx.n; t++) tileAt.set(`${ctx.xs[t]},${ctx.ys[t]}`, t);
+
+    // Rebuild the reported layout the way the app does — every building rated
+    // for the tile it sits on — and score it.
+    const rebuilt: Placement = new Array(ctx.n).fill(null);
+    for (const p of solution.placements) {
+      const tile = tileAt.get(`${p.x},${p.y}`)!;
+      rebuilt[tile] = ctx.rate(tile, byId.get(p.buildingId)!);
+    }
+
+    expect(simulateIsland(rebuilt, ctx).totalPower).toBeCloseTo(
+      solution.powerOutput,
+      6,
+    );
   });
 
   it("scores a shore layout above the same layout inland", () => {
