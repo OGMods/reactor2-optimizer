@@ -31,6 +31,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import {
+  ANOMALIES,
+  DEFAULT_ANOMALY_ID,
+  getAnomaly,
+} from "../src/data/anomalies";
 import { BUILDINGS, allUpgradesUnlocked } from "../src/data/buildings";
 import { getEffectiveBuildings } from "../src/data/effectiveBuildings";
 import {
@@ -46,6 +51,7 @@ import {
   solve,
 } from "../src/solver/solver";
 import type {
+  AnomalyId,
   IslandLayout,
   OptimizationResult,
   Tile,
@@ -143,6 +149,7 @@ async function solveWithPool(
   unlockedUpgrades: Record<string, number>,
   timeBudgetS: number,
   seed: number | undefined,
+  anomalyId: AnomalyId | undefined,
   pool: WorkerPool | null,
 ): Promise<OptimizationResult> {
   const plan = planSolve(
@@ -151,6 +158,7 @@ async function solveWithPool(
     unlockedUpgrades,
     timeBudgetS,
     seed,
+    anomalyId,
   );
   if (!plan || plan.islands.length < 2 || !pool || pool.size < 2)
     return solve(
@@ -158,7 +166,7 @@ async function solveWithPool(
       [...BUILDINGS],
       unlockedUpgrades,
       timeBudgetS,
-      undefined,
+      { anomalyId },
       seed,
     );
 
@@ -176,6 +184,10 @@ async function solveWithPool(
         effectiveBuildings: plan.effectiveBuildings,
         budgetS: plan.budgetsS[i],
         seed: plan.seeds[i],
+        // The resolved definition rather than the id: the plan has already
+        // resolved it, and a worker re-resolving would be a second reading of
+        // the same string.
+        anomaly: plan.anomaly,
       },
     })),
     (i, result) => {
@@ -205,6 +217,7 @@ async function solveMap(
   label: string,
   filenameFor: (run: SolveRun, bestPower: number) => string,
   seed: number | undefined,
+  anomalyId: AnomalyId | undefined,
   pool: WorkerPool | null,
 ): Promise<SolveRun[]> {
   const { grid } = await decodeBlueprint(gameMap.code);
@@ -219,6 +232,7 @@ async function solveMap(
       unlockedUpgrades,
       timeLimitS,
       offsetSeed(seed, runNum - 1),
+      anomalyId,
       pool,
     );
     results.push({
@@ -246,6 +260,7 @@ async function runSingle(
   unlockedUpgrades: Record<string, number>,
   timeLimitS: number,
   seed: number | undefined,
+  anomalyId: AnomalyId | undefined,
   pool: WorkerPool | null,
 ): Promise<void> {
   const testId = nextOutputId(TEST_FILENAME_RE);
@@ -257,10 +272,17 @@ async function runSingle(
     `Solving map ${gameMap.num} (test ID: ${testId})`,
     () => `test_${testId}.txt`,
     seed,
+    anomalyId,
     pool,
   );
 
   const run = runs[0];
+  // Named only when there is one, so the ordinary line-up is unchanged. The
+  // power figures mean something different under each set of rules, and a
+  // `solves/` directory of codes solved under three timelines otherwise says
+  // nothing about which is which.
+  if (anomalyId && anomalyId !== DEFAULT_ANOMALY_ID)
+    console.log(`Anomaly:                ${getAnomaly(anomalyId).name}`);
   printSummary(run.result, run.elapsedS);
   console.log(`Blueprint: ${run.code}`);
   console.log(
@@ -274,6 +296,7 @@ async function runComparison(
   runs: number,
   timeLimitS: number,
   seed: number | undefined,
+  anomalyId: AnomalyId | undefined,
   pool: WorkerPool | null,
 ): Promise<void> {
   const sessionId = nextOutputId(ISLAND_FILENAME_RE);
@@ -295,6 +318,7 @@ async function runComparison(
       `Map ${gameMap.num} [${idx + 1}/${gameMaps.length}]`,
       filenameFor,
       seed,
+      anomalyId,
       pool,
     );
 
@@ -361,6 +385,7 @@ async function runSession(
         unlockedUpgrades,
         timeLimitS: args.timeLimitS,
         seed: offsetSeed(args.seed, i),
+        anomalyId: args.anomalyId,
       },
     })),
     (attempt, raw) => {
@@ -427,10 +452,12 @@ interface Args {
   top: number;
   workers: number | undefined;
   seed: number | undefined;
+  anomalyId: AnomalyId | undefined;
 }
 
 const USAGE = `usage: solve [-h] [--map NUM] [--all] [--runs RUNS] [--time TIME_LIMIT_S]
              [--attempts N] [--top K] [--workers N] [--seed SEED]
+             [--anomaly ID]
 
 Decode a map, solve it, and report on the result.
 
@@ -448,6 +475,10 @@ options:
   --seed SEED    base seed for the search's random stream; narrows run-to-run
                  variance for debugging (stage deadlines remain wall-clock, so
                  runs are not bit-identical)
+  --anomaly ID   the timeline's anomaly (default: ${DEFAULT_ANOMALY_ID}).
+                 One of: ${ANOMALIES.map((a) => a.id).join(", ")}.
+                 Only the rules the solver implements take effect; the rest are
+                 accepted and ignored, exactly as in the app.
 
 This renders no picture. Each run writes its blueprint code to solves/, named
 after what it found; paste one into the app's Import to see the board.`;
@@ -462,6 +493,7 @@ function parseArgs(argv: string[]): Args | null {
     top: DEFAULT_TOP_N,
     workers: undefined,
     seed: undefined,
+    anomalyId: undefined,
   };
 
   const takeValue = (
@@ -533,6 +565,23 @@ function parseArgs(argv: string[]): Args | null {
         [raw, i] = takeValue(flag, inline, i);
         args.seed = asInt(flag, raw);
         break;
+      case "--anomaly":
+        [raw, i] = takeValue(flag, inline, i);
+        // Checked here rather than left to `getAnomaly`, which is total and
+        // would silently run the base rules on a typo — fine for an id off
+        // localStorage, useless for one a person just typed.
+        {
+          const match = ANOMALIES.find((a) => a.id === raw);
+          if (!match) {
+            throw new Error(
+              `unknown anomaly '${raw}'. One of: ${ANOMALIES.map((a) => a.id).join(", ")}`,
+            );
+          }
+          // Taken off the table entry rather than off the argument, so what is
+          // carried is an `AnomalyId` and not a string that happens to match.
+          args.anomalyId = match.id;
+        }
+        break;
       default:
         throw new Error(`unrecognized arguments: ${token}`);
     }
@@ -590,6 +639,7 @@ export async function main(argv: string[]): Promise<number> {
         args.runs,
         args.timeLimitS,
         args.seed,
+        args.anomalyId,
         pool,
       );
     else
@@ -598,6 +648,7 @@ export async function main(argv: string[]): Promise<number> {
         unlockedUpgrades,
         args.timeLimitS,
         args.seed,
+        args.anomalyId,
         pool,
       );
   } finally {

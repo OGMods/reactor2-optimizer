@@ -386,12 +386,55 @@ function bestHeatForEngineTiles(
   return best;
 }
 
-/** Sum of theoretical max power across all valid island sub-grids. */
+/**
+ * The largest multiplier any building on this island can be rated at.
+ *
+ * One number for the island rather than one per tile, because it is used to
+ * keep the bound a bound: the estimate below is homogeneous in the roster's
+ * figures — scale every one of them by `k` and the bound scales by `k` — so
+ * rating the whole island at its best tile is an upper bound on rating each
+ * tile at its own.
+ *
+ * It is loose by construction where only part of an island qualifies, and that
+ * is the right trade: a bound that can be beaten is worthless, while one that
+ * is generous only makes the efficiency figure read low.
+ */
+function islandMaxScale(
+  island: IslandSubGrid,
+  anomaly?: AnomalyDefinition,
+): number {
+  if (anomaly?.rule !== "terrain_affinity") return 1;
+  if (anomaly.multiplier <= 1) return 1;
+  // Only water can lie off the board, so the mask answers the whole question
+  // for the one terrain any shipped anomaly names; anything else is inside the
+  // window and would need the grid. Erring high keeps this a bound.
+  if (!anomaly.terrain.includes("water")) return anomaly.multiplier;
+
+  for (let i = 0; i < island.buildable.length; i++) {
+    if (island.buildable[i] === 1 && island.waterAdjacent[i] === 1)
+      return anomaly.multiplier;
+  }
+  return 1;
+}
+
+/**
+ * Sum of theoretical max power across all valid island sub-grids.
+ *
+ * `anomaly` is taken because the bound has to hold under the rules the search
+ * is actually running: a terrain bonus rates some tiles above their authored
+ * figures, and a bound computed on the plain roster is one a real layout beats.
+ * The "layout efficiency" figure this feeds then reads above 100%, which is the
+ * visible half of the problem; the invisible half is that nothing else in the
+ * solver is entitled to assume the bound holds either.
+ */
 export function estimateTotalMaxPower(
   islands: IslandSubGrid[],
   roster: EffectiveBuilding[],
+  anomaly?: AnomalyDefinition,
 ): number {
   let total = 0;
-  for (const island of islands) total += estimateIslandMaxPower(island, roster);
+  for (const island of islands)
+    total +=
+      estimateIslandMaxPower(island, roster) * islandMaxScale(island, anomaly);
   return total;
 }

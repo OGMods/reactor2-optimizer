@@ -427,6 +427,70 @@ describe("the theoretical max-power bound", () => {
     }
   });
 
+  it("is never beaten by a random layout under a terrain bonus", () => {
+    /*
+     * The same property under the one anomaly the search acts on, and the case
+     * that actually broke it: a shore tile rates its building above the roster,
+     * so a bound computed on the plain roster is one a real layout walks past.
+     * A CLI run on Magma Rift reported 119.9% layout efficiency before the
+     * bound learned about the anomaly.
+     *
+     * The board is bare grass, so every tile of it is on the board's edge and
+     * every building is bonused — the worst case for the bound, and the one
+     * where being loose is no excuse.
+     */
+    const tidal = getAnomaly("tidal_ascendancy");
+    const roster = basicRoster({ dpValue: 120, dpWasteRatio: 0.2 });
+    const island = islandFor(["GGG", "GGG", "GGG"], roster);
+    const bound = estimateTotalMaxPower([island], roster, tidal);
+    const ctx = buildIslandContext(
+      island.grid,
+      island.buildable,
+      tidal,
+      island.waterAdjacent,
+    );
+    expect(ctx.uniformRating, "every tile here is shore").toBe(false);
+
+    const rng = new Rng(20260921);
+    const options: (EffectiveBuilding | null)[] = [...roster, null];
+    for (let attempt = 0; attempt < 300; attempt++) {
+      const placement: Placement = Array.from({ length: ctx.n }, (_, t) => {
+        const pick = rng.choice(options);
+        return pick === null ? null : ctx.rate(t, pick);
+      });
+
+      const { totalPower } = simulateIsland(placement, ctx);
+
+      expect(
+        totalPower,
+        `a layout beat the 'upper' bound on attempt ${attempt}`,
+      ).toBeLessThanOrEqual(bound + EPS);
+    }
+  });
+
+  it("rises with a terrain bonus only where a tile qualifies", () => {
+    const tidal = getAnomaly("tidal_ascendancy");
+    const roster = basicRoster();
+    // Bare grass: every tile is on the board's edge, so the whole island is
+    // shore and the bound is the plain one scaled by the multiplier.
+    const shore = islandFor(["GGG", "GGG", "GGG"], roster);
+    // Walled in and away from every edge: nothing qualifies, so the bound is
+    // untouched and stays as tight as it was.
+    const inland = islandFor(
+      ["RRRRR", "RGGGR", "RGGGR", "RGGGR", "RRRRR"],
+      roster,
+    );
+
+    expectClose(
+      estimateTotalMaxPower([shore], roster, tidal),
+      estimateTotalMaxPower([shore], roster) * 1.67,
+    );
+    expectClose(
+      estimateTotalMaxPower([inland], roster, tidal),
+      estimateTotalMaxPower([inland], roster),
+    );
+  });
+
   it("totals as the sum over islands", () => {
     const roster = basicRoster();
     const islands = splitGridIntoIslands(

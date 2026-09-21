@@ -299,14 +299,22 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   back objects it was already given. Without it a restore would scale a scaled
   building and the layout would quietly be worth 2.8x.
 
-  **A bonus is genuinely not free power here, and it shows.** A shore generator
-  makes x1.67 the waste while an inland cooler still covers x1, so a cluster
-  straddling the shoreline goes offline — a layout optimised under the base
-  rules can score *lower* re-rated under Tidal. The search has to learn to keep
-  a cluster on one side of the coast, which is a harder problem than the uniform
-  one: on Magma Rift a 6s run comes back under the baseline and a 30s run comes
-  back 8% above it. The seeding heuristics still reason in unscaled roster
-  figures, which is where that gap lives.
+  **A bonus is genuinely not free power here.** A shore generator makes x1.67
+  the waste while an inland cooler still covers x1, so a cluster straddling the
+  shoreline goes offline — a layout optimised under the base rules scores
+  *lower* re-rated under Tidal. The search has to keep a cluster on one side of
+  the coast, which is a harder problem than the uniform one. On Magma Rift at
+  20s, `--anomaly tidal_ascendancy` returns 181AC against the baseline's 142AC.
+  The seeding heuristics still pick candidates by unscaled roster figures, which
+  is the remaining gap.
+
+  **`estimateTotalMaxPower` takes the anomaly, and has to.** A terrain bonus
+  rates some tiles above the roster, so a bound computed on the plain roster is
+  one a real layout walks past — Magma Rift reported 119.9% layout efficiency
+  before it did. The bound rates a whole island at its best tile
+  (`islandMaxScale`), which is loose where only part of it qualifies and is the
+  right trade: a bound that can be beaten is worthless, one that is generous
+  only makes the efficiency figure read low.
 
   The anomaly crosses the worker boundary **as an id**, resolved again on the
   far side, so the message stays a string rather than a table entry that has to

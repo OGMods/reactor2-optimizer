@@ -114,7 +114,11 @@ export function planSolve(
     ),
     originalWidth: grid[0].length,
     totalGrassTiles,
-    theoreticalMaxPower: estimateTotalMaxPower(islands, effectiveBuildings),
+    theoreticalMaxPower: estimateTotalMaxPower(
+      islands,
+      effectiveBuildings,
+      anomaly,
+    ),
   };
 }
 

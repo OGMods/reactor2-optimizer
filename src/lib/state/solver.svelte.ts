@@ -350,7 +350,11 @@ class SolverState {
       hasCoolingSupport,
       configState.activeAnomaly,
     );
-    return estimateTotalMaxPower(subGrids, effectiveBuildings);
+    return estimateTotalMaxPower(
+      subGrids,
+      effectiveBuildings,
+      configState.activeAnomaly,
+    );
   }
 
   /** How many layouts this solve offers. Below two, there is nothing to cycle. */

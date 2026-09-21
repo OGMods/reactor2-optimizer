@@ -131,10 +131,16 @@ Two things about where it is applied:
 
 **A terrain bonus is a harder search, not just a bigger number.** A shore generator makes x1.67 the
 waste while an inland cooler still covers x1, so a cluster straddling the coast goes offline — a
-layout optimised under the base rules can score *lower* re-rated under Tidal, and the search has to
-keep each cluster on one side of the shoreline. On Magma Rift a 6s run lands under the baseline and
-a 30s run lands 8% above it. The seeding heuristics still pick candidates by unscaled roster
-figures, which is where that gap lives.
+layout optimised under the base rules scores *lower* re-rated under Tidal, and the search has to
+keep each cluster on one side of the shoreline. On Magma Rift at 20s,
+`npm run solve -- --map 3 --anomaly tidal_ascendancy` returns 181AC against the baseline's 142AC.
+The seeding heuristics still pick candidates by unscaled roster figures, which is the remaining gap.
+
+**The bound takes the anomaly too.** `estimateTotalMaxPower` rates each island at its best tile
+(`islandMaxScale`), because a bound computed on the plain roster is one a bonused layout walks
+past: Magma Rift reported 119.9% layout efficiency before it did, and nothing else in the solver is
+entitled to assume the bound holds either. It is loose where only part of an island qualifies,
+which is the right way to be wrong.
 
 `shared_cooling` is the odd one out entirely, and it is the one that costs this package
 something. **Its pool is the whole board** — the game's "island" is the map, Gale Hills and Ash
