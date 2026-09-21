@@ -64,6 +64,7 @@
    *   idle    — the board only: this building is doing nothing.
    *   danger  — the board: overheating. In the UI: this destroys something.
    *   warn    — a limit is reached, or this board is not yours to edit.
+   *   benefit / drawback — the anomaly cards only, and nowhere else.
    *
    * The two board readings are **reserved**, and that is the whole point. The
    * pad under every building, the pulse that breathes it and the readout in
@@ -108,6 +109,136 @@
   --danger-soft: #ff8f9b;
   --danger-bg: rgba(255, 71, 87, 0.12);
   --danger-line: rgba(255, 71, 87, 0.4);
+
+  /*
+   * The anomaly cards' good/bad pair, sampled from the game's own "Choose an
+   * anomaly" screen — the two striped panel fills and the text on each.
+   *
+   * These exist rather than reusing `--status-ok` and `--danger` because those
+   * two are the **board's** language and stay reserved to it, and because
+   * reusing them would not even have looked right: the board speaks in a
+   * saturated accent on a dark ground (`#4ade80`, `#ff4757`), while these are
+   * muted *fills* carrying near-white text. A player meets them as panels, not
+   * as status lights, which is the distinction that keeps the reservation
+   * honest.
+   *
+   * They are matched to the game deliberately. This is the one screen in the
+   * app that mirrors a screen in the game — the player has just chosen there
+   * and is confirming here — so the pairing they read a moment ago is worth
+   * more than a palette of our own. `-alt` is the second band of the diagonal
+   * stripe; both panels have one.
+   */
+  --benefit-fill: #2d543f;
+  --benefit-fill-alt: #386a4d;
+  --benefit-text: #e5fee8;
+  --drawback-fill: #6b3028;
+  --drawback-fill-alt: #813d32;
+  --drawback-text: #fadedb;
+
+  /*
+   * And the same screen's *selection* colour, which is the sharper exception:
+   * `--neon` means selected everywhere else in this app, and here it does not.
+   *
+   * The reason is the same one and it only stretches this far. The anomaly
+   * list is a second view of a chooser the player has just used in the game,
+   * and there the chosen card is ringed in this green. Two selection colours
+   * is a real cost; showing a player their own choice in a colour they will
+   * not recognise from the screen they made it on is the larger one. It stops
+   * at this list — nothing else in the app may take it.
+   */
+  --anomaly-selected: #79e097;
+  --anomaly-selected-glow: rgba(121, 224, 151, 0.18);
+
+  /*
+   * And the card's own ground, sampled from the same screen. A purple that
+   * exists nowhere else in this app, for the same reason as the two above: it
+   * is what an anomaly card is, and this list is a second view of the game's.
+   *
+   * One token, not two, because the game's selected card is `#221438` against
+   * `#23143b` unselected — a difference of three in one channel, which is JPEG
+   * noise rather than a design. There as here, selection is carried by the ring
+   * around the card and not by what is behind it.
+   *
+   * `--text-dim` reads 5.0:1 on it and `--text` 13.8:1, so the panel's ordinary
+   * type needs no adjusting to sit on it.
+   */
+  --anomaly-card: #23143b;
+
+  /*
+   * The ground the cards sit on, sampled from the dialog behind them, and a
+   * bare triplet rather than a colour because **three surfaces wear it at three
+   * different strengths** — the sheet at 0.97 over the board, the docked panel
+   * at 0.88, the readout at 0.94. Each keeps the alpha it already had, so
+   * selecting an anomaly changes the hue and nothing about how much board shows
+   * through; a token per surface would be three names for one decision.
+   */
+  --anomaly-panel-rgb: 56, 38, 80;
+  /* The opaque form, for anything that must not be seen through — the roster's
+     sticky category bar is the one such thing inside these panels. */
+  --anomaly-panel-solid: #382650;
+
+  /*
+   * The whole `--neon` family again in purple, for the inside of a panel that
+   * has gone purple: Setup re-points every one of these, so its heading, its
+   * active tab, its selected island row and its category pills stop being cyan
+   * along with the ground under them.
+   *
+   * It is a **lighter** purple than `--anomaly-accent`, and that is forced
+   * rather than chosen. Cyan earns its prominence by contrast, and the badge
+   * purple reads 3.3:1 against this panel — fine as a stroke on the dark
+   * collapse handle, unreadable as a heading. `#c9a5f0` restores the 6.5:1 the
+   * cyan had, in the same family.
+   *
+   * Names mirror the tokens they stand in for, one for one, so the mapping in
+   * `ConfigSidebar` can be read straight down.
+   */
+  --anomaly-neon: #c9a5f0;
+  --anomaly-neon-strong: #d8bdf7;
+  --anomaly-neon-dim: rgba(201, 165, 240, 0.4);
+  --anomaly-neon-line: rgba(201, 165, 240, 0.5);
+  --anomaly-neon-glow: rgba(201, 165, 240, 0.2);
+  --anomaly-neon-bg: rgba(201, 165, 240, 0.16);
+  --anomaly-neon-faint: rgba(201, 165, 240, 0.18);
+  --anomaly-border-neon: rgba(201, 165, 240, 0.3);
+
+  /*
+   * Type for that ground, sampled from the same screens. The app's own text
+   * tokens are cyan-leaning (`--text` is `#e0f0ff`, `--text-dim` a blue-grey)
+   * and read as the wrong family on purple — the panel would look like our
+   * chrome with someone else's background behind it.
+   *
+   * `--anomaly-text` is the game's `#e6d8fc` untouched, at 10:1 on the panel.
+   * The other two are **lifted** off their sampled values, and for the reason
+   * `--text-dim` was lifted once already: the game's secondary lavender
+   * (`#9281ad`) measures 3.82:1 on this panel, under AA. Measure against the
+   * panel rather than the cards — the panel is the lighter of the two grounds,
+   * and light type loses contrast on the lighter one.
+   *
+   * These are not applied by any rule here. `ConfigSidebar` re-points `--text`,
+   * `--text-muted`, `--text-dim` and `--border` at them on the tab's container,
+   * so the whole subtree follows without a component knowing about it.
+   */
+  --anomaly-text: #e6d8fc;
+  /* `#94a3b8` -> the same lavender family. 7.0:1 on the panel. */
+  --anomaly-text-muted: #c3b4dd;
+  /* The game's `#9281ad`, lifted to clear AA on the panel. 4.7:1. */
+  --anomaly-text-dim: #a091bd;
+  --anomaly-border: rgba(230, 216, 252, 0.14);
+
+  /*
+   * Two purples for controls, and the split is a contrast one rather than a
+   * taste one. `--anomaly-accent` is the game's own badge purple, used for
+   * *strokes and glyphs on a dark ground*, where brighter is more legible.
+   * `--anomaly-action` is a *fill behind white text*, where brighter is less:
+   * the badge purple carries white at only 4.0:1, so the filled pair is pulled
+   * two steps down the same ramp until both the resting and the hover state
+   * clear AA (5.4:1 and 4.8:1). RUN is 12.8px bold, which is not "large text",
+   * so 4.5 is the bar it has to meet.
+   */
+  --anomaly-accent: #9b65d4;
+  --anomaly-accent-dim: rgba(155, 101, 212, 0.45);
+  --anomaly-action: #8450bd;
+  --anomaly-action-hover: #8d5ac6;
 
   /* A limit reached, or a board that is not yours. Never a plain action. */
   --warn: #f59e0b;

@@ -17,7 +17,10 @@ import {
   decodeBlueprint,
   encodeBlueprint,
   placementTiers,
+  prestigeScales,
+  type BlueprintRules,
   type DecodedBlueprint,
+  type PrestigeScales,
 } from "@reactor2/solver";
 import {
   createPlacement,
@@ -575,10 +578,24 @@ class LayoutState {
    * Saving to `localStorage` deliberately goes the other way and records no
    * tiers at all — see `#writeBlueprint`.
    */
+  /**
+   * The share code for a board: its shape, its tiers, **and the rules it was
+   * built under**.
+   *
+   * The rules are passed in rather than read, for the same reason the unlock
+   * levels are — this class reaches nothing else in the state layer, and both
+   * the anomaly and the research live on `configState`.
+   */
   exportBlueprint(
+    rules: BlueprintRules,
     placements: readonly PlacedBuilding[] = this.placements,
   ): Promise<string> {
-    return encodeBlueprint(this.grid, placements, placementTiers(placements));
+    return encodeBlueprint(
+      this.grid,
+      placements,
+      placementTiers(placements),
+      rules,
+    );
   }
 
   // ── Preview: someone else's board, opened from a link ────────────────────
@@ -593,6 +610,13 @@ class LayoutState {
    * saw. A code from before the table existed names none, and those buildings
    * fall back to the visitor's levels — the best guess available, and what
    * every reader did before there was anything better.
+   *
+   * The same argument runs one level up: a tier is only worth what the author's
+   * Time Lab research made it worth, so a code that carries rules rates the
+   * board with **the author's** research, and one that carries none rates it
+   * with no research at all. That is the honest reading of silence — an old
+   * code cannot tell us, and reaching for the reader's own would restate
+   * someone else's board in figures they never saw.
    *
    * Nothing here is persisted and `activeTemplateId` is left alone, so the
    * island the visitor was last on is still selected underneath and
@@ -619,6 +643,7 @@ class LayoutState {
     this.grid = decoded.grid;
     this.width = decoded.width;
     this.height = decoded.height;
+    this.#previewRules = decoded.rules;
     this.placements = decoded.placements.map((p) => {
       const tier = decoded.tiers[p.buildingId];
       return tier === undefined
@@ -1045,7 +1070,61 @@ class LayoutState {
       this.grid,
       BUILDINGS,
       this.placements,
+      // A previewed board is the author's, rated at the author's research —
+      // the same reason `rebasePlacements` sits preview out. The code now says
+      // what that research was, so it is used; a code that does not say rates
+      // the board unresearched, which is the honest reading of silence and
+      // never the reader's own.
+      this.isPreview ? this.#previewPrestige : this.#prestige,
     );
+  }
+
+  /**
+   * The Time Lab research every placement is rated under.
+   *
+   * Pushed in rather than read, because this class imports nothing from the
+   * rest of the state layer and `configState` is where research lives — the
+   * same arrangement `rebasePlacements` uses for unlock levels, except that
+   * `recalculate()` is called from a dozen internal places that cannot all take
+   * an argument, so it is held instead of passed.
+   */
+  #prestige: PrestigeScales | undefined;
+
+  /**
+   * The rules a previewed board names, and the scales they resolve to. Null off
+   * a code that carries none — see `loadPreview`.
+   */
+  #previewRules = $state<BlueprintRules | null>(null);
+
+  #previewPrestige = $derived(
+    this.#previewRules
+      ? prestigeScales(this.#previewRules.research)
+      : undefined,
+  );
+
+  /**
+   * The research every placement on the board **currently on screen** is rated
+   * under — the author's on a previewed board, the player's otherwise.
+   *
+   * Exposed because a reader of those placements has to resolve them the same
+   * way `recalculate()` did. Reaching for `configState.prestige` instead puts a
+   * previewed building's used figures on the author's research and its ceilings
+   * on the reader's, which prints rows like "259AC / 51.8AC" and can paint a
+   * perfectly cooled building red.
+   */
+  get placementPrestige(): PrestigeScales | undefined {
+    return this.isPreview ? this.#previewPrestige : this.#prestige;
+  }
+
+  /** The anomaly a previewed board was built under, or null if unstated. */
+  get previewAnomalyId(): string | null {
+    return this.#previewRules?.anomalyId ?? null;
+  }
+
+  setPrestige(scales: PrestigeScales) {
+    if (this.#prestige === scales) return;
+    this.#prestige = scales;
+    this.recalculate();
   }
 }
 

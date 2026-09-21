@@ -167,13 +167,50 @@
   // Seeded before the first run, so mounting does not re-score a board that
   // nothing has changed.
   let previousRoster = rosterSignature();
+  let previousAnomaly = configState.anomalyId;
+  let previousPrestige = configState.prestige;
 
+  /*
+   * The anomaly and the Time Lab research are the second and third inputs of
+   * this kind and are handled in the same effect, because it is the same
+   * argument: each changes what the buildings already on both boards are worth,
+   * not just what the next run may build.
+   *
+   * It is tracked separately from the roster rather than folded into one
+   * signature because the two ask for different work. A tier bought behind a
+   * standing building changes which tier that *placement* resolves to, which
+   * is what `rebasePlacements` re-reads; an anomaly changes none of them — the
+   * same building at the same tier is simply rated differently — so it needs
+   * the re-score and nothing else.
+   *
+   * Like a roster change, this deliberately does not re-optimise. That layout
+   * was chosen under the old rules and may no longer be the best shape or a
+   * stable one; what it reports is the honest output of those buildings under
+   * the new ones, and re-running is the player's call.
+   */
   $effect(() => {
     const signature = rosterSignature();
-    if (signature === previousRoster) return;
-    previousRoster = signature;
+    const anomaly = configState.anomalyId;
+    const prestige = configState.prestige;
+    if (
+      signature === previousRoster &&
+      anomaly === previousAnomaly &&
+      prestige === previousPrestige
+    )
+      return;
 
-    layoutState.rebasePlacements(configState.buildingUpgrades);
+    const rosterChanged = signature !== previousRoster;
+    const prestigeChanged = prestige !== previousPrestige;
+    previousRoster = signature;
+    previousAnomaly = anomaly;
+    previousPrestige = prestige;
+
+    if (rosterChanged)
+      layoutState.rebasePlacements(configState.buildingUpgrades);
+    // Research does not change which *tier* a placement is, only what that
+    // tier is worth — so the board is re-rated rather than re-based, and
+    // `setPrestige` re-scores on its own.
+    if (prestigeChanged) layoutState.setPrestige(prestige);
     solverState.rescoreResult();
   });
 </script>

@@ -31,7 +31,14 @@ import type { EffectiveBuilding, Placement, Tile } from "../src/solver/types";
 // --- Building factories ---------------------------------------------------
 
 function reactor(value: number, id = "reactor"): EffectiveBuilding {
-  return { id, type: "reactor", effectiveValue: value, energy: 0, waste: 0 };
+  return {
+    id,
+    type: "reactor",
+    effectiveValue: value,
+    energy: 0,
+    waste: 0,
+    baseValue: value,
+  };
 }
 
 function generator(value: number, id = "generator"): EffectiveBuilding {
@@ -41,11 +48,19 @@ function generator(value: number, id = "generator"): EffectiveBuilding {
     effectiveValue: value,
     energy: value * GENERATOR_ENERGY_RATIO,
     waste: value * GENERATOR_WASTE_RATIO,
+    baseValue: value,
   };
 }
 
 function cooler(value: number, id = "cooler"): EffectiveBuilding {
-  return { id, type: "cooler", effectiveValue: value, energy: 0, waste: 0 };
+  return {
+    id,
+    type: "cooler",
+    effectiveValue: value,
+    energy: 0,
+    waste: 0,
+    baseValue: value,
+  };
 }
 
 function directProducer(
@@ -59,6 +74,7 @@ function directProducer(
     effectiveValue: value,
     energy: value * (1 - wasteRatio),
     waste: value * wasteRatio,
+    baseValue: value,
   };
 }
 
@@ -184,6 +200,7 @@ describe("downgradeOversized", () => {
       effectiveValue: 1000,
       energy: 750,
       waste: 400,
+      baseValue: 1000,
     };
     const genS: EffectiveBuilding = {
       id: "generator_s",
@@ -191,6 +208,7 @@ describe("downgradeOversized", () => {
       effectiveValue: 100,
       energy: 75,
       waste: 25,
+      baseValue: 100,
     };
     const roster = [
       reactor(100),

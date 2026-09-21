@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { layoutState, solverState, uiState } from "../../state";
+  import { configState, layoutState, solverState, uiState } from "../../state";
   import { Play, Redo2, Square, Undo2 } from "lucide-svelte";
 
   /**
@@ -21,6 +21,18 @@
    */
 
   let running = $derived(solverState.isOptimizing);
+
+  /*
+   * Run goes purple while a rule change is in force — the game's colour for
+   * anomalies, on the one control that starts a solve under them.
+   *
+   * It follows the *selection*, not Setup's Anomaly tab: the tab is where the
+   * choice is made and is closed most of the time, while this is the standing
+   * reminder that the run about to start is not an ordinary one. Stopping is
+   * unaffected — a stop is destructive of the run in progress whatever rules it
+   * was started under, so `--danger` still wins.
+   */
+  let anomalous = $derived(configState.hasAnomaly);
 
   /*
    * A press here must not also collapse the config panel.
@@ -77,6 +89,7 @@
 
   <button
     class="run"
+    class:anomaly={anomalous}
     class:stopping={running}
     onpointerdown={keepPanel}
     onclick={() => uiState.requestSolve()}
@@ -186,6 +199,16 @@
 
   .run:hover {
     background: var(--neon-strong);
+  }
+
+  /* White rather than `--surface-void`: the fill is dark, not bright. */
+  .run.anomaly {
+    background: var(--anomaly-action);
+    color: #ffffff;
+  }
+
+  .run.anomaly:hover {
+    background: var(--anomaly-action-hover);
   }
 
   /* Stopping is destructive of the run in progress, so it takes `--danger`. */

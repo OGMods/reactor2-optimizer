@@ -1,5 +1,6 @@
+import { getAnomaly } from "../data/anomalies";
 import { CHEBYSHEV_DIRECTIONS, spatialKeyCompare } from "./constants";
-import type { Tile } from "./types";
+import type { AnomalyDefinition, Tile } from "./types";
 
 /**
  * Scratch buffers reused by every `runDistribution` call on one island.
@@ -100,6 +101,20 @@ export class DistributionScratch {
 export interface IslandContext {
   /** Number of buildable (grass) tiles. */
   readonly n: number;
+  /**
+   * The rules this island is being solved under. Always present — `"none"` is
+   * an anomaly like any other, so no stage has to branch on `undefined`.
+   *
+   * It rides on the context rather than being passed down the stages because
+   * every stage already has one, and the two anomalies that will need a board
+   * to answer (a shore bonus, a shared cooling pool) will want it exactly here,
+   * beside the tile index and the adjacency they are defined over.
+   *
+   * **Nothing reads it yet.** The rules are not implemented — see
+   * `docs/game-logic.md`. It is threaded so that implementing them is a change
+   * to the stages and not to every signature between here and the worker.
+   */
+  readonly anomaly: AnomalyDefinition;
   readonly xs: Int32Array;
   readonly ys: Int32Array;
   /** Chebyshev-adjacent buildable tiles of each tile, ascending index order. */
@@ -121,12 +136,29 @@ export interface IslandContext {
   readonly wasteTiles: Int32Array;
 }
 
-/** Builds the tile index and adjacency for one island's grass tiles. */
-export function buildIslandContext(localGrid: Tile[][]): IslandContext {
+/**
+ * Builds the tile index and adjacency for one island's buildable tiles.
+ *
+ * `buildable` is an `IslandSubGrid`'s mask, indexed `y * width + x` over the
+ * same window. Pass it whenever the grid is an island window: the window holds
+ * the board's real terrain, so a *neighbouring* island's grass sits inside it
+ * and is grass, and without the mask those tiles would join this island's
+ * index. Omitted, every grass tile counts — which is what a caller handing over
+ * a whole grid of its own means.
+ */
+export function buildIslandContext(
+  localGrid: Tile[][],
+  buildable?: Uint8Array,
+  anomaly: AnomalyDefinition = getAnomaly(undefined),
+): IslandContext {
+  const gridWidth = localGrid[0]?.length ?? 0;
   const coords: [number, number][] = [];
   for (const row of localGrid) {
     for (const tile of row) {
-      if (tile.type === "grass") coords.push([tile.x, tile.y]);
+      const mine = buildable
+        ? buildable[tile.y * gridWidth + tile.x] === 1
+        : tile.type === "grass";
+      if (mine) coords.push([tile.x, tile.y]);
     }
   }
   coords.sort(spatialKeyCompare);
@@ -165,6 +197,7 @@ export function buildIslandContext(localGrid: Tile[][]): IslandContext {
 
   return {
     n,
+    anomaly,
     xs,
     ys,
     neighbors,

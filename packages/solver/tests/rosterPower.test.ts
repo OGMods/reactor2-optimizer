@@ -17,6 +17,7 @@ const cooler: EffectiveBuilding = {
   effectiveValue: 100,
   energy: 0,
   waste: 0,
+  baseValue: 100,
 };
 const reactor: EffectiveBuilding = {
   id: "reactor1",
@@ -24,6 +25,7 @@ const reactor: EffectiveBuilding = {
   effectiveValue: 100,
   energy: 0,
   waste: 0,
+  baseValue: 100,
 };
 const generator: EffectiveBuilding = {
   id: "generator1",
@@ -31,6 +33,7 @@ const generator: EffectiveBuilding = {
   effectiveValue: 100,
   energy: 75,
   waste: 25,
+  baseValue: 100,
 };
 const turbine: EffectiveBuilding = {
   id: "windturbine1",
@@ -38,6 +41,7 @@ const turbine: EffectiveBuilding = {
   effectiveValue: 10,
   energy: 7,
   waste: 3,
+  baseValue: 10,
 };
 
 describe("rosterCanProducePower", () => {

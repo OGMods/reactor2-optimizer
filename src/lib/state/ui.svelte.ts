@@ -3,7 +3,7 @@ import type { ImageScale, PlacedBuilding, PlacementView } from "../types";
 import type { BuildingCategory } from "@reactor2/solver";
 import { buildShareUrl, clearSharedCode } from "../encoding/shareLink";
 import { downloadBlob, toFileSlug } from "../utils/downloadFile";
-import { formatNumberForFilename } from "@reactor2/solver";
+import { blueprintRules, formatNumberForFilename } from "@reactor2/solver";
 import {
   analyticsOptedOut,
   doNotTrackRequested,
@@ -78,7 +78,7 @@ export type SheetDetent = "closed" | "peek" | "half" | "full";
  * Defaults to the islands, because that is the recurring task. The roster is
  * set once and then the same roster is tried against one island after another.
  */
-type SetupTab = "islands" | "buildings";
+type SetupTab = "islands" | "buildings" | "timelab";
 
 /**
  * Visible height of the sheet's `peek` detent, in px.
@@ -701,7 +701,12 @@ class UIState {
     this.shareUrl = "";
     this.copiedForm = null;
     try {
-      const code = await layoutState.exportBlueprint(this.visiblePlacements);
+      // The rules the board on screen was built under travel with it — this
+      // is the one place that can see both the board and `configState`.
+      const code = await layoutState.exportBlueprint(
+        blueprintRules(configState.anomalyId, configState.prestigeLevels),
+        this.visiblePlacements,
+      );
       this.shareCode = code;
       this.shareUrl = buildShareUrl(code);
     } catch (err) {

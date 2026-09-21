@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { MIN_GRID_DIM } from "@reactor2/solver";
   import { layoutState } from "../../state";
   import { Minus, Plus } from "lucide-svelte";
 
@@ -13,7 +14,13 @@
 
   let { variant = "inline" }: Props = $props();
 
-  const MIN = 5;
+  /*
+   * The floor is the codec's, not this component's. A blueprint written before
+   * the format carried a version byte is recognised by its first byte being a
+   * width rather than a version, and that test is "at least `MIN_GRID_DIM`" —
+   * so a smaller board here would have made some old codes unreadable.
+   */
+  const MIN = MIN_GRID_DIM;
   const MAX = 30;
 
   /*

@@ -106,15 +106,161 @@ the building actually ran at — the two diverge the moment an upgrade is bought
 behind a standing building.
 
 **The catalogue is generated, so don't hand-edit it.** An external extraction
-script in `tools/` (gitignored — it reads the game's own files and does not
-ship) emits the `BUILDING_TABLE` block in `packages/solver/src/data/buildings.ts`
-from the extracted roster. It splices only that declaration; the prose and the
-helpers around it are hand-owned and survive regeneration.
+script — it reads the game's own files and is not part of this repo — emits the
+`BUILDING_TABLE` block in `packages/solver/src/data/buildings.ts` from the
+extracted roster. It splices only that declaration; the prose and the helpers
+around it are hand-owned and survive regeneration.
 
 The tables carry the game's **authored ScriptableObject doubles**, not the
 3-significant-figure numbers its UI shows and not the extractor's rounded JSON
 (which loses 22 of the roster's 301 numbers): cooler2 tier 3 is 18662, not
 1.86e4.
+
+## The Time Lab: research and anomalies
+
+Prestiging ("Time Jump") does two things to the numbers, and Setup's third tab —
+named **Time Lab** after the game's own screen — holds both.
+
+### Time Lab research
+
+`PRESTIGE_UPGRADES` (`data/prestige.ts`) carries **three** of the game's ten
+researches: Absolute Zero (cooler cooling), Infinite Grid (generator and wind
+turbine stats) and Stellar Forge (reactor heat). The other seven move research
+income, research time, chronons, obstacle-removal and building prices — all
+decided *before* the solver is handed a board, so none can change which layout
+is best. The file names them so it is clear they were read and dismissed.
+
+Three things bind:
+
+- **Each is a uniform multiplier on the roles it names**, the same shape the
+  stat anomalies turned out to have, so both go through
+  `scaleEffectiveBuilding`. Infinite Grid raises the overheat threshold as well
+  as the energy, which is what keeps it a bigger bet rather than free power.
+- **It folds into the roster, not into the solver.** `prestigeScales()` resolves
+  levels to one factor per role and `getEffectiveBuildings` applies it, so by the
+  time an `EffectiveBuilding` crosses the worker boundary the research is already
+  in its three numbers and nothing in the engine knows a Time Lab exists — which
+  is why the worker protocol has no field for it.
+
+  **That means the scales have to reach `planSolve`, and a run does not resolve
+  its own roster.** `solveProgressive` hands over `buildings` and
+  `unlockedUpgrades` and the coordinator resolves from those, so research
+  applied anywhere else — the readout, the run estimate — reaches the search
+  only if `SolveRunOptions.prestige` carries it there. Omit it and the run comes
+  back with a perfectly valid layout optimised for a roster the player does not
+  have, which nothing on screen would contradict. `prestige.test.ts` pins the
+  plan's roster and its upper bound against exactly that.
+  `effectiveAtValue` takes it too, and must: a placement stores the **authored**
+  tier value, which identifies the tier and is deliberately never rewritten, so
+  the research is applied on the way out every time.
+- **A multiplier breaks what `effectiveValue` used to mean, so
+  `EffectiveBuilding` carries `baseValue` beside it** — the authored tier value,
+  which every scaling helper passes through **untouched**. `simulateIsland`
+  reports that, never `effectiveValue`, because a placement's tier is resolved
+  back out of the reported number by matching the catalogue: report a scaled one
+  and it matches a *higher* tier and gets scaled a second time. A generator at
+  authored 320 under a x2 research reported 640, resolved as the authored 640
+  tier, and came back 1280 at one level too high — in the readout's ceilings,
+  the `Lv.` chip, `copySolveToBoard` and the tier table of every share code, with
+  nothing failing anywhere.
+- **It follows `buildingUpgrades`' convention exactly** — presence of the key is
+  what "researched" means, the value is a 0-based level index the UI numbers from
+  1, and un-researching deletes the key. Same control, same gesture, so a second
+  convention would only be a way to rate a board at the wrong level without
+  failing. `PrestigeUpgrades` is `BuildingUnlockCard`'s idiom down to the edge
+  stripe and the tier row disabling when off.
+- **The table authors the game's `BonusPercentage`, not the multiplier.** The
+  game works and reads in bonuses — its UI says "+100%", never "×2" — so
+  `bonuses` is what is carried and `prestigeMultiplier` (`1 + bonus`) is the one
+  place the factor comes from. Carrying both would be two spellings of one number
+  to keep in step; the card prints the bonus and puts the factor in the tier
+  button's tooltip.
+
+`layoutState` cannot read `configState`, so it **holds** the scales
+(`setPrestige`) rather than taking them per call — `recalculate()` runs from a
+dozen internal places that cannot all grow an argument. `hydrateState` seeds it
+before the board exists; `App.svelte`'s effect pushes changes. A previewed board
+sits it out, the same as `rebasePlacements`: it is the author's board at the
+author's research, and a blueprint does not record what that was.
+
+**Stellar Forge is the one uncertain call.** The game's `heat_producer` category
+holds reactors *and* direct producers, so "all Heat Producers" read literally
+would take the wind turbine — but Infinite Grid goes out of its way to name wind
+turbines, which is only worth saying if this one does not cover them. Modelled as
+reactors only; the cost of being wrong is a turbine that per `docs/game-logic.md`
+almost never earns a tile.
+
+### Anomalies
+
+Prestiging also picks an **anomaly** that changes the rules for the whole next
+timeline. `docs/game-logic.md` is the authority on what each one does and
+`docs/SOLVER.md` on how the table is shaped; the short version:
+
+- `AnomalyDefinition` (`solver/types.ts`) is a tagged union over the **rule
+  shape**, not the anomaly's name, and `ANOMALIES` (`data/anomalies.ts`) is
+  **hand-owned** — unlike `BUILDING_TABLE` beside it, what the extractor can
+  read is the text and the multipliers, never the rule shape those numbers plug
+  into.
+- `"none"` is an entry, not an absence, and `getAnomaly` is total: an id it does
+  not know resolves to the baseline, because the id arrives off `localStorage`
+  and the worker boundary.
+- Every stat anomaly is a **uniform** scale on a building's three figures
+  (`scaleEffectiveBuilding`), so a bonus is never free power — the cooling it
+  needs grows with it.
+- `configState.anomalyId` is the live choice, persisted under its own key rather
+  than in `ui_prefs` because it is a **solve input** like the roster, not a
+  preference about the app — which is also why `solveSignature()` counts it and
+  a solve found under another anomaly restores as stale.
+- **Cryo Nexus pools across the whole board.** The game's "island" is the map,
+  so under it the islands `splitGridIntoIslands` produces **do** interact —
+  against the assumption the worker pool, the budget split, `IslandBest` and
+  `variants.ts` are built on. Heat stays adjacency-bound, so an island is still
+  solvable alone; it is just no longer described by its best power but by a
+  frontier of power against net cooling contributed, with the board combining
+  those under one scalar budget. See `docs/SOLVER.md`.
+- **`ANOMALIES` is transcribed by hand from the same extractor's output**, which
+  emits an anomaly record alongside the roster and drops the icons into
+  `public/icons/anomaly_<id>.webp`. Unlike `BUILDING_TABLE`, **nothing splices
+  this table** — the extractor writes its record and stops — so a new anomaly is
+  brought across by hand. The game's `{0}`-templated strings land here with their
+  `values` resolved, so the wording and the numbers the solver runs on cannot
+  disagree.
+- **`sidebar/AnomalySelector` is the only place it is chosen**, under the
+  research on Setup's Time Lab tab. It mirrors a choice already made in the game rather than making one, so
+  it is built to be recognised rather than shopped: icon and name first, the
+  game's benefit/drawback pair beside them, and the full rule only under the
+  selected card — four rules at once is a wall of text on a phone describing
+  three timelines nobody is in.
+- **Changing it re-scores both boards** through the same `$effect` in
+  `App.svelte` a roster change goes through, and for the same reason. It is
+  tracked separately there because the two ask for different work: a bought tier
+  changes which tier a *placement* resolves to (`rebasePlacements`), while an
+  anomaly changes none of them — the same building at the same tier is simply
+  rated differently — so it needs the re-score alone.
+- **The solver accepts an anomaly and does not yet act on one.** It is threaded
+  the whole way — `SolveOptions.anomalyId` / `SolveRunOptions.anomalyId`, the
+  worker request, and `IslandContext.anomaly`, which is where the stages will
+  read it because every stage already holds a context. The model, the board
+  window the rules need, the catalogue and the UI are in; the rules are not, and
+  nothing on screen says a solve ignored one.
+
+  The anomaly crosses the worker boundary **as an id**, resolved again on the
+  far side, so the message stays a string rather than a table entry that has to
+  survive structured cloning. `replayIslandDeterministic` passes none and never
+  will: the fixtures are a determinism harness for the search, and a rule change
+  is a different question asked of it.
+
+**Three Time Lab upgrades scale building stats too**, and they are not anomalies:
+they are bought with Chronons, survive a Time Jump, and stack with whatever
+anomaly is running. The extractor's record covers all ten Time Lab upgrades; the
+three a layout can see are **Stellar Forge** (every heat
+producer), **Infinite Grid** (every generator), and **Absolute Zero** (every
+cooler), each five levels of `BonusPercentage` 1.0 to 4.0. That field is a
+fraction rather than a percent -- the same field is 0.05 on Chronon Reactor,
+which the game shows as +5% -- so the levels are worth x2 to x5. Like an
+anomaly's, the scale is uniform, so the cooling a boosted producer needs grows
+with it. Their badges ship as `public/icons/prestige_<id>.webp`. Nothing models
+them yet.
 
 ## Architecture
 
@@ -167,8 +313,8 @@ cascade.
 ### Blueprint is the format
 
 `encoding/blueprint.ts` in the solver package is deflate + base64url, one byte
-per tile, carrying terrain **and** buildings in a single payload with the grid's
-dimensions in the first two bytes. The shipped island templates (`data/maps.ts`),
+per tile, carrying terrain **and** buildings in a single payload behind a
+version byte and the grid's dimensions. The shipped island templates (`data/maps.ts`),
 the user's saved edits (`localStorage`), the Share button and the CLI's output
 all use it. It needs
 `CompressionStream`, so encode and decode are **async** — which is why loading a
@@ -177,6 +323,17 @@ grid is an awaited step rather than something a constructor can do.
 - **Never compare encoded codes to test whether two layouts match.** DEFLATE is
   only required to round-trip; two engines may emit different bytes for the same
   input. Use `blueprintKey()`, which compares the uncompressed payload.
+- **A code says which format it is, and an old one is recognised by its
+  width.** `BLUEPRINT_VERSION` is byte 0 of every new code; codes written before
+  it began with the width instead, so the two are told apart by *value* — a
+  board is at least `MIN_GRID_DIM` (5) on a side, so a first byte below that
+  cannot be a width. Which is why that constant now lives in the codec rather
+  than in the size stepper that enforces it, and why lowering it would not
+  shrink a board but would make some old codes unreadable. It constrains old
+  codes only: a versioned code states its width where no value is ambiguous, so
+  the 4x4 fixtures encode fine. An unknown version is **refused**, never
+  guessed at — the tiles are positional, so misreading one produces a different
+  board rather than an error.
 - **`IslandTemplate` has no `width`/`height`.** The code carries them, so there
   is nothing to drift out of sync with the terrain. To author a new island, build
   it in the app and press Share.
@@ -192,6 +349,25 @@ ends after the tiles, and a reader that predates it stops there too. An **empty*
 table means "tiers unknown", never "everything at tier 0", and the caller
 resolves them from its own unlocks.
 
+**A third section carries the rules the board was built under** — the anomaly
+byte, then a count and one `[research byte][level index]` pair per Time Lab
+upgrade. Tiers say what the buildings were, and that stopped being the whole
+story once research changed what a tier is worth: a board shared out of a
+×5-cooling timeline is not the board a reader without that research would get.
+
+Two things about it:
+
+- **Rules are read only after the tier table, so a code carrying them carries a
+  tier count byte first, even a zero one.** A byte for a strictly sequential
+  parse, and zero there is not a contradiction — an empty table already meant
+  "tiers unknown".
+- **`rules` decodes to `null` when the code does not say**, which is not the
+  same as a code that states "no anomaly, no research". A reader that confused
+  the two would rate someone else's board at nothing and still print a figure.
+  `loadPreview` uses the author's research where the code names it and **no**
+  research where it does not — never the reader's own, for the same reason it
+  uses the author's tiers.
+
 Two rules follow, and they are not symmetric:
 
 - **`encodeBlueprint` takes tiers; `blueprintKey` never does.** The key answers
@@ -199,7 +375,7 @@ Two rules follow, and they are not symmetric:
   template, the solver's board signature — mean the arrangement, not what the
   roster currently rates it at. Fold tiers in and buying an upgrade reads as a
   repainted board.
-- **Share codes carry tiers, saved layouts do not.** A save is the player's own
+- **Share codes carry tiers and rules, saved layouts carry neither.** A save is the player's own
   board and is meant to pick up upgrades bought since (`#applySaved` on load,
   `rebasePlacements` live). Freezing tiers into the save would put those two in
   permanent disagreement, so `persist()` calls `encodeBlueprint` directly while
@@ -1357,20 +1533,27 @@ descendants still bubble through an element with `pointer-events: none` — that
 property only stops the element being a hit target itself, which is what keeps
 canvas drags working through the HUD's empty margins.
 
-### Setup is two tasks, and it shows one at a time
+### Setup is three tasks, and it shows one at a time
 
-The panel holds two unrelated jobs — **which island** and **which buildings**.
-Stacked in one scroller with the islands on top, the roster is never on screen
-when Setup opens on a 390x844 phone, and the Reactors tab behind it is 24
-cards.
+The panel holds three unrelated jobs — **which island**, **which buildings** and
+**the Time Lab** (research, then anomaly). Stacked in one scroller with the islands on top, the roster is
+never on screen when Setup opens on a 390x844 phone, and the Reactors tab behind
+it is 24 cards.
+
+The Time Lab is a tab rather than a row somewhere because it is a third input of
+the same kind, not a qualifier on either of the other two: it changes what a run
+comes back with, it is set once and then tried against island after island, and
+it needs room — four cards, each with the game's own icon and wording. Three
+labels do fit a 374px phone, but only because each may ellipsize (`min-width: 0`
+on the buttons).
 
 `uiState.setupTab` picks between them and `ConfigSidebar` renders the switch and
 the body as **snippets**, used by both shells: a sheet and a docked column differ
 in their chrome and their gesture, never in this. Four things about it:
 
-- **It defaults to `islands`, and is not persisted.** The roster is set once; the
-  same roster is then tried against one island after another, so the island list
-  is the recurring task. This is view state, not a preference.
+- **It defaults to `islands`, and is not persisted.** The roster and the Time Lab
+  are set once; both are then tried against one island after another, so the
+  island list is the recurring task. This is view state, not a preference.
 - **The switch sits between the fixed top region and the scroller.** Inside
   `.sheet-top` it would inflate the measured `peekHeight`; inside `.scroll-body`
   it would scroll away, and the one control that says where you are is the last
@@ -1535,6 +1718,7 @@ drifts to twelve-odd hues — a Share button wearing the colour the board uses f
 | `--status-idle` | the board only: this building is doing nothing.             |
 | `--danger`      | the board: overheating. In the UI: this destroys something. |
 | `--warn`        | a limit is reached, or this board is not yours to edit.     |
+| `--anomaly-*`   | Setup's Anomaly tab only, and nowhere else.                 |
 
 **The two board readings are reserved, and that is the whole point.** The pad under
 every building, the pulse that breathes it and the readout in the corner all speak
@@ -1553,6 +1737,85 @@ is most of the header.
 One hue sits outside the law and says so in the file: `--heart`, for the donate
 button, because a donate heart is pink everywhere on the web and `--danger` would
 tell the user the button breaks something.
+
+**The anomaly cards' green/red pair is the second exception, and it is a
+narrower one.** `--benefit-*` and `--drawback-*` are sampled from the game's own
+"Choose an anomaly" screen — both stripe fills and the text on each — because
+that is the one screen in the app mirroring a screen in the game: the player has
+just chosen there and is confirming here, so the pairing they read a moment ago
+is worth more than a palette of our own. They are **not** `--status-ok` and
+`--danger`, which stay reserved to the board, and reusing those would not even
+have looked right: the board speaks as a saturated accent on a dark ground, these
+are muted fills carrying near-white text. A player meets them as panels, not as
+status lights, which is what keeps the reservation honest.
+
+**`--anomaly-selected` is the sharper half of that exception**, because `--neon`
+means selected everywhere else and on this list it does not: the chosen card is
+ringed in the game's own green. Two selection colours is a real cost, and it is
+taken for the same reason and stretches no further — showing a player their own
+choice in a colour they will not recognise from the screen they made it on is the
+larger one. Nothing outside `AnomalySelector` may take it.
+
+**Three surfaces go purple while an anomaly is selected** — Setup on *every*
+tab, the readout, and Run in the HUD — all reading `configState.hasAnomaly`, so
+it is one signal rather than three effects. Keyed on the selection and not on
+the Anomaly tab, because that is what it says: this timeline is not running the
+ordinary rules, and the island list, the roster and the board's figures are all
+read under them. Nothing selected puts every one of them back to navy, which is
+the common case. Each surface keeps **its own alpha** — sheet 0.97, docked panel
+0.88, readout 0.94 — which is why `--anomaly-panel-rgb` is a bare triplet rather
+than a colour: one decision, not three tokens.
+
+The type and chrome follow by **re-pointing the inherited tokens** on each container — `ConfigSidebar`
+and `BoardStatsCard` re-point `--text`, `--text-muted`, `--text-dim` and
+`--border` at the `--anomaly-*` values, plus `--border-neon`, `--neon-faint` and
+`--surface-panel-solid` on Setup, so every hairline and the roster's sticky bar
+go along too — and no component learns that anomalies exist.
+
+Setup re-points the **whole `--neon` family** on top of that, so every mark
+inside it that means "selected" goes purple with the ground: the SETUP heading,
+the active tab's label and underline, the chosen island's row, the roster's
+category pills. The `--anomaly-neon-*` tokens mirror the `--neon-*` ones name for
+name so the mapping reads straight down. They are a **lighter** purple than
+`--anomaly-accent`, and that is forced: cyan earns its prominence by contrast,
+and the badge purple reads 3.3:1 against this panel — right as a stroke on the
+dark collapse handle, unreadable as a heading. `#c9a5f0` puts back the 6.5:1 the
+cyan had.
+
+That leaves two purples meaning "selected" inside the panel, which is deliberate:
+the lavender is the **app** saying which tab or row you are on, while the green
+ring on an anomaly card is the **game's**, and the card is a second view of the
+game's own chooser.
+
+One thing is deliberately **not** re-pointed: the **board's own reds and ambers**
+in the readout. They mean the same thing under every anomaly, and an anomaly is
+precisely when a player most needs them to.
+
+Two of the three text values are **lifted** off what the game uses — its
+secondary lavender measures 3.8:1 on this panel, under AA, the same trap
+`--text-dim` was lifted out of once already. The cards on it are the game's, so the ground
+under them goes along rather than leaving them floating on a navy belonging to
+the rest of the panel. Each shell keeps its **own** alpha — the sheet 0.97, the
+docked panel 0.88 — so the hue changes and how much board shows through does
+not; and the docked foot darkens rather than keeping its navy tint, which would
+fight the purple. It is a view, not a mode: nothing else in the app reads it.
+
+**Run in the HUD takes the colour too**, and Stop is untouched: a stop is
+destructive of the run in progress whatever rules it began under. The docked panel's collapse handle takes it on the
+same condition, which is what keeps it from ever sitting purple against a navy
+panel.
+
+Run and the handle take **different purples**, and that is a contrast rule rather than a
+taste one: `--anomaly-accent` is the game's badge purple for strokes and glyphs
+on a dark ground, where brighter is more legible, while `--anomaly-action` is a
+fill behind white text, where brighter is less — the badge purple carries white
+at 4.0:1, so the filled pair sits two steps down the same ramp.
+
+That list also **stays compact until a card is chosen** — the unselected size is
+the default and `.active` is what loosens it (a larger icon, roomier panels, and
+the full rule). Three of the four describe a timeline nobody is in, and sizing it
+this way makes the selected card obvious by shape as well as by colour, which is
+the reading that survives a colourblind viewer.
 
 ### Overflow and viewport rules
 

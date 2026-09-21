@@ -249,6 +249,7 @@ describe("hand-placed scorer matches the solver", () => {
       effectiveValue: VALUES[id],
       energy: "energy" in tier ? tier.energy : 0,
       waste: "waste" in tier ? (tier.waste ?? 0) : 0,
+      baseValue: VALUES[id],
     };
   }
 

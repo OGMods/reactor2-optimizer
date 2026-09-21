@@ -8,7 +8,8 @@ the terminal.
 ```
 packages/solver/
   src/solver/     the engine: types, island split, simulation, distribution, search
-  src/data/       the authored building tables, the shipped island codes, unlock resolution
+  src/data/       the authored building tables, the anomaly table, the shipped island codes,
+                  unlock resolution
   src/encoding/   the blueprint wire format
   src/utils/      the game's number ladder
   src/grid.ts     tile predicates and the ASCII alphabet the tests are written in
@@ -66,6 +67,71 @@ nothing else.
 Search _tuning_ constants (`SWAP_RADIUS`, `POLISH_SHARE`, and the rest) deliberately stay private
 to `placementSearch.ts` rather than moving to `constants.ts`: they are meaningless apart from the
 stage they tune.
+
+### `anomalies.ts` — the prestige rule changes
+
+A timeline runs under exactly one anomaly, and `"none"` is one of them rather than an absence, so
+every consumer branches on a field instead of on `undefined`. `AnomalyDefinition` is a tagged
+union over the **rule shape** (`baseline`, `shared_cooling`, `terrain_affinity`,
+`role_isolation`), not over the anomaly's identity: the game ships these in batches and most of a
+batch is an existing rule with different numbers, which this makes a table entry — while a
+genuinely new rule is a variant the solver fails to compile without handling.
+
+Unlike `BUILDING_TABLE` beside it, the table is **hand-owned**. The game does ship an
+`*AnomalySO` per anomaly and the external extractor dumps them alongside the roster — but all one
+of those records carries is an id, four localized terms and the multipliers. Which *rule* a
+multiplier belongs to is not in the data at all: a shared cooling pool and a shoreline bonus are
+both "one double" to it. So the extract is what each entry's numbers and its quoted `description`
+are checked against, and the `rule` tag stays a human's reading of the text.
+
+Two things about the shapes are load-bearing:
+
+- **Every stat anomaly is a _uniform_ scale.** "Energy, Heat, Cooling, and overheat capacity" is
+  four names for one field each across the four roles, so a bonus is a building whose whole tier
+  is worth more — `scaleEffectiveBuilding` is the one place that applies it, and one function
+  covers every such anomaly there will be. It is not free power: a scaled producer needs
+  proportionally more cooling and goes offline just as readily.
+- **`role_isolation` depends on the layout, the other shapes do not.** A terrain bonus is fixed
+  per tile and can be folded into the board; a generator's isolation multiplier changes every
+  time the search moves a neighbour, so a placed building's figures have to be resolved per
+  layout.
+
+`shared_cooling` is the odd one out entirely, and it is the one that costs this package
+something. **Its pool is the whole board** — the game's "island" is the map, Gale Hills and Ash
+Bay, and "cooling does not carry over to other islands" means it does not carry to a different
+map. So under Cryo Nexus the islands `splitGridIntoIslands` produces are **not independent**,
+which is the assumption the worker pool, the per-island budget split, `IslandBest` and
+`variants.ts` all rest on.
+
+What survives is more than it sounds. Heat stays adjacency-bound, so how much power an island can
+make is still a question about that island alone; the islands are coupled by exactly two scalars,
+the cooling they contribute and the waste they generate, and the board runs only if the first sums
+over the second. An island is therefore no longer described by "its best power" but by a frontier —
+power against net cooling it puts into or takes out of the pool — and the board-level problem is to
+combine those frontiers under one scalar budget. That keeps the per-island parallelism; it changes
+what a worker is asked for.
+
+Two smaller effects: the board is all-or-nothing **together** (every power source gets the same
+percentage, and a partial percentage runs nothing), and patches below the minimum island size come
+alive, since a lone tile's producer can be cooled from anywhere. The second is worth little — the
+shipped maps lose 0 to 6 tiles that way, on boards of 49 to 184.
+
+`docs/game-logic.md` has the rules. Nothing about them is unconfirmed now: a pond is an obstacle
+and grants no shore bonus, and the Tidal bonus lands on 36-44% of the grass of every shipped map.
+
+### `island.ts` — the window an island is solved in
+
+An `IslandSubGrid` is the component's bounding box **padded by one tile on every side**, carrying
+the board's **real terrain** rather than a flattened "not mine" marker, plus a `buildable` mask.
+
+All three are for terrain rules. A rule can care what a building stands next to, a rock is not a
+lake, and a building on the island's own edge has neighbours outside the component's bare box.
+Real terrain in a padded window means a *neighbouring* island's grass falls inside it, so **which
+tiles are this island's is the mask, never `type === "grass"`** — `buildIslandContext` takes it
+and `tileCount` is the count that goes with it.
+
+The padding changes tile coordinates uniformly, so it changes no result: the fixtures reproduce
+byte for byte across it.
 
 ### `distribution.ts` — a port of Unity's `FlowNetwork.cs`
 

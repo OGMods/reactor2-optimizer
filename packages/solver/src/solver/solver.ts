@@ -5,10 +5,13 @@ import {
   splitGridIntoIslands,
 } from "./island";
 import { solveIsland, type IslandSolution } from "./placementSearch";
+import { getAnomaly } from "../data/anomalies";
 import { getEffectiveBuildings } from "../data/effectiveBuildings";
 import type {
+  AnomalyDefinition,
   BuildingDefinition,
   EffectiveBuilding,
+  PrestigeScales,
   IslandSubGrid,
   OptimizationResult,
   PlacedBuilding,
@@ -31,6 +34,12 @@ export const DEFAULT_TIME_BUDGET_S = 10.0;
 export interface IslandPlan {
   islands: IslandSubGrid[];
   effectiveBuildings: EffectiveBuilding[];
+  /**
+   * The rules every island is solved under. Resolved here so both solve paths
+   * and the worker pool hand the same object down, and never `undefined` —
+   * "no anomaly" is one of them.
+   */
+  anomaly: AnomalyDefinition;
   /** Per-island time budget, proportional to buildable-tile count. */
   budgetsS: number[];
   /** Per-island RNG seed, or undefined for a fresh stochastic stream. */
@@ -54,6 +63,8 @@ export function planSolve(
   unlockedUpgrades: Record<string, number>,
   timeBudgetS: number,
   rngSeed?: number,
+  anomalyId?: string,
+  prestige?: PrestigeScales,
 ): IslandPlan | null {
   if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0)
     return null;
@@ -61,7 +72,13 @@ export function planSolve(
   const totalGrassTiles = countGrassTiles(grid);
   if (totalGrassTiles === 0) return null;
 
-  const effectiveBuildings = getEffectiveBuildings(buildings, unlockedUpgrades);
+  // Research folds in here, at the one place the roster is resolved, so every
+  // island and every attempt is handed the same already-scaled buildings.
+  const effectiveBuildings = getEffectiveBuildings(
+    buildings,
+    unlockedUpgrades,
+    prestige,
+  );
   if (effectiveBuildings.length === 0) return null;
 
   const islands = splitGridIntoIslands(
@@ -70,12 +87,17 @@ export function planSolve(
   );
   if (islands.length === 0) return null;
 
-  const grassCounts = islands.map((island) => countGrassTiles(island.grid));
+  const grassCounts = islands.map((island) => island.tileCount);
   const totalIslandGrass = grassCounts.reduce((a, b) => a + b, 0) || 1;
 
   return {
     islands,
     effectiveBuildings,
+    // Taken by id rather than as a definition, because that is also the
+    // worker protocol's form: an id is a string that survives any
+    // boundary, and `getAnomaly` is total, so one from a newer save
+    // resolves to the base rules instead of arriving half understood.
+    anomaly: getAnomaly(anomalyId),
     budgetsS: grassCounts.map(
       (count) => timeBudgetS * (count / totalIslandGrass),
     ),
@@ -191,6 +213,8 @@ export async function solve(
     unlockedUpgrades,
     timeBudgetS,
     rngSeed,
+    options?.anomalyId,
+    options?.prestige,
   );
   if (!plan)
     return createEmptyResult(grid?.[0]?.length ? countGrassTiles(grid) : 0);
@@ -214,6 +238,7 @@ export async function solve(
         },
       },
       plan.seeds[i],
+      plan.anomaly,
     );
     options?.onProgress?.(buildOptimizationResult(plan, islandResults));
   }

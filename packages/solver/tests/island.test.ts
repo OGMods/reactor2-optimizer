@@ -192,7 +192,16 @@ describe("coordinate remapping", () => {
 
     expect(island.grid[0][0].x).toBe(0);
     expect(island.grid[0][0].y).toBe(0);
-    expect([island.width, island.height]).toEqual([3, 2]);
+    // The window is the component's box (x 1-3, y 1-2) padded a tile on every
+    // side and clamped to the board, so it holds every neighbour of every
+    // island tile — which is what a terrain rule has to be able to read.
+    expect([island.width, island.height]).toEqual([5, 3]);
+    expect(island.tileCount).toBe(6);
+    // Padding brings in tiles that are not this island's, so membership is the
+    // mask rather than the terrain.
+    expect([...island.buildable]).toEqual([
+      0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0,
+    ]);
   });
 });
 
@@ -237,6 +246,8 @@ describe("the theoretical max-power bound", () => {
       width: 0,
       height: 0,
       grid: [],
+      buildable: new Uint8Array(0),
+      tileCount: 0,
       originalTileIndices: [],
     };
 

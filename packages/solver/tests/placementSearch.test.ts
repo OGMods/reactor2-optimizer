@@ -106,10 +106,10 @@ describe("the solveIsland contract", () => {
   // Whatever the search decides, the result must be structurally valid.
 
   it("returns nothing for an island with no buildable tiles", async () => {
+    // Which tiles are this island's is the mask, not the terrain — an island
+    // window carries the board's real terrain and a neighbour's grass with it.
     const island = islandFrom(["GGG"]);
-    for (const row of island.grid) {
-      for (const tile of row) tile.type = "water";
-    }
+    island.buildable.fill(0);
 
     const { placements, powerOutput } = await solveIsland(
       island,

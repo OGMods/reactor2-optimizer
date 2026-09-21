@@ -23,7 +23,10 @@ import { describe, expect, it } from "vitest";
 import { BUILDINGS } from "../src/data/buildings";
 import { makeGrid } from "../src/grid";
 import {
+  BLUEPRINT_VERSION,
+  MIN_GRID_DIM,
   blueprintKey,
+  blueprintRules,
   decodeBlueprint,
   encodeBlueprint,
   type BlueprintPlacement,
@@ -224,18 +227,19 @@ describe("tier table", () => {
       cooler1: 3,
     });
 
-    //                                    w  h  tiles  n  [byte, level]
-    expect(await payloadOf(code)).toEqual([2, 1, 10, 1, 1, 10, 3]);
+    //                                    v  w  h  tiles  n  [byte, level]
+    expect(await payloadOf(code)).toEqual([1, 2, 1, 10, 1, 1, 10, 3]);
   });
 
-  it("leaves the payload untouched when no tiers are given", async () => {
-    // This is what let `blueprintKey` keep its meaning across the change: a
-    // code encoded without tiers is byte for byte what it always was.
+  it("appends nothing when no tiers are given", async () => {
+    // What lets `blueprintKey` keep its meaning: a code encoded without tiers
+    // is the header and the tiles and nothing else.
     const board = grid(3, 2);
     const placements = [place(1, 0, "cooler1")];
 
+    //                v  w  h  tiles
     expect(await payloadOf(await encodeBlueprint(board, placements))).toEqual([
-      3, 2, 1, 10, 1, 1, 1, 1,
+      1, 3, 2, 1, 10, 1, 1, 1, 1,
     ]);
   });
 
@@ -303,5 +307,176 @@ describe("tier table", () => {
 
     expect(decoded.tiers).toEqual({});
     expect(decoded.placements).toEqual(placements);
+  });
+});
+
+describe("the rules section", () => {
+  /*
+   * The anomaly and the research a board was built under. Everything here is a
+   * way the section fails *quietly*: a reader that mistakes "unstated" for
+   * "none" rates someone else's board at nothing and still shows a number, and
+   * one that starts reading at the wrong offset finds an anomaly where a tier
+   * was. Neither throws.
+   */
+  const GRID = makeGrid(["GG", "GG"]);
+
+  it("round-trips the anomaly and the research", async () => {
+    const code = await encodeBlueprint(
+      GRID,
+      [],
+      {},
+      blueprintRules("cryo_nexus", { absolute_zero: 2, stellar_forge: 4 }),
+    );
+    const decoded = await decodeBlueprint(code);
+
+    expect(decoded.rules).toEqual({
+      anomalyId: "cryo_nexus",
+      research: { absolute_zero: 2, stellar_forge: 4 },
+    });
+  });
+
+  it("distinguishes 'no rules stated' from 'no anomaly and no research'", async () => {
+    // The whole reason `rules` is nullable. A save states nothing and must pick
+    // up the reader's own; a share code can state emptiness and mean it.
+    const silent = await decodeBlueprint(await encodeBlueprint(GRID, []));
+    expect(silent.rules).toBeNull();
+
+    const explicit = await decodeBlueprint(
+      await encodeBlueprint(GRID, [], undefined, blueprintRules("none", {})),
+    );
+    expect(explicit.rules).toEqual({ anomalyId: "none", research: {} });
+  });
+
+  it("writes a tier count byte ahead of rules given no tiers", async () => {
+    // The section is read only after the tier table, so rules without that byte
+    // would be read as a tier table. Zero there means "tiers unknown", which is
+    // what a code with no tiers has always meant.
+    const code = await encodeBlueprint(
+      GRID,
+      [],
+      undefined,
+      blueprintRules("tidal_ascendancy", {}),
+    );
+    const payload = await payloadOf(code);
+
+    expect(payload.slice(0, 3)).toEqual([1, 2, 2]);
+    // tiles, then the zero tier count, then the anomaly byte and a zero
+    // research count.
+    expect(payload.slice(7)).toEqual([0, 2, 0]);
+
+    const decoded = await decodeBlueprint(code);
+    expect(decoded.tiers).toEqual({});
+    expect(decoded.rules?.anomalyId).toBe("tidal_ascendancy");
+  });
+
+  it("reads rules that sit after a real tier table", async () => {
+    const placements: BlueprintPlacement[] = [
+      { x: 0, y: 0, buildingId: "cooler1" },
+    ];
+    const decoded = await decodeBlueprint(
+      await encodeBlueprint(
+        GRID,
+        placements,
+        { cooler1: 3 },
+        blueprintRules("singularity_isolation", { infinite_grid: 1 }),
+      ),
+    );
+
+    expect(decoded.tiers).toEqual({ cooler1: 3 });
+    expect(decoded.rules).toEqual({
+      anomalyId: "singularity_isolation",
+      research: { infinite_grid: 1 },
+    });
+  });
+
+  it("reads an unknown anomaly byte as no anomaly", async () => {
+    // A code from a later build naming an anomaly this one has never heard of.
+    // The same fallback `getAnomaly` makes, and the only safe one.
+    const decoded = await decodeBlueprint(
+      codeFor([1, 2, 2, 1, 1, 1, 1, 0, 200, 0]),
+    );
+    expect(decoded.rules?.anomalyId).toBe("none");
+  });
+
+  it("drops a truncated rules section rather than the layout", async () => {
+    // A count that outruns the payload. The tiles are the part that cannot be
+    // reconstructed and they have already been read.
+    const decoded = await decodeBlueprint(
+      codeFor([1, 2, 2, 1, 1, 1, 1, 0, 1, 9]),
+    );
+    expect(decoded.grid).toHaveLength(2);
+    expect(decoded.rules).toEqual({ anomalyId: "cryo_nexus", research: {} });
+  });
+
+  it("keeps rules out of the layout key", async () => {
+    // `blueprintKey` answers "is this the same layout?" — the same reason tiers
+    // are not in it. Choosing an anomaly must not read as a repainted board.
+    const withRules = await encodeBlueprint(
+      GRID,
+      [],
+      {},
+      blueprintRules("cryo_nexus", { absolute_zero: 4 }),
+    );
+    expect(await payloadOf(withRules)).not.toEqual(
+      [...blueprintKey(GRID, [])].map((c) => c.charCodeAt(0)),
+    );
+    expect(blueprintKey(GRID, [])).toBe(blueprintKey(GRID, []));
+  });
+});
+
+describe("the format version byte", () => {
+  /*
+   * A code written before the byte existed begins with its width, so the two
+   * are told apart by value: below `MIN_GRID_DIM` is a version, at or above it
+   * is a width. Nothing here throws when it goes wrong — a legacy code read as
+   * versioned is off by one byte from its second tile onward, which is a
+   * different board, not an error. That is what these pin.
+   */
+  it("writes the current version as byte 0", async () => {
+    const payload = await payloadOf(await encodeBlueprint(grid(6, 1)));
+    expect(payload[0]).toBe(BLUEPRINT_VERSION);
+    expect(payload.slice(0, 3)).toEqual([BLUEPRINT_VERSION, 6, 1]);
+  });
+
+  it("still reads a code written before the byte existed", async () => {
+    // Byte 0 is 6 — too big to be a version, so this is a width and the tiles
+    // start at byte 2. Every share code and saved layout in the wild is one of
+    // these.
+    const decoded = await decodeBlueprint(codeFor([6, 1, 1, 1, 2, 1, 1, 1]));
+
+    expect([decoded.width, decoded.height]).toEqual([6, 1]);
+    expect(decoded.grid[0].map((t) => t.type)).toEqual([
+      "grass",
+      "grass",
+      "rock",
+      "grass",
+      "grass",
+      "grass",
+    ]);
+    expect(decoded.rules).toBeNull();
+  });
+
+  it("reads a legacy code at the narrowest board that can exist", async () => {
+    // The boundary the whole scheme rests on: a width of exactly
+    // `MIN_GRID_DIM` must still read as a width, not as a version.
+    const tiles = new Array(MIN_GRID_DIM).fill(1);
+    const decoded = await decodeBlueprint(codeFor([MIN_GRID_DIM, 1, ...tiles]));
+    expect(decoded.width).toBe(MIN_GRID_DIM);
+  });
+
+  it("refuses a version it does not know rather than guessing", async () => {
+    // Reading a later payload as this one would not fail — the tiles are
+    // positional — so it would quietly hand back a different board.
+    await expect(
+      decodeBlueprint(codeFor([BLUEPRINT_VERSION + 1, 2, 2, 1, 1, 1, 1])),
+    ).rejects.toThrow(/format version/);
+  });
+
+  it("encodes boards smaller than the legacy floor", async () => {
+    // `MIN_GRID_DIM` constrains which *old* codes are recognisable, not what a
+    // board may be: a versioned code says its width where no value is
+    // ambiguous, which is what the 4x4 fixtures rely on.
+    const decoded = await decodeBlueprint(await encodeBlueprint(grid(2, 2)));
+    expect([decoded.width, decoded.height]).toEqual([2, 2]);
   });
 });

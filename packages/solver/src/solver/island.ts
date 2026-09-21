@@ -114,14 +114,25 @@ export function splitGridIntoIslands(
 
       if (component.length < minTilesRequired) continue;
 
-      // 3. Extract bounding dimensions and build the sub-grid mapping
-      const subWidth = maxX - minX + 1;
-      const subHeight = maxY - minY + 1;
+      // 3. Window the board around the component and build the sub-grid.
+      //
+      // Padded by one tile on every side so that every neighbour of every
+      // island tile is inside the window: a rule that reads terrain (a shore
+      // bonus, say) has to be answerable for a building on the island's own
+      // edge, and the component's bare bounding box cuts exactly those
+      // neighbours off.
+      const padMinX = minX > 0 ? minX - 1 : 0;
+      const padMinY = minY > 0 ? minY - 1 : 0;
+      const padMaxX = maxX < originalWidth - 1 ? maxX + 1 : maxX;
+      const padMaxY = maxY < originalHeight - 1 ? maxY + 1 : maxY;
+
+      const subWidth = padMaxX - padMinX + 1;
+      const subHeight = padMaxY - padMinY + 1;
       const inComponent = new Uint8Array(subWidth * subHeight);
       for (const flat of component) {
         const cx = flat % originalWidth;
         const cy = (flat - cx) / originalWidth;
-        inComponent[(cy - minY) * subWidth + (cx - minX)] = 1;
+        inComponent[(cy - padMinY) * subWidth + (cx - padMinX)] = 1;
       }
 
       const subGridTiles: Tile[][] = [];
@@ -129,16 +140,15 @@ export function splitGridIntoIslands(
 
       for (let subY = 0; subY < subHeight; subY++) {
         const row: Tile[] = [];
-        const origY = minY + subY;
+        const origY = padMinY + subY;
         for (let subX = 0; subX < subWidth; subX++) {
-          const origX = minX + subX;
+          const origX = padMinX + subX;
           const localFlat = subY * subWidth + subX;
           originalTileIndices[localFlat] = origY * originalWidth + origX;
-          row.push({
-            x: subX,
-            y: subY,
-            type: inComponent[localFlat] ? "grass" : "water",
-          });
+          // The board's own terrain, not a "mine / not mine" flag — that is
+          // what `inComponent` is, and it is carried separately because a
+          // neighbouring island's grass is real grass and still not ours.
+          row.push({ x: subX, y: subY, type: grid[origY][origX].type });
         }
         subGridTiles.push(row);
       }
@@ -147,6 +157,8 @@ export function splitGridIntoIslands(
         width: subWidth,
         height: subHeight,
         grid: subGridTiles,
+        buildable: inComponent,
+        tileCount: component.length,
         originalTileIndices,
       });
     }
@@ -183,7 +195,7 @@ function estimateIslandMaxPower(
   island: IslandSubGrid,
   roster: EffectiveBuilding[],
 ): number {
-  const buildableTiles = countGrassTiles(island.grid);
+  const buildableTiles = island.tileCount;
   if (buildableTiles <= 0) return 0.0;
 
   let cVal = 0.0;

@@ -31,7 +31,8 @@ import { solverState } from "./solver.svelte";
  *
  * It lives here rather than on either singleton because it spans both: the
  * placements being restored need `configState`'s unlock levels to resolve their
- * base values, and `layoutState` deliberately does not import `configState`.
+ * base values and its Time Lab research to be rated under, and `layoutState`
+ * deliberately does not import `configState`.
  *
  * The last solve is re-hung afterwards, in that order because deciding whether
  * it is still valid means reading the board it was solved against.
@@ -45,6 +46,9 @@ import { solverState } from "./solver.svelte";
  * the same place a mistyped link should land them.
  */
 export async function hydrateState(): Promise<void> {
+  // Before the board exists, so the first score every placement gets is already
+  // under the player's research rather than a frame of unresearched figures.
+  layoutState.setPrestige(configState.prestige);
   await layoutState.hydrate(configState.buildingUpgrades);
 
   const shared = readSharedCode();

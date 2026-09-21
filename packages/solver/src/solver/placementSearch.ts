@@ -11,6 +11,7 @@ import { AlternateCollector, isDistinctLayout, powerTies } from "./alternates";
 import { Rng, randomSeed } from "./rng";
 import { simulateIsland, type SimPlacedBuilding } from "./simulate";
 import type {
+  AnomalyDefinition,
   EffectiveBuilding,
   IslandLayout,
   IslandSubGrid,
@@ -1751,7 +1752,9 @@ export async function replayIslandDeterministic(
   rngSeed: number,
   maxSteps: number,
 ): Promise<IslandSolution> {
-  const ctx = buildIslandContext(island.grid);
+  // No anomaly, and never one: the fixtures are a determinism harness for the
+  // search itself, and a rule change is a different question asked of it.
+  const ctx = buildIslandContext(island.grid, island.buildable);
   if (ctx.n === 0) return { placements: [], powerOutput: 0.0 };
 
   const reactors = effectiveBuildings
@@ -1812,8 +1815,9 @@ export async function solveIsland(
   timeBudgetS: number,
   hooks?: SearchHooks,
   rngSeed?: number,
+  anomaly?: AnomalyDefinition,
 ): Promise<IslandSolution> {
-  const ctx = buildIslandContext(island.grid);
+  const ctx = buildIslandContext(island.grid, island.buildable, anomaly);
   if (ctx.n === 0) return { placements: [], powerOutput: 0.0 };
 
   const reactors = effectiveBuildings

@@ -28,9 +28,11 @@ export * from "./solver/alternates";
 export * from "./solver/report";
 export * from "./solver/solver";
 
+export * from "./data/anomalies";
 export * from "./data/buildings";
 export * from "./data/effectiveBuildings";
 export * from "./data/maps";
+export * from "./data/prestige";
 
 export * from "./encoding/blueprint";
 export * from "./utils/formatters";

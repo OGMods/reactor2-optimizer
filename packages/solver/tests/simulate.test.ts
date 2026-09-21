@@ -136,6 +136,7 @@ describe("generator physics", () => {
       effectiveValue: 8.85e21,
       energy: 6.64e21,
       waste: snapToAuthoredPrecision(8.85e21 - 6.64e21),
+      baseValue: 8.85e21,
     };
 
     const { power, byPos } = run(["RGC"], {
@@ -159,6 +160,7 @@ describe("generator physics", () => {
       effectiveValue: 100,
       energy: 70,
       waste: 30,
+      baseValue: 100,
     };
 
     const { power, byPos } = run(["RGC"], {

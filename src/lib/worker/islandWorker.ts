@@ -1,4 +1,4 @@
-import { solveIsland } from "@reactor2/solver";
+import { getAnomaly, solveIsland } from "@reactor2/solver";
 import type {
   IslandWorkerRequest,
   IslandWorkerResponse,
@@ -43,6 +43,7 @@ self.addEventListener(
           },
         },
         req.rngSeed,
+        getAnomaly(req.anomalyId),
       );
       post({
         id: req.id,

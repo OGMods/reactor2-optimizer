@@ -1,10 +1,19 @@
 <script lang="ts">
-  import { uiState, viewportState } from "../../state";
+  import { configState, uiState, viewportState } from "../../state";
   import { type SheetDetent } from "../../state/ui.svelte";
   import TemplateSelector from "./TemplateSelector.svelte";
   import BuildingUnlockList from "./BuildingUnlockList.svelte";
   import SolveModeSelector from "./SolveModeSelector.svelte";
-  import { ChevronLeft, ChevronRight, Layers, X, Zap } from "lucide-svelte";
+  import AnomalySelector from "./AnomalySelector.svelte";
+  import PrestigeUpgrades from "./PrestigeUpgrades.svelte";
+  import {
+    ChevronLeft,
+    ChevronRight,
+    FlaskConical,
+    Layers,
+    X,
+    Zap,
+  } from "lucide-svelte";
 
   /*
    * The sheet's top region — grabber, header, run slot. Measured rather than
@@ -192,6 +201,20 @@
       <Zap size={15} />
       <span>Buildings</span>
     </button>
+    <!--
+      Named for the game's own screen rather than for either of the two things
+      on it: the research and the anomaly are both chosen in the Time Lab, and
+      a tab called "Anomaly" leaves the research with nowhere to be.
+    -->
+    <button
+      class="switch-btn"
+      class:active={uiState.setupTab === "timelab"}
+      aria-pressed={uiState.setupTab === "timelab"}
+      onclick={() => (uiState.setupTab = "timelab")}
+    >
+      <FlaskConical size={15} />
+      <span>Time Lab</span>
+    </button>
   </div>
 {/snippet}
 
@@ -203,8 +226,12 @@
   -->
   {#if uiState.setupTab === "islands"}
     <TemplateSelector />
-  {:else}
+  {:else if uiState.setupTab === "buildings"}
     <BuildingUnlockList />
+  {:else}
+    <!-- Research first: it applies under every anomaly, including none. -->
+    <PrestigeUpgrades />
+    <AnomalySelector />
   {/if}
 {/snippet}
 
@@ -216,6 +243,7 @@
   -->
   <aside
     class="sheet"
+    class:anomalous={configState.hasAnomaly}
     class:dragging={dragHeight !== null}
     style:height="{sheetHeight}px"
     style:transform="translateY({translateY}px)"
@@ -284,6 +312,7 @@
   <!-- ── Docked sidebar ─────────────────────────────────────────── -->
   <aside
     class="sidebar"
+    class:anomalous={configState.hasAnomaly}
     class:collapsed={uiState.sidebarCollapsed}
     bind:clientWidth={sidebarWidth}
   >
@@ -354,10 +383,13 @@
 
   .switch-btn {
     flex: 1;
+    /* Three of these share a 380px panel and a 374px phone, so a long label
+       has to be allowed to shrink rather than widening the row past it. */
+    min-width: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
+    gap: 0.35rem;
     height: var(--ctl);
     background: none;
     border: none;
@@ -371,6 +403,12 @@
     letter-spacing: 0.3px;
     cursor: pointer;
     transition: all var(--dur-fast) var(--ease);
+  }
+
+  .switch-btn span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .switch-btn:hover {
@@ -427,6 +465,16 @@
     z-index: var(--z-sheet);
     display: flex;
     flex-direction: column;
+    /*
+     * Purple whenever an anomaly is selected — see `--anomaly-panel-rgb` in
+     * `app.css` — on every tab, not just the one that chose it.
+     *
+     * Keyed on the selection rather than on the tab because that is what it
+     * says: this timeline is not running the ordinary rules, and the island
+     * list and the roster are read under those rules too. Run in the HUD reads
+     * the same state, so the two agree. Nothing is selected -> the panel is
+     * plain navy again, which is the common case.
+     */
     background: rgba(10, 14, 23, 0.97);
     backdrop-filter: blur(16px);
     border-top: 1px solid var(--border-neon);
@@ -435,9 +483,53 @@
     /* Nothing inside may paint outside the sheet — the belt to `min-height`'s
        braces, and it makes the top corners clip properly too. */
     overflow: hidden;
-    transition: transform var(--dur) var(--ease);
+    transition:
+      transform var(--dur) var(--ease),
+      background var(--dur) var(--ease);
     /* Content clears the home indicator when pulled up. */
     padding-bottom: var(--safe-bottom);
+  }
+
+  .sheet.anomalous {
+    background: rgba(var(--anomaly-panel-rgb), 0.97);
+  }
+
+  /*
+   * ── The Anomaly tab's type ────────────────────────────────────
+   * Re-pointing the inherited tokens rather than restyling anything: every
+   * descendant already reads `--text` / `--text-dim` / `--border`, so the whole
+   * subtree — the switch, the cards, the run control in the foot — follows the
+   * purple ground without one component learning that this tab exists.
+   *
+   * `--neon` is deliberately NOT re-pointed. It says which tab you are on, and
+   * that is app navigation rather than anything the game's chooser has an
+   * opinion about; the green on a card says which anomaly, which is a different
+   * question and keeps a colour of its own.
+   */
+  .sheet.anomalous,
+  .sidebar.anomalous {
+    --text: var(--anomaly-text);
+    --text-muted: var(--anomaly-text-muted);
+    --text-dim: var(--anomaly-text-dim);
+    --border: var(--anomaly-border);
+    /*
+     * And the whole `--neon` family, which inside this panel is every mark
+     * that says "selected" — the SETUP heading, the active tab's label and
+     * underline, the chosen island's row, the roster's category pills. Cyan is
+     * the app's selection colour against its own navy; on this ground it is a
+     * leftover. One line per token, same order as `app.css` declares them.
+     */
+    --neon: var(--anomaly-neon);
+    --neon-strong: var(--anomaly-neon-strong);
+    --neon-dim: var(--anomaly-neon-dim);
+    --neon-line: var(--anomaly-neon-line);
+    --neon-glow: var(--anomaly-neon-glow);
+    --neon-bg: var(--anomaly-neon-bg);
+    --neon-faint: var(--anomaly-neon-faint);
+    --border-neon: var(--anomaly-border-neon);
+    /* The roster's sticky category bar, which must stay opaque — it would
+       otherwise pin a navy bar across a purple panel. */
+    --surface-panel-solid: var(--anomaly-panel-solid);
   }
 
   /* No transition while a finger is down — it must track the finger 1:1. */
@@ -541,6 +633,9 @@
     border-left: none;
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     color: var(--neon);
+    transition:
+      border-color var(--dur) var(--ease),
+      color var(--dur) var(--ease);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -560,11 +655,29 @@
     display: flex;
     flex-direction: column;
     background: var(--surface-panel);
+    transition: background var(--dur) var(--ease);
     backdrop-filter: blur(14px);
     border: 1px solid var(--border-neon);
     border-radius: var(--radius);
     overflow: hidden;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+
+  .sidebar.anomalous .sidebar-panel {
+    background: rgba(var(--anomaly-panel-rgb), 0.88);
+  }
+
+  /*
+   * The handle goes with the panel it hangs off, which is now the same
+   * condition Run reads — so the whole signal is one state and there is no tab
+   * on which a purple handle meets a navy panel.
+   *
+   * `--anomaly-accent` rather than the filled `--anomaly-action`: this is a
+   * stroke and a glyph on a dark ground, which is the brighter of the two.
+   */
+  .sidebar.anomalous .toggle-handle {
+    border-color: var(--anomaly-accent-dim);
+    color: var(--anomaly-accent);
   }
 
   .sidebar-head {
@@ -573,10 +686,20 @@
     flex-shrink: 0;
   }
 
+  /*
+   * The foot tints itself navy to sit apart from the panel, which fights a
+   * purple one. On this tab it darkens instead — a neutral that separates the
+   * run control from either ground without naming a colour of its own.
+   */
+  .sidebar.anomalous .sidebar-foot {
+    background: rgba(0, 0, 0, 0.22);
+  }
+
   .sidebar-foot {
     padding: 0.75rem 1rem;
     border-top: 1px solid var(--neon-faint);
     background: rgba(15, 23, 42, 0.6);
+    transition: background var(--dur) var(--ease);
     flex-shrink: 0;
   }
 </style>

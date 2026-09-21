@@ -10,10 +10,25 @@ import type { PlacedBuilding, Tile, TileType } from "../solver/types";
  *
  * Wire format, before deflate + base64url:
  *
- *   byte 0        grid width
- *   byte 1        grid height
- *   byte 2..      one byte per tile, row-major
+ *   byte 0        format version
+ *   byte 1        grid width
+ *   byte 2        grid height
+ *   byte 3..      one byte per tile, row-major
  *   [tier table]  optional, see below
+ *   [rules]       optional, see below
+ *
+ * **The version byte, and how a code without one is recognised.** Codes written
+ * before it existed begin with the width, so the two are told apart by value
+ * rather than by a flag: a board is at least `MIN_GRID_DIM` (5) tiles on a
+ * side, so a first byte *below* that cannot be a width and is a version.
+ * Versions therefore have five usable values before the trick runs out, which
+ * is ample for a format whose last two changes were both appended optional
+ * sections — and if it ever is not, version 4 can spend a byte on a longer
+ * header.
+ *
+ * This is why `MIN_GRID_DIM` lives in this package rather than in the size
+ * stepper that enforces it: it stopped being a UI limit the moment the wire
+ * format began reading codes by it.
  *
  * Each tile byte is either a terrain id (0-6) or a building id (10+). A
  * building byte implies the tile beneath it is grass, which is the only terrain
@@ -48,6 +63,29 @@ import type { PlacedBuilding, Tile, TileType } from "../solver/types";
  * `#applySaved` and `rebasePlacements` both apply. Freezing tiers into the
  * save would put those two in permanent disagreement.
  *
+ * **The rules section.** Tiers say what the buildings were, and that is no
+ * longer the whole story: the timeline's anomaly and its Time Lab research
+ * change what those same tiers are worth, so a board shared out of a
+ * ×5-cooling timeline is not the board a reader without that research would
+ * get. One more optional section carries them:
+ *
+ *   byte a        anomaly id byte
+ *   byte a+1      m — how many research entries follow
+ *   then m pairs  [research byte][level index]
+ *
+ * It follows the tier table and is read only after it, so **a code carrying
+ * rules must carry a tier count byte first**, even a zero one. That costs a
+ * byte and buys a strictly sequential parse; writing a zero count is not a
+ * contradiction, since an empty table already means "tiers unknown" rather
+ * than "tiers are zero".
+ *
+ * Optional in both directions on the same terms as the tier table: an older
+ * code stops earlier, an older reader stops earlier, and **no rules section
+ * means "rules unknown"** — never "no anomaly and no research", which is a
+ * thing a code can also say explicitly and is not the same claim. Share codes
+ * carry it; saved layouts do not, for the reason above — a save should pick up
+ * the research bought since, not argue with it.
+ *
  * This is the only layout format there is: island templates (`data/maps.ts`),
  * the app's saved layouts, share codes and the golden fixtures all use it.
  *
@@ -57,6 +95,66 @@ import type { PlacedBuilding, Tile, TileType } from "../solver/types";
  * different board. Append; never renumber. `tests/blueprint.test.ts` holds
  * every shipped building to a round-trip for exactly that reason.
  */
+
+/**
+ * The current format version, written as byte 0 of every new code.
+ *
+ * Bump it only for a change a reader cannot absorb by stopping early — the
+ * optional-section rule below covers appending, which is why this is still 1
+ * after two sections were added. A code naming a version this build does not
+ * know is refused rather than guessed at: the tiles are positional, so reading
+ * a later payload as this one would not fail, it would quietly produce a
+ * different board.
+ */
+export const BLUEPRINT_VERSION = 1;
+
+/**
+ * The smallest a board may be on either side, as the size stepper enforces it.
+ *
+ * It is a **wire constant** now rather than a UI one, because it is what makes
+ * a version byte distinguishable from the width byte an older code starts with.
+ * The claim it rests on is historical and settled: every code written before
+ * versioning came from a board at least this wide — the shipped islands are 13
+ * across at the narrowest, a blank custom island is 10, and the stepper has
+ * always clamped here.
+ *
+ * Note it constrains **old codes only**. A versioned code says its width in
+ * byte 1, where no value is ambiguous, so the fixtures' 4x4 test boards encode
+ * and decode perfectly well. Lowering this would not shrink any board; it would
+ * only make some old codes unreadable.
+ */
+export const MIN_GRID_DIM = 5;
+
+/**
+ * Anomaly and research ids, as bytes.
+ *
+ * The same **compatibility surface** as the building map below: renumber one
+ * and a code shared last month decodes as a different anomaly rather than
+ * failing. Append; never renumber. Both start their real entries at 1, leaving
+ * 0 free — for anomalies it is the genuine "no anomaly" choice, and for
+ * research it is a value no writer emits, so a stray zero decodes as nothing
+ * rather than as the first upgrade.
+ */
+const ANOMALY_BYTE_MAP: Record<string, number> = {
+  none: 0,
+  cryo_nexus: 1,
+  tidal_ascendancy: 2,
+  singularity_isolation: 3,
+};
+
+const RESEARCH_BYTE_MAP: Record<string, number> = {
+  absolute_zero: 1,
+  infinite_grid: 2,
+  stellar_forge: 3,
+};
+
+const REV_ANOMALY_BYTE_MAP: Record<number, string> = Object.fromEntries(
+  Object.entries(ANOMALY_BYTE_MAP).map(([id, byte]) => [byte, id]),
+);
+
+const REV_RESEARCH_BYTE_MAP: Record<number, string> = Object.fromEntries(
+  Object.entries(RESEARCH_BYTE_MAP).map(([id, byte]) => [byte, id]),
+);
 
 /** Terrain ids. Buildings start at 10 so the two ranges never collide. */
 const TILE_BYTE_MAP: Record<TileType, number> = {
@@ -145,6 +243,19 @@ export type BlueprintPlacement = Pick<PlacedBuilding, "x" | "y" | "buildingId">;
  */
 export type BlueprintTiers = Record<string, number>;
 
+/**
+ * The rules a board was built under: which anomaly was running and what Time
+ * Lab research the author had.
+ *
+ * `research` is keyed and indexed exactly like the player's own record — the
+ * level **index**, and a key's presence is what "researched" means, so an id
+ * that is absent was not researched at all.
+ */
+export interface BlueprintRules {
+  anomalyId: string;
+  research: Record<string, number>;
+}
+
 // --- Browser Compression & Base64URL Helpers ---
 
 /**
@@ -221,6 +332,7 @@ function buildPayload(
   grid: Tile[][],
   placements: readonly BlueprintPlacement[],
   tiers?: BlueprintTiers,
+  rules?: BlueprintRules,
 ): Uint8Array<ArrayBuffer> {
   const height = grid.length;
   const width = grid[0].length;
@@ -258,15 +370,46 @@ function buildPayload(
     }
   }
 
+  /*
+   * The rules section, in the order the reader walks it. Research entries go
+   * out in byte order for the same reason the tier table does: two encodes of
+   * one board must produce one payload, and object key order is not something
+   * to rely on for that.
+   */
+  const ruleBytes: number[] = [];
+  if (rules) {
+    const research: number[] = [];
+    for (const [id, byte] of Object.entries(RESEARCH_BYTE_MAP).sort(
+      (a, b) => a[1] - b[1],
+    )) {
+      const level = rules.research[id];
+      if (level === undefined) continue;
+      research.push(byte, Math.max(0, Math.min(255, Math.round(level))));
+    }
+    ruleBytes.push(
+      ANOMALY_BYTE_MAP[rules.anomalyId] ?? ANOMALY_BYTE_MAP.none,
+      research.length / 2,
+      ...research,
+    );
+  }
+
+  // A rules section is read only after a tier count byte, so writing one means
+  // writing that byte even when there are no tiers to declare. Zero there says
+  // "tiers unknown", which is true and is what it has always meant.
+  const writeTable = table.length > 0 || ruleBytes.length > 0;
+
   const payload = new Uint8Array(
-    2 + tiles.length + (table.length > 0 ? 1 + table.length : 0),
+    3 + tiles.length + (writeTable ? 1 + table.length : 0) + ruleBytes.length,
   );
-  payload[0] = width;
-  payload[1] = height;
-  payload.set(tiles, 2);
-  if (table.length > 0) {
-    payload[2 + tiles.length] = table.length / 2;
-    payload.set(table, 3 + tiles.length);
+  payload[0] = BLUEPRINT_VERSION;
+  payload[1] = width;
+  payload[2] = height;
+  payload.set(tiles, 3);
+  if (writeTable) {
+    payload[3 + tiles.length] = table.length / 2;
+    payload.set(table, 4 + tiles.length);
+    if (ruleBytes.length > 0)
+      payload.set(ruleBytes, 4 + tiles.length + table.length);
   }
 
   return payload;
@@ -301,17 +444,26 @@ export function blueprintKey(
 }
 
 /**
- * Encodes a layout. Pass `tiers` to record what each building was rated for —
- * share codes do, saved layouts do not; see the module header.
+ * Encodes a layout. Pass `tiers` to record what each building was rated for and
+ * `rules` to record the anomaly and research it was built under — share codes
+ * pass both, saved layouts pass neither; see the module header.
+ *
+ * The argument order is the payload order, which is also the order they may be
+ * dropped in: a code can carry tiers without rules, but not rules without a
+ * tier count byte ahead of them. Passing `rules` alone is legal and writes that
+ * byte as zero, meaning "tiers unknown".
  */
 export async function encodeBlueprint(
   grid: Tile[][],
   placements: readonly BlueprintPlacement[] = [],
   tiers?: BlueprintTiers,
+  rules?: BlueprintRules,
 ): Promise<string> {
   if (!grid || !grid.length || !grid[0]?.length) return "";
 
-  const compressed = await compress(buildPayload(grid, placements, tiers));
+  const compressed = await compress(
+    buildPayload(grid, placements, tiers, rules),
+  );
   return uint8ArrayToBase64Url(compressed);
 }
 
@@ -327,6 +479,16 @@ export interface DecodedBlueprint {
    * "everything is at tier 0".
    */
   tiers: BlueprintTiers;
+  /**
+   * The anomaly and research the board was built under, or **null** where the
+   * code does not say — which every code written before this section existed
+   * is, and every saved layout still is.
+   *
+   * Null rather than a zeroed record, because "the author had no anomaly and no
+   * research" is a different claim a code can also make explicitly, and a
+   * reader that confused the two would rate someone else's board at nothing.
+   */
+  rules: BlueprintRules | null;
 }
 
 /**
@@ -338,15 +500,36 @@ export interface DecodedBlueprint {
  */
 export async function decodeBlueprint(code: string): Promise<DecodedBlueprint> {
   if (!code)
-    return { width: 0, height: 0, grid: [], placements: [], tiers: {} };
+    return {
+      width: 0,
+      height: 0,
+      grid: [],
+      placements: [],
+      tiers: {},
+      rules: null,
+    };
 
   const compressedBytes = base64UrlToUint8Array(code);
   const data = await decompress(compressedBytes);
 
-  const width = data[0];
-  const height = data[1];
+  /*
+   * Versioned or not, told apart by value — see the module header. A first byte
+   * below `MIN_GRID_DIM` is too small to be a width, so it is a version; at or
+   * above it, this is a code from before the byte existed and that value is the
+   * width.
+   */
+  const versioned = data[0] < MIN_GRID_DIM;
+  if (versioned && data[0] !== BLUEPRINT_VERSION) {
+    throw new Error(
+      `Blueprint is format version ${data[0]}; this build reads ${BLUEPRINT_VERSION}`,
+    );
+  }
 
-  if (!width || !height || data.length < 2 + width * height) {
+  const head = versioned ? 3 : 2;
+  const width = data[head - 2];
+  const height = data[head - 1];
+
+  if (!width || !height || data.length < head + width * height) {
     throw new Error("Blueprint payload is truncated or malformed");
   }
 
@@ -356,7 +539,7 @@ export async function decodeBlueprint(code: string): Promise<DecodedBlueprint> {
   for (let y = 0; y < height; y++) {
     const row: Tile[] = [];
     for (let x = 0; x < width; x++) {
-      const byteVal = data[2 + (y * width + x)];
+      const byteVal = data[head + (y * width + x)];
       const buildingId = REV_BUILDING_BYTE_MAP[byteVal];
 
       if (buildingId !== undefined) {
@@ -378,9 +561,10 @@ export async function decodeBlueprint(code: string): Promise<DecodedBlueprint> {
    * reconstructed, and they have already been read.
    */
   const tiers: BlueprintTiers = {};
-  const tableAt = 2 + width * height;
+  const tableAt = head + width * height;
+  let entries = 0;
   if (data.length > tableAt) {
-    const entries = data[tableAt];
+    entries = data[tableAt];
     for (let i = 0; i < entries; i++) {
       const at = tableAt + 1 + i * 2;
       if (at + 1 >= data.length) break;
@@ -389,7 +573,33 @@ export async function decodeBlueprint(code: string): Promise<DecodedBlueprint> {
     }
   }
 
-  return { width, height, grid, placements, tiers };
+  /*
+   * The rules section, which begins past the tier table the count byte
+   * *declared* — not past the entries that fitted. A truncated table therefore
+   * takes the rules with it rather than letting the walk resume at an offset
+   * that means nothing, which is the same "give up the rest, keep the tiles"
+   * rule the table itself follows.
+   */
+  let rules: BlueprintRules | null = null;
+  const rulesAt = tableAt + 1 + entries * 2;
+  if (data.length > tableAt && data.length > rulesAt) {
+    const research: Record<string, number> = {};
+    const count = rulesAt + 1 < data.length ? data[rulesAt + 1] : 0;
+    for (let i = 0; i < count; i++) {
+      const at = rulesAt + 2 + i * 2;
+      if (at + 1 >= data.length) break;
+      const id = REV_RESEARCH_BYTE_MAP[data[at]];
+      if (id !== undefined) research[id] = data[at + 1];
+    }
+    rules = {
+      // An anomaly byte this build has never heard of reads as none, the same
+      // fallback `getAnomaly` makes for an unrecognised id.
+      anomalyId: REV_ANOMALY_BYTE_MAP[data[rulesAt]] ?? "none",
+      research,
+    };
+  }
+
+  return { width, height, grid, placements, tiers, rules };
 }
 
 /**
@@ -412,6 +622,23 @@ export async function decodeBlueprint(code: string): Promise<DecodedBlueprint> {
  * two, the first wins, which is the same arbitrary-but-stable answer the wire
  * format could hold anyway.
  */
+/**
+ * The rules record for a share code: the anomaly running and the research the
+ * player has.
+ *
+ * Beside `placementTiers` below and for the same reason — the app's Share
+ * button and the CLI both write share codes, and neither should be spelling
+ * this out itself. Research is copied rather than filtered: an id this build
+ * does not carry a byte for is simply dropped at encode time, which is where
+ * the format's own compatibility rule lives.
+ */
+export function blueprintRules(
+  anomalyId: string,
+  research: Record<string, number>,
+): BlueprintRules {
+  return { anomalyId, research: { ...research } };
+}
+
 export function placementTiers(
   placements: readonly PlacedBuilding[],
 ): BlueprintTiers {

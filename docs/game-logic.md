@@ -329,3 +329,150 @@ A few things always hold true no matter how you arrange things:
 And ultimately, what matters isn't how many buildings you've placed, or how much
 heat or cooling moved around the grid — it's the total amount of power actually
 being produced by whatever's still online at the end.
+
+---
+
+## Anomalies
+
+Prestiging ("Time Jump") ends a timeline and starts a new one, and on the way
+out the player picks an **anomaly**: a rule change that applies for the whole of
+the next timeline. Exactly one is active at a time, and "no anomaly" is a real
+option rather than a missing value — it means the rules exactly as described
+above.
+
+An anomaly never adds a building, removes one, or changes the grid. It changes
+either **what a placed building's figures are** or **how a supply gets shared
+out**, and the three that exist so far divide cleanly along that line.
+
+### The figures an anomaly scales
+
+Every stat anomaly so far scales a building **uniformly**: the same multiplier
+lands on all of its authored figures at once. The game's wording lists them
+separately — "Energy, Heat, Cooling, and overheat capacity" — but those four
+names are one field each across the four roles:
+
+| the game says      | the figure                                          |
+| ------------------ | --------------------------------------------------- |
+| Heat               | a reactor's output, a generator's intake capacity, a direct producer's own heat |
+| Energy             | what a generator or direct producer puts out at full |
+| Cooling            | what a cooler absorbs                                |
+| overheat capacity  | the waste heat a generator or direct producer makes at full, and therefore what must be cooled for it to stay online |
+
+So a building with a ×1.67 bonus is simply a building whose whole tier is worth
+1.67× as much: it absorbs more, produces more, and needs proportionally more
+cooling. A bonus is **not** free power on its own — it moves the whole balance
+of a layout, and a scaled producer that outruns its coolers goes offline like
+any other.
+
+The multiplier is applied to the authored figure at solve time and is not
+snapped back to the game's authored precision, because it is a runtime
+multiply rather than a table entry.
+
+### Cryo Nexus — one shared cooling pool
+
+> All Heat Sinks on an island add their Cooling to one shared pool. It can cool
+> every Power Source on that island, no matter how far away it is. If there is
+> not enough Cooling, every Power Source receives the same percentage of what it
+> needs. Each Heat Sink contributes ×0.88 of its normal Cooling. Cooling does
+> not carry over to other islands.
+
+This replaces the cooling half of the distribution wholesale. Adjacency stops
+mattering for cooling, and so do the fair split and the cleanup pass — there is
+one number for the island and one rule for handing it out. Heat delivery is
+untouched: reactors still only reach adjacent generators, and heat is still
+settled first.
+
+Two consequences fall straight out of it, and both matter more than the rule
+itself:
+
+- **Coolers stop competing for tile space near producers.** A cooler anywhere on
+  the island is worth exactly as much as one wedged between two generators, so
+  the layout problem collapses to "how much total cooling do I buy, and where do
+  I spend the tiles I have left".
+- **Cooling becomes all-or-nothing for the whole island at once.** Every power
+  source gets the same percentage of what it needs, and a building only runs if
+  it is covered in full — so either the pool covers the island's entire waste
+  and everything runs, or it falls short and *every* power source on that island
+  shuts down. There is no partial board.
+
+The ×0.88 is a straight tax on each cooler's contribution, applied before
+anything is shared.
+
+**"An island" here means the whole map.** Gale Hills is an island; so is Ash
+Bay. The rule is board-wide: every cooler anywhere on the map pays into one
+pool, and every power source anywhere on the map draws from it. "Cooling does
+not carry over to other islands" means it does not carry to a *different map* —
+there is nothing finer than the board for this pool to respect.
+
+This is the one rule in the game that reaches across the whole board, and every
+other rule in this document is the opposite: adjacency-bound, which is why a
+board splits into independent patches of connected grass and each can be solved
+on its own. Under this anomaly they are not independent.
+
+They are still *nearly* independent, and the shape of what survives is worth
+being precise about, because it is the whole basis of solving this efficiently:
+
+- **Heat is untouched.** Reactors still only reach adjacent generators, so which
+  buildings a patch can bring online, and how much power it makes, is still a
+  question about that patch alone.
+- **The patches are coupled by exactly two numbers.** A layout on a patch makes
+  some power, generates some waste, and contributes some cooling; the board runs
+  on whether the cooling *summed over every patch* covers the waste summed over
+  every patch. Nothing else crosses.
+
+So a patch is no longer described by "the most power it can make" but by a
+trade-off: how much power it makes for a given amount of cooling it puts into
+the pool over what it takes out. It can run a producer it cannot cool and let
+the rest of the board pay for it, or pave itself in coolers and produce nothing
+but surplus.
+
+And because cooling is all-or-nothing, and every power source gets the same
+percentage, **the whole board is all-or-nothing together**: either the pool
+covers the board's entire waste and everything runs, or it falls short and every
+power source on the map produces nothing. There is no partial board and no
+partially-lit patch.
+
+One smaller consequence: a patch too small to work normally becomes usable, since
+it no longer needs a cooler of its own. A lone grass tile with a direct producer
+on it runs off the pool. That is worth having but it is not much — the shipped
+maps lose between 0 and 6 tiles to patches below the minimum size, out of boards
+of 49 to 184 grass tiles.
+
+### Tidal Ascendancy — a bonus for building on the shore
+
+> Production buildings next to water get a ×1.67 multiplier. Corners count too.
+> The bonus affects Energy, Heat, Cooling, and overheat capacity. Buildings away
+> from water work normally and get no bonus.
+
+A per-tile uniform scale, decided by terrain alone: a building is scaled if any
+of the eight tiles around it is water. Nothing about the layout can change which
+tiles qualify, so this is a fixed per-tile multiplier the solver can compute once
+per island and then treat as part of the board.
+
+It is the first rule in the game where a non-buildable tile does anything at all.
+
+**A pond is not water.** It is an obstacle — scenery you cannot build on, like a
+rock or a tree — and it grants no shore bonus. Only the water tile proper does.
+
+The bonus is not a rare one: between 36% and 44% of the grass on every shipped
+map is water-adjacent, so on any of them something close to half the buildable
+board is worth ×1.67. That makes the shoreline the most valuable ground on the
+map and this anomaly a genuine change of shape rather than a modifier, since the
+best layout under it wants its producers on a coastline whose length is fixed by
+the terrain.
+
+### Singularity Isolation — generators want elbow room
+
+> A Generator with no other Generator next to it gets ×2.5 Energy output, Heat
+> output, and overheat capacity. If another Generator touches it, including at a
+> corner, those values drop to ×0.8. More neighbours do not make the penalty
+> worse.
+
+Unlike the other two, this one depends on **the layout itself**: a generator's
+figures are a function of what its neighbours are, so they change as the search
+moves buildings around. It cannot be folded into the board or into the roster,
+and it is the reason a placed building's resolved figures have to be computed
+per layout rather than once per tile.
+
+The threshold is binary — one adjacent generator costs the same as five — so the
+rule is a two-way test, not a count.

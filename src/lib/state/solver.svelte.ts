@@ -294,6 +294,7 @@ class SolverState {
     const effectiveBuildings = getEffectiveBuildings(
       BUILDINGS,
       configState.buildingUpgrades,
+      configState.prestige,
     );
     if (!effectiveBuildings.length) return 0;
 
@@ -303,7 +304,10 @@ class SolverState {
     );
     if (!islands.length) return 0;
 
-    const tileCounts = islands.map((island) => countGrassTiles(island.grid));
+    // `tileCount`, not the window's grass: an island's sub-grid is padded and
+    // carries the board's real terrain, so a neighbouring island's tiles sit
+    // inside it and counting them would inflate every budget estimate.
+    const tileCounts = islands.map((island) => island.tileCount);
     return estimateMakespanMs(
       taskDurationsMs(mode, tileCounts),
       defaultPoolSize(),
@@ -329,7 +333,11 @@ class SolverState {
     if (!grid || !grid.length || !grid[0] || !grid[0].length) return 0;
 
     const upgrades = configState.buildingUpgrades;
-    const effectiveBuildings = getEffectiveBuildings(BUILDINGS, upgrades);
+    const effectiveBuildings = getEffectiveBuildings(
+      BUILDINGS,
+      upgrades,
+      configState.prestige,
+    );
     if (!effectiveBuildings.length) return 0;
 
     const hasCoolingSupport = canCoolDirectProducer(effectiveBuildings);
@@ -382,7 +390,15 @@ class SolverState {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([id, level]) => `${id}:${level}`)
       .join(",");
-    return `${blueprintKey(layoutState.grid)}|${roster}`;
+    // The anomaly and the Time Lab research are both part of the rules the
+    // layout was found under, so a solve from another set describes a board
+    // that no longer exists — stale in exactly the way a cleared obstacle or a
+    // bought upgrade is.
+    const research = Object.entries(configState.prestigeLevels)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([id, level]) => `${id}:${level}`)
+      .join(",");
+    return `${blueprintKey(layoutState.grid)}|${roster}|${configState.anomalyId}|${research}`;
   }
 
   /**
@@ -446,7 +462,12 @@ class SolverState {
     bound: number,
   ): OptimizationResult {
     const grid = layoutState.grid;
-    const scored = simulatePlacedBuildings(grid, BUILDINGS, placements);
+    const scored = simulatePlacedBuildings(
+      grid,
+      BUILDINGS,
+      placements,
+      configState.prestige,
+    );
 
     let totalPower = 0;
     let totalHeatProduced = 0;
@@ -531,12 +552,14 @@ class SolverState {
     if (this.variants.length === 0) return;
 
     const upgrades = configState.buildingUpgrades;
-    // `null` from each variant that nothing moved on; if that is all of them,
-    // the roster change did not touch this board and there is nothing to do.
+    // `null` from each variant that no *tier* moved on. That is not a reason to
+    // stop: this also runs for an anomaly or a Time Lab change, neither of which
+    // moves a tier — they change what the same tier is worth. Returning early
+    // there left the panel printing figures from the old rules and, worse, left
+    // the stored record under the old signature, so a reload dropped the solve.
     const rebased = this.variants.map((variant) =>
       rebaseToUnlocks(variant.placements, upgrades),
     );
-    if (rebased.every((placements) => placements === null)) return;
 
     // Every variant is re-rated, not just the one on screen: they are all this
     // island's answer and the user can cycle to any of them. A tier bought
@@ -737,7 +760,15 @@ class SolverState {
             return;
           this.optimizationResult = progressResult;
         },
-        { attempts: mode.attempts, attemptBudgetMs: mode.attemptBudgetMs },
+        {
+          attempts: mode.attempts,
+          attemptBudgetMs: mode.attemptBudgetMs,
+          // The rules this timeline runs under. The research is folded into
+          // the roster the coordinator resolves and lands; the anomaly is
+          // carried the whole way and not yet acted on.
+          anomalyId: configState.activeAnomaly.id,
+          prestige: configState.prestige,
+        },
       );
       this.activeTask = handle;
       this.#startWatchdog(mode);

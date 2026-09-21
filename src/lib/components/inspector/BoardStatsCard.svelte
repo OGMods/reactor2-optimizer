@@ -3,6 +3,7 @@
   import { createConfirmArm } from "../confirmArm.svelte";
   import { STAT_ICON } from "../statIcons";
   import {
+    configState,
     layoutState,
     solverState,
     uiState,
@@ -274,7 +275,13 @@
     const def = findBuilding(building.buildingId);
     if (!def) return [];
 
-    const max = effectiveAtValue(def, building.baseValue);
+    // The scales the board on screen was scored under, which on a previewed
+    // board are the author's and not the reader's — see `placementPrestige`.
+    const max = effectiveAtValue(
+      def,
+      building.baseValue,
+      layoutState.placementPrestige,
+    );
 
     // A waste producer that is not getting the cooling it needs is shut down,
     // and this row is the only place the board admits it. The test is
@@ -399,7 +406,12 @@
 <div class="sr-only" role="status" aria-live="polite">{announcement}</div>
 
 {#if panel || tile}
-  <div class="board-card">
+  <!--
+    Purple while an anomaly is in force, on the same state Setup and Run read.
+    The figures in this card are what those rules produced, so it belongs to
+    the signal rather than standing apart from it in the app's own navy.
+  -->
+  <div class="board-card" class:anomalous={configState.hasAnomaly}>
     {#if panel}
       <div class="card-head">
         {#if panel === "solver"}
@@ -762,6 +774,9 @@
     max-width: 100%;
     min-height: 0;
     background: rgba(10, 14, 23, 0.94);
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
     backdrop-filter: blur(12px);
     border: 1px solid var(--neon-dim);
     border-radius: var(--radius);
@@ -782,6 +797,25 @@
      * shrink *into*; this is what stops anything escaping the rounded corner.
      */
     overflow: hidden;
+  }
+
+  /*
+   * Keeps its own 0.94 — see `--anomaly-panel-rgb`. The re-pointed tokens are
+   * the same four Setup re-points, so type and hairlines follow the ground.
+   *
+   * What is deliberately NOT re-pointed is the board's own language: the reds
+   * and ambers this card prints for overheating and idle buildings are read off
+   * explicit tokens and stay exactly as they are. They mean the same thing
+   * under every anomaly, and an anomaly is precisely the condition under which
+   * a player most needs them to.
+   */
+  .board-card.anomalous {
+    background: rgba(var(--anomaly-panel-rgb), 0.94);
+    border-color: var(--anomaly-accent-dim);
+    --text: var(--anomaly-text);
+    --text-muted: var(--anomaly-text-muted);
+    --text-dim: var(--anomaly-text-dim);
+    --border: var(--anomaly-border);
   }
 
   /*

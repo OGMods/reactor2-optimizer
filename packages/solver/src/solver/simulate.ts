@@ -245,7 +245,9 @@ function row(
     x: ctx.xs[t],
     y: ctx.ys[t],
     buildingId: b.id,
-    baseValue: b.effectiveValue,
+    // The authored tier value, never the scaled one — a placement's tier is
+    // resolved back out of this. See `EffectiveBuilding.baseValue`.
+    baseValue: b.baseValue,
     powerGenerated,
     heatProduced,
     heatConsumed,

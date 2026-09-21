@@ -1,7 +1,9 @@
 import type {
   Tile,
+  AnomalyId,
   BuildingDefinition,
   OptimizationResult,
+  PrestigeScales,
 } from "@reactor2/solver";
 import { SolverCoordinator } from "./solverCoordinator";
 
@@ -42,6 +44,25 @@ export interface SolveRunOptions {
   attempts?: number;
   /** What one attempt divides across the islands, ms. */
   attemptBudgetMs?: number;
+  /**
+   * The timeline's anomaly, by id. Omitted means the base rules.
+   *
+   * Carried the whole way to `solveIsland` and **not yet acted on** — the
+   * rules are modelled and threaded, not implemented. Time Lab research needs
+   * nothing here: it resolves into `unlockedUpgrades`' effective roster before
+   * a run starts.
+   */
+  anomalyId?: AnomalyId;
+  /**
+   * Time Lab research as resolved scales. **Required for research to reach a
+   * run at all** — the coordinator resolves the roster itself from `buildings`
+   * and `unlockedUpgrades`, so without this it builds an unresearched one and
+   * the search optimises a board the player does not have.
+   *
+   * It goes no further than `planSolve`: the roster that crosses to the workers
+   * already carries it.
+   */
+  prestige?: PrestigeScales;
 }
 
 export interface SolveTaskHandle {
@@ -105,6 +126,8 @@ export class SolverWorkerClient {
     const promise = coordinator
       .solve(grid, buildings, unlockedUpgrades, timeBudgetS, {
         attempts: run?.attempts,
+        anomalyId: run?.anomalyId,
+        prestige: run?.prestige,
         reportIntervalMs: this.options.reportIntervalMs,
         onProgress: (result) => {
           if (!entry.stopped) entry.onProgress?.(result);

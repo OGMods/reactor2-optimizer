@@ -1,7 +1,7 @@
 import { buildIslandContext, type IslandContext } from "@reactor2/solver";
 import { simulateIsland } from "@reactor2/solver";
 import type { Placement } from "@reactor2/solver";
-import { effectiveAtValue } from "@reactor2/solver";
+import { effectiveAtValue, type PrestigeScales } from "@reactor2/solver";
 import { unscoredPlacement } from "../data/placements";
 import type { BuildingDefinition, PlacedBuilding, Tile } from "../types";
 
@@ -65,6 +65,7 @@ export function simulatePlacedBuildings(
   grid: Tile[][],
   buildings: readonly BuildingDefinition[],
   placedBuildings: PlacedBuilding[],
+  prestige?: PrestigeScales,
 ): PlacedBuilding[] {
   // Copies, with every derived figure reset: this returns a fresh set of rows
   // rather than writing through to the caller's, and a figure left over from a
@@ -97,7 +98,7 @@ export function simulatePlacedBuildings(
     if (t === undefined) continue;
     // Two placements on one tile is not a state the editor can produce; if a
     // save carries one anyway, the later one stands.
-    placement[t] = effectiveAtValue(def, pb.baseValue);
+    placement[t] = effectiveAtValue(def, pb.baseValue, prestige);
     rowOf[t] = i;
   }
 
