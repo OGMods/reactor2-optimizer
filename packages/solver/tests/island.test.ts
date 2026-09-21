@@ -15,10 +15,13 @@ import { describe, expect, it } from "vitest";
 import { EPS } from "../src/solver/constants";
 import { buildIslandContext } from "../src/solver/context";
 import { makeGrid } from "../src/grid";
+import { getAnomaly } from "../src/data/anomalies";
 import {
   canCoolDirectProducer,
+  computeWaterAdjacency,
   countGrassTiles,
   estimateTotalMaxPower,
+  minIslandTiles,
   splitGridIntoIslands,
 } from "../src/solver/island";
 import { Rng } from "../src/solver/rng";
@@ -161,6 +164,125 @@ describe("splitting a grid into islands", () => {
   });
 });
 
+describe("the smallest patch worth keeping", () => {
+  const cryo = getAnomaly("cryo_nexus");
+
+  it("is 3 tiles, or 2 when one cooler can cover a direct producer", () => {
+    expect(minIslandTiles(false)).toBe(3);
+    expect(minIslandTiles(true)).toBe(2);
+  });
+
+  it("is 1 tile under a shared cooling pool, whatever the roster", () => {
+    // Both ordinary floors exist because cooling has to cross a tile boundary.
+    // Pooled, it does not: a lone tile takes a cooler that pays into the pool,
+    // or a direct producer the pool pays for.
+    expect(minIslandTiles(false, cryo)).toBe(1);
+    expect(minIslandTiles(true, cryo)).toBe(1);
+  });
+
+  it("is unchanged by an anomaly that does not pool cooling", () => {
+    expect(minIslandTiles(false, getAnomaly("tidal_ascendancy"))).toBe(3);
+    expect(minIslandTiles(false, getAnomaly("none"))).toBe(3);
+    expect(minIslandTiles(false, undefined)).toBe(3);
+  });
+
+  it("keeps the patches it otherwise drops, under a shared pool", () => {
+    /*
+     * The same board the roster above reduces to a single 3-tile island. These
+     * are tiles no other rule in the game can use: 21 of them across the
+     * shipped maps.
+     */
+    const board = makeGrid(["G.GG.GGG"]);
+
+    expect(
+      splitGridIntoIslands(board, false).map((i) => i.tileCount),
+    ).toEqual([3]);
+    expect(
+      splitGridIntoIslands(board, false, cryo)
+        .map((i) => i.tileCount)
+        .sort((a, b) => a - b),
+    ).toEqual([1, 2, 3]);
+  });
+});
+
+describe("water adjacency", () => {
+  /*
+   * Off the board counts as water: the game has one global map on which every
+   * island sits in open water, and these boards are rectangles cut out of it.
+   * The flag has to be resolved on the full grid, because an island's window is
+   * padded *clamped to the board* — so a tile on the board's own edge has no
+   * off-board neighbour inside its window to test, and the natural
+   * bounds-check-and-skip would read it as inland.
+   */
+  const flagsOf = (rows: string[]) => {
+    const grid = makeGrid(rows);
+    const width = grid[0].length;
+    const flags = computeWaterAdjacency(grid);
+    return (x: number, y: number) => flags[y * width + x];
+  };
+
+  it("flags every tile on the board's edge", () => {
+    const at = flagsOf(["GGGGG", "GGGGG", "GGGGG"]);
+
+    // The one tile with eight in-board, non-water neighbours.
+    expect(at(2, 1)).toBe(0);
+    for (const [x, y] of [
+      [0, 0],
+      [2, 0],
+      [4, 2],
+      [0, 1],
+      [4, 1],
+    ] as const) {
+      expect(at(x, y), `(${x}, ${y}) is on the board's edge`).toBe(1);
+    }
+  });
+
+  it("flags a tile beside water, and not one beside a pond or a rock", () => {
+    // A pond looks wet and is filed with the rocks and the trees: an obstacle,
+    // and no shore bonus. Only the water tile proper counts.
+    const at = flagsOf([
+      "RRRRRRR",
+      "RG.GORG",
+      "RGGGGRG",
+      "RRRRRRR",
+    ]);
+
+    expect(at(1, 2), "diagonally below the water at (2, 1)").toBe(1);
+    expect(at(3, 2), "diagonally below the water at (2, 1)").toBe(1);
+    expect(at(4, 2), "beside the pond at (4, 1), which is not water").toBe(0);
+  });
+
+  it("carries the board-edge flag into a window that cannot see the edge", () => {
+    /*
+     * The trap, concretely. This island is clamped against the board's left,
+     * top and bottom edges, so in its own window those tiles sit at coordinate
+     * 0 — indistinguishable from the window boundary that padding creates
+     * everywhere else. Resolved from the window, every one of them would read
+     * as inland.
+     */
+    const islands = splitGridIntoIslands(makeGrid(["GGGRRRR", "GGGRRRR", "GGGRRRR"]));
+
+    expect(islands.length).toBe(1);
+    const island = islands[0];
+    const at = (x: number, y: number) =>
+      island.waterAdjacent[y * island.width + x];
+
+    // The window is padded one tile to the right only — the other three sides
+    // are the board's, so sub coordinates match original ones for this island.
+    expect(island.width).toBe(4);
+    expect([at(0, 0), at(1, 0), at(0, 1), at(1, 2)]).toEqual([1, 1, 1, 1]);
+    // The two interior tiles: eight in-board neighbours, none of them water.
+    expect([at(1, 1), at(2, 1)]).toEqual([0, 0]);
+  });
+
+  it("indexes like `buildable`, over the same window", () => {
+    const [island] = splitGridIntoIslands(makeGrid(["RRRRR", "RGGGR", "RRRRR"]));
+
+    expect(island.waterAdjacent.length).toBe(island.buildable.length);
+    expect(island.waterAdjacent.length).toBe(island.width * island.height);
+  });
+});
+
 describe("coordinate remapping", () => {
   it("points original tile indices back at the source tiles", () => {
     const grid = makeGrid(["......", "..GGG.", "..GGG."]);
@@ -247,6 +369,7 @@ describe("the theoretical max-power bound", () => {
       height: 0,
       grid: [],
       buildable: new Uint8Array(0),
+      waterAdjacent: new Uint8Array(0),
       tileCount: 0,
       originalTileIndices: [],
     };

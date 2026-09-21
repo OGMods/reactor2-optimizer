@@ -81,9 +81,19 @@ export function planSolve(
   );
   if (effectiveBuildings.length === 0) return null;
 
+  // Taken by id rather than as a definition, because that is also the worker
+  // protocol's form: an id is a string that survives any boundary, and
+  // `getAnomaly` is total, so one from a newer save resolves to the base rules
+  // instead of arriving half understood.
+  //
+  // Resolved before the split because the split reads it: a shared cooling pool
+  // changes the smallest patch worth keeping.
+  const anomaly = getAnomaly(anomalyId);
+
   const islands = splitGridIntoIslands(
     grid,
     canCoolDirectProducer(effectiveBuildings),
+    anomaly,
   );
   if (islands.length === 0) return null;
 
@@ -93,11 +103,7 @@ export function planSolve(
   return {
     islands,
     effectiveBuildings,
-    // Taken by id rather than as a definition, because that is also the
-    // worker protocol's form: an id is a string that survives any
-    // boundary, and `getAnomaly` is total, so one from a newer save
-    // resolves to the base rules instead of arriving half understood.
-    anomaly: getAnomaly(anomalyId),
+    anomaly,
     budgetsS: grassCounts.map(
       (count) => timeBudgetS * (count / totalIslandGrass),
     ),

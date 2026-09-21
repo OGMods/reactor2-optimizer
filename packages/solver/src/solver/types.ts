@@ -313,6 +313,22 @@ export interface IslandSubGrid {
    * `originalTileIndices`.
    */
   buildable: Uint8Array;
+  /**
+   * 1 where the tile has water among its eight neighbours, **counting off the
+   * board as water**. Indexed like `buildable`.
+   *
+   * Resolved on the full grid before decomposition and carried here, because it
+   * cannot be recovered from this window. The window's padding is clamped to
+   * the board, so for a tile on the board's own edge the off-board neighbour is
+   * simply not in it — indistinguishable from the window's own boundary. A
+   * shore test run over `grid` would read every border tile as inland, which on
+   * a custom island is its entire perimeter.
+   *
+   * Off the board is water because the game has one global map with open water
+   * between islands, and these boards are rectangles cut out of it. See
+   * `docs/game-logic.md`.
+   */
+  waterAdjacent: Uint8Array;
   /** How many tiles this island has. `buildable`'s popcount, kept rather than recounted. */
   tileCount: number;
   /**

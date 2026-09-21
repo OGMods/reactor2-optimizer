@@ -126,13 +126,13 @@ what a worker is asked for.
 
 Two smaller effects. The board is sustainable **together** — every power source is served the same
 fraction, so either the pool covers the board's whole waste or no part of it holds — which is what
-makes one scalar budget the right shape for the board-level problem. And **`splitGridIntoIslands`'
-minimum drops to one tile**: `minTilesRequired` is 2 or 3 only because cooling has to cross a tile
-boundary, and under Cryo it does not. A lone tile takes a heat sink that pays into the pool, or a
-direct producer the pool pays for; a lone generator or reactor is still worthless, heat being
-adjacency-bound either way. The shipped maps have 21 such tiles between them, 0 to 6 each — small,
-but they are ground no other rule in the game can use, and they arrive as degenerate one-tile
-islands that should not be handed a real share of the time budget.
+makes one scalar budget the right shape for the board-level problem. And **`minIslandTiles` returns
+1**: the 2-and-3-tile floors hold only because cooling has to cross a tile boundary, and under Cryo
+it does not. A lone tile takes a heat sink that pays into the pool, or a direct producer the pool
+pays for; a lone generator or reactor stays worthless, heat being adjacency-bound either way, and
+the search leaves that tile empty. The shipped maps have 21 such tiles between them, 0 to 6 each —
+small, but they are ground no other rule in the game can use. They arrive as degenerate one-tile
+islands; the budget split is proportional to tile count, so each draws a share to match.
 
 `docs/game-logic.md` has the rules. Two are worth repeating here because they decide how much of a
 board this package has to look at: a pond is an obstacle and grants no shore bonus, while **off the
@@ -154,16 +154,17 @@ and `tileCount` is the count that goes with it.
 The padding changes tile coordinates uniformly, so it changes no result: the fixtures reproduce
 byte for byte across it.
 
-**The padding cannot answer the shore question on its own, and this is the trap.** It is clamped
-to the board, so for a tile on the board's own edge the off-board neighbour is not in the window —
-and an absent cell there is indistinguishable from the window's own boundary. Since off-board
-counts as water, a shore flag resolved from inside an `IslandSubGrid` would rate every border tile
-inland, which on a custom island is the entire perimeter and the whole of the anomaly's effect.
-So water adjacency has to be resolved **once on the full grid**, before decomposition, and carried
-into the sub-grid alongside `originalTileIndices` — not recomputed from the window.
+**The padding cannot answer the shore question, which is why `waterAdjacent` rides along.** The
+window is clamped to the board, so for a tile on the board's own edge the off-board neighbour is
+not in it — and an absent cell there is indistinguishable from the window's own boundary. Since
+off-board counts as water, a shore flag resolved from inside an `IslandSubGrid` reads every border
+tile as inland, which on a custom island is the entire perimeter and the whole of the anomaly's
+effect. So `computeWaterAdjacency` runs **once on the full grid** before decomposition and each
+sub-grid carries a copy indexed like `buildable`. `island.test.ts` pins it on a board where the
+window is clamped against three edges.
 
-The same goes for `minTilesRequired`: it is a property of the rules in force, not of the grid, so
-the anomaly has to reach `splitGridIntoIslands` rather than being consulted after it.
+`splitGridIntoIslands` takes the anomaly for the same class of reason: `minIslandTiles` is a
+property of the rules in force rather than of the grid, so it cannot be applied after the split.
 
 ### `distribution.ts` — a port of Unity's `FlowNetwork.cs`
 

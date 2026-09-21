@@ -301,6 +301,7 @@ class SolverState {
     const islands = splitGridIntoIslands(
       grid,
       canCoolDirectProducer(effectiveBuildings),
+      configState.activeAnomaly,
     );
     if (!islands.length) return 0;
 
@@ -341,7 +342,14 @@ class SolverState {
     if (!effectiveBuildings.length) return 0;
 
     const hasCoolingSupport = canCoolDirectProducer(effectiveBuildings);
-    const subGrids = splitGridIntoIslands(grid, hasCoolingSupport);
+    // The same anomaly the run will be planned under: under a shared cooling
+    // pool the split keeps one-tile patches, and a bound that decomposed the
+    // board differently from the run would be measured against another board.
+    const subGrids = splitGridIntoIslands(
+      grid,
+      hasCoolingSupport,
+      configState.activeAnomaly,
+    );
     return estimateTotalMaxPower(subGrids, effectiveBuildings);
   }
 

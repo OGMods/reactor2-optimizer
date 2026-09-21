@@ -51,6 +51,7 @@ function plan(): IslandPlan {
     height: 1,
     grid: [] as Tile[][],
     buildable: Uint8Array.from([1, 1]),
+    waterAdjacent: Uint8Array.from([0, 0]),
     tileCount: 2,
     originalTileIndices: [offset, offset + 1],
   });

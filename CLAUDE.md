@@ -234,13 +234,14 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   frontier of power against net cooling contributed, with the board combining
   those under one scalar budget. See `docs/SOLVER.md`.
 
-  It also **drops `splitGridIntoIslands`' minimum island size to one tile**. The
-  2-and-3-tile floors exist only because cooling has to cross a tile boundary; a
-  lone tile under Cryo takes a heat sink that pays into the pool, or a direct
-  producer the pool pays for. That is 21 tiles across the shipped maps which no
-  other rule in the game can use, arriving as degenerate one-tile islands that
-  must not be handed a real share of the time budget. The anomaly therefore has
-  to reach the split, not be consulted after it.
+  It also makes **`minIslandTiles` 1**. The 2-and-3-tile floors hold only
+  because cooling has to cross a tile boundary; a lone tile under Cryo takes a
+  heat sink that pays into the pool, or a direct producer the pool pays for.
+  That is 21 tiles across the shipped maps which no other rule in the game can
+  use. `splitGridIntoIslands` therefore takes the anomaly — the floor is a
+  property of the rules, so it cannot be applied after the split — and every
+  caller passes the same one the run is planned under, the app's two estimates
+  included, or the bound and the clock describe a different board from the run.
 - **Off the board counts as water**, which is a fact about our data rather than
   about the game: the game has one global map with open water between islands,
   and our eight boards are rectangles cut out of it, so the water past an edge is
@@ -248,9 +249,10 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   island3, +2 on island7, the rest unchanged) and is the whole of the anomaly on
   a custom island, whose blank 10x10 of grass has no water in it at all.
 
-  The trap is that `IslandSubGrid`'s one-tile padding is **clamped to the board**,
-  so it cannot tell an off-board neighbour from the window's own edge. Water
-  adjacency has to be resolved once on the full grid and carried in.
+  `IslandSubGrid`'s one-tile padding is **clamped to the board**, so it cannot
+  tell an off-board neighbour from the window's own edge — which is why
+  `computeWaterAdjacency` runs on the full grid before the split and each
+  sub-grid carries a `waterAdjacent` mask indexed like `buildable`.
 - **`ANOMALIES` is transcribed by hand from the same extractor's output**, which
   emits an anomaly record alongside the roster and drops the icons into
   `public/icons/anomaly_<id>.webp`. Unlike `BUILDING_TABLE`, **nothing splices

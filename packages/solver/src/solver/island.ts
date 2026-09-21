@@ -5,7 +5,12 @@ import {
   GENERATOR_WASTE_RATIO,
 } from "./constants";
 import { generatorEnergyRatio, generatorWasteRatio } from "./physics";
-import type { EffectiveBuilding, IslandSubGrid, Tile } from "./types";
+import type {
+  AnomalyDefinition,
+  EffectiveBuilding,
+  IslandSubGrid,
+  Tile,
+} from "./types";
 
 /**
  * Island decomposition and per-island upper bounds.
@@ -46,18 +51,87 @@ export function canCoolDirectProducer(roster: EffectiveBuilding[]): boolean {
 }
 
 /**
+ * The fewest tiles a patch needs before anything on it can be worth building.
+ *
+ * Both ordinary floors exist for one reason: cooling has to cross a tile
+ * boundary, so a producer needs a cooler beside it. A reactor + generator +
+ * cooler chain is 3 tiles; a direct producer needs no reactor, so it is 2 when
+ * one cooler can cover one producer's whole waste.
+ *
+ * **Under a shared cooling pool that reason is gone and the floor is 1.** A lone
+ * tile takes a cooler, which pays into the pool for the whole board, or a direct
+ * producer, whose waste the board pays for. A lone generator or reactor stays
+ * worthless — heat is adjacency-bound under every rule — but the search works
+ * that out for itself and leaves the tile empty, which costs nothing.
+ */
+export function minIslandTiles(
+  canCoolDp: boolean,
+  anomaly?: AnomalyDefinition,
+): number {
+  if (anomaly?.rule === "shared_cooling") return 1;
+  return canCoolDp ? 2 : 3;
+}
+
+/**
+ * Whether each tile has water among its eight neighbours, **off the board
+ * counting as water**. Indexed `y * width + x` over the full grid.
+ *
+ * Resolved here, on the whole board, because it cannot be resolved anywhere
+ * downstream: an `IslandSubGrid`'s padding is clamped to the board, so a tile on
+ * the board's own edge has no off-board neighbour inside its window to test.
+ *
+ * Off the board is water because the game has one global map on which every
+ * island sits in open water, and these boards are rectangles cut out of it — so
+ * the water past an edge is real water this rectangle does not include. A pond
+ * is not water; it is an obstacle, like a rock. See `docs/game-logic.md`.
+ */
+export function computeWaterAdjacency(grid: Tile[][]): Uint8Array {
+  const height = grid.length;
+  const width = grid[0]?.length ?? 0;
+  const flags = new Uint8Array(width * height);
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let shore = false;
+      for (const [dx, dy] of CHEBYSHEV_DIRECTIONS) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+          shore = true;
+          break;
+        }
+        if (grid[ny][nx]?.type === "water") {
+          shore = true;
+          break;
+        }
+      }
+      if (shore) flags[y * width + x] = 1;
+    }
+  }
+
+  return flags;
+}
+
+/**
  * Splits the grid into independently solvable sub-grids of buildable tiles.
- * Components too small to ever bring a building online are dropped.
+ * Components too small to ever be worth building on are dropped.
+ *
+ * `anomaly` is taken because the floor is a property of the rules in force
+ * rather than of the grid — see `minIslandTiles`. Under a shared cooling pool
+ * the islands this produces are no longer independent either, which is the
+ * board-level problem and not this function's.
  */
 export function splitGridIntoIslands(
   grid: Tile[][],
   canCoolDp = true,
+  anomaly?: AnomalyDefinition,
 ): IslandSubGrid[] {
   if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) return [];
 
   const originalHeight = grid.length;
   const originalWidth = grid[0].length;
-  const minTilesRequired = canCoolDp ? 2 : 3;
+  const minTilesRequired = minIslandTiles(canCoolDp, anomaly);
+  const waterAdjacent = computeWaterAdjacency(grid);
 
   // 1. Only grass is buildable; everything else is an impassable boundary.
   const buildable = new Uint8Array(originalWidth * originalHeight);
@@ -137,6 +211,7 @@ export function splitGridIntoIslands(
 
       const subGridTiles: Tile[][] = [];
       const originalTileIndices = new Int32Array(subWidth * subHeight);
+      const subWaterAdjacent = new Uint8Array(subWidth * subHeight);
 
       for (let subY = 0; subY < subHeight; subY++) {
         const row: Tile[] = [];
@@ -144,7 +219,11 @@ export function splitGridIntoIslands(
         for (let subX = 0; subX < subWidth; subX++) {
           const origX = padMinX + subX;
           const localFlat = subY * subWidth + subX;
-          originalTileIndices[localFlat] = origY * originalWidth + origX;
+          const origFlat = origY * originalWidth + origX;
+          originalTileIndices[localFlat] = origFlat;
+          // Copied from the full-grid pass rather than recomputed here: this
+          // window cannot see off the board. See `computeWaterAdjacency`.
+          subWaterAdjacent[localFlat] = waterAdjacent[origFlat];
           // The board's own terrain, not a "mine / not mine" flag — that is
           // what `inComponent` is, and it is carried separately because a
           // neighbouring island's grass is real grass and still not ours.
@@ -158,6 +237,7 @@ export function splitGridIntoIslands(
         height: subHeight,
         grid: subGridTiles,
         buildable: inComponent,
+        waterAdjacent: subWaterAdjacent,
         tileCount: component.length,
         originalTileIndices,
       });
