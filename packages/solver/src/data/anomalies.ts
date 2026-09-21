@@ -43,7 +43,7 @@ export const ANOMALIES: readonly AnomalyDefinition[] = [
       "is. If there is not enough Cooling, every Power Source receives the " +
       "same percentage of what it needs. Each Heat Sink contributes ×0.88 of " +
       "its normal Cooling. Cooling does not carry over to other islands.",
-    contribution: 0.88,
+    coolerMultiplier: 0.88,
   },
   {
     id: "tidal_ascendancy",

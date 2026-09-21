@@ -172,36 +172,36 @@ describe("the smallest patch worth keeping", () => {
     expect(minIslandTiles(true)).toBe(2);
   });
 
-  it("is 1 tile under a shared cooling pool, whatever the roster", () => {
-    // Both ordinary floors exist because cooling has to cross a tile boundary.
-    // Pooled, it does not: a lone tile takes a cooler that pays into the pool,
-    // or a direct producer the pool pays for.
-    expect(minIslandTiles(false, cryo)).toBe(1);
-    expect(minIslandTiles(true, cryo)).toBe(1);
-  });
-
-  it("is unchanged by an anomaly that does not pool cooling", () => {
-    expect(minIslandTiles(false, getAnomaly("tidal_ascendancy"))).toBe(3);
-    expect(minIslandTiles(false, getAnomaly("none"))).toBe(3);
-    expect(minIslandTiles(false, undefined)).toBe(3);
-  });
-
-  it("keeps the patches it otherwise drops, under a shared pool", () => {
+  it("does not apply under a shared cooling pool — the board is one island", () => {
     /*
-     * The same board the roster above reduces to a single 3-tile island. These
-     * are tiles no other rule in the game can use: 21 of them across the
-     * shipped maps.
+     * The floors exist because cooling has to cross a tile boundary. Pooled it
+     * does not, and the components stop being independent at all, so the whole
+     * board is handed over as one island and every grass tile comes with it —
+     * including the ones a decomposition drops. 21 tiles across the shipped
+     * maps that no other rule in the game can use.
      */
     const board = makeGrid(["G.GG.GGG"]);
 
-    expect(
-      splitGridIntoIslands(board, false).map((i) => i.tileCount),
-    ).toEqual([3]);
-    expect(
-      splitGridIntoIslands(board, false, cryo)
-        .map((i) => i.tileCount)
-        .sort((a, b) => a - b),
-    ).toEqual([1, 2, 3]);
+    expect(splitGridIntoIslands(board, false).map((i) => i.tileCount)).toEqual([
+      3,
+    ]);
+
+    const pooled = splitGridIntoIslands(board, false, cryo);
+    expect(pooled.length, "one island, whatever the terrain").toBe(1);
+    expect(pooled[0].tileCount, "every grass tile, 1 + 2 + 3").toBe(6);
+  });
+
+  it("hands over the board's own dimensions and an identity remap", () => {
+    // The window is the board, so a placement needs no coordinate translation
+    // on the way back out.
+    const board = makeGrid(["GG.G", "GG.G"]);
+    const [island] = splitGridIntoIslands(board, false, cryo);
+
+    expect([island.width, island.height]).toEqual([4, 2]);
+    expect(island.tileCount).toBe(6);
+    expect([...island.originalTileIndices]).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    // Water is still not buildable — one island is not one usable island.
+    expect([...island.buildable]).toEqual([1, 1, 0, 1, 1, 1, 0, 1]);
   });
 });
 

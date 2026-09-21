@@ -210,17 +210,63 @@ export function simulateIsland(
   for (let i = 0; i < numCoolers; i++) heatOut[coolerTiles[i]] = 0.0;
 
   if (numWaste > 0) {
-    for (let i = 0; i < numCoolers; i++) {
-      d.supplierCap[i] = layout[coolerTiles[i]]!.effectiveValue;
+    if (ctx.anomaly.rule === "shared_cooling") {
+      /*
+       * One pool for the whole board, handed out in proportion to what each
+       * power source is owed. Port of `CoolingNetwork.DistributeCryoArea`:
+       * adjacency stops mattering, and so do the fair split and the repair
+       * pass — there is one number and one rule for sharing it.
+       *
+       * Nothing downstream changes. Serving every source the same fraction
+       * means a short pool leaves *every* source under its waste, so the
+       * ordinary per-producer online test below turns that into the
+       * board-wide all-or-nothing the rule describes, with no second code
+       * path and no board-level flag.
+       *
+       * The 0.88 is already in each cooler's `effectiveValue` — the game rates
+       * the cooler down rather than charging it at the pool — so this sums
+       * what the buildings are worth, exactly as the local path does.
+       */
+      let totalCooling = 0.0;
+      for (let i = 0; i < numCoolers; i++)
+        totalCooling += layout[coolerTiles[i]]!.effectiveValue;
+
+      let totalDemand = 0.0;
+      for (let j = 0; j < numWaste; j++) totalDemand += wasteOf[wasteTiles[j]];
+
+      const factor =
+        totalDemand > 0 && totalCooling > 0
+          ? totalCooling < totalDemand
+            ? totalCooling / totalDemand
+            : 1.0
+          : 0.0;
+
+      let totalAccepted = 0.0;
+      for (let j = 0; j < numWaste; j++) {
+        const accepted = wasteOf[wasteTiles[j]] * factor;
+        coolingIn[wasteTiles[j]] = accepted;
+        totalAccepted += accepted;
+      }
+
+      // What each cooler is doing, for the readout: its own share of the work
+      // the pool actually did, which is the game's own reporting rule.
+      const share =
+        totalCooling > 0 && totalAccepted > 0 ? totalAccepted / totalCooling : 0;
+      for (let i = 0; i < numCoolers; i++)
+        heatOut[coolerTiles[i]] = layout[coolerTiles[i]]!.effectiveValue * share;
+    } else {
+      for (let i = 0; i < numCoolers; i++) {
+        d.supplierCap[i] = layout[coolerTiles[i]]!.effectiveValue;
+      }
+      for (let j = 0; j < numWaste; j++) {
+        d.consumerCap[j] = wasteOf[wasteTiles[j]];
+      }
+      runDistribution(coolerTiles, numCoolers, wasteTiles, numWaste, ctx);
+      for (let i = 0; i < numCoolers; i++)
+        heatOut[coolerTiles[i]] = d.supplierSent[i];
+      for (let j = 0; j < numWaste; j++)
+        coolingIn[wasteTiles[j]] = d.consumerReceived[j];
     }
-    for (let j = 0; j < numWaste; j++) {
-      d.consumerCap[j] = wasteOf[wasteTiles[j]];
-    }
-    runDistribution(coolerTiles, numCoolers, wasteTiles, numWaste, ctx);
-    for (let i = 0; i < numCoolers; i++)
-      heatOut[coolerTiles[i]] = d.supplierSent[i];
-    for (let j = 0; j < numWaste; j++)
-      coolingIn[wasteTiles[j]] = d.consumerReceived[j];
   }
 
   let totalPower = 0.0;

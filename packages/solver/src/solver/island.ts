@@ -53,22 +53,16 @@ export function canCoolDirectProducer(roster: EffectiveBuilding[]): boolean {
 /**
  * The fewest tiles a patch needs before anything on it can be worth building.
  *
- * Both ordinary floors exist for one reason: cooling has to cross a tile
- * boundary, so a producer needs a cooler beside it. A reactor + generator +
- * cooler chain is 3 tiles; a direct producer needs no reactor, so it is 2 when
- * one cooler can cover one producer's whole waste.
+ * Both floors exist for one reason: cooling has to cross a tile boundary, so a
+ * producer needs a cooler beside it. A reactor + generator + cooler chain is
+ * 3 tiles; a direct producer needs no reactor, so it is 2 when one cooler can
+ * cover one producer's whole waste.
  *
- * **Under a shared cooling pool that reason is gone and the floor is 1.** A lone
- * tile takes a cooler, which pays into the pool for the whole board, or a direct
- * producer, whose waste the board pays for. A lone generator or reactor stays
- * worthless — heat is adjacency-bound under every rule — but the search works
- * that out for itself and leaves the tile empty, which costs nothing.
+ * A shared cooling pool removes that reason, and removes the decomposition with
+ * it — the board is then one island and there is nothing here to apply. See
+ * `wholeBoardIsland`.
  */
-export function minIslandTiles(
-  canCoolDp: boolean,
-  anomaly?: AnomalyDefinition,
-): number {
-  if (anomaly?.rule === "shared_cooling") return 1;
+export function minIslandTiles(canCoolDp: boolean): number {
   return canCoolDp ? 2 : 3;
 }
 
@@ -113,6 +107,66 @@ export function computeWaterAdjacency(grid: Tile[][]): Uint8Array {
 }
 
 /**
+ * The whole board as a single island: every grass tile, with the board itself
+ * as the window.
+ *
+ * Under a shared cooling pool the components `splitGridIntoIslands` would
+ * produce are **not** independent — every cooler anywhere pays into one pool
+ * that every power source anywhere draws from — so solving them apart is
+ * simply wrong. Handing the board over whole makes the pool board-wide by
+ * construction, and costs nothing in the rest of the simulation: heat stays
+ * adjacency-bound because `runDistribution` already scopes its round budget and
+ * its repair to each connected component of the supplier/consumer graph, which
+ * is a finer partition than the island. `simulator.test.ts` is where that is
+ * pinned, for the whole-board context the readout has always used.
+ *
+ * The price is per-island parallelism: one island is one pool task, so a board
+ * of two large landmasses searches on one core where it could have used two.
+ * On the shipped maps that is a small loss — most are one landmass and a few
+ * scraps, so one island already holds about 95% of the budget — and it buys the
+ * whole board-level problem for nothing. Solving the components separately
+ * would mean describing each by a frontier of power against net cooling
+ * contributed and combining those under one scalar budget, which is a different
+ * and much larger machine.
+ *
+ * Every grass tile is included, however isolated: a lone tile takes a cooler
+ * that pays into the pool, or a direct producer the pool pays for, so there is
+ * no minimum size here to apply.
+ */
+function wholeBoardIsland(grid: Tile[][]): IslandSubGrid {
+  const height = grid.length;
+  const width = grid[0].length;
+  const buildable = new Uint8Array(width * height);
+  const originalTileIndices = new Int32Array(width * height);
+  const tiles: Tile[][] = [];
+  let tileCount = 0;
+
+  for (let y = 0; y < height; y++) {
+    const row: Tile[] = [];
+    for (let x = 0; x < width; x++) {
+      const flat = y * width + x;
+      originalTileIndices[flat] = flat;
+      if (grid[y][x]?.type === "grass") {
+        buildable[flat] = 1;
+        tileCount++;
+      }
+      row.push({ x, y, type: grid[y][x].type });
+    }
+    tiles.push(row);
+  }
+
+  return {
+    width,
+    height,
+    grid: tiles,
+    buildable,
+    waterAdjacent: computeWaterAdjacency(grid),
+    tileCount,
+    originalTileIndices,
+  };
+}
+
+/**
  * Splits the grid into independently solvable sub-grids of buildable tiles.
  * Components too small to ever be worth building on are dropped.
  *
@@ -128,9 +182,13 @@ export function splitGridIntoIslands(
 ): IslandSubGrid[] {
   if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) return [];
 
+  // A shared cooling pool is the one rule that reaches across the whole board,
+  // so under it the board is one island and the decomposition does not apply.
+  if (anomaly?.rule === "shared_cooling") return [wholeBoardIsland(grid)];
+
   const originalHeight = grid.length;
   const originalWidth = grid[0].length;
-  const minTilesRequired = minIslandTiles(canCoolDp, anomaly);
+  const minTilesRequired = minIslandTiles(canCoolDp);
   const waterAdjacent = computeWaterAdjacency(grid);
 
   // 1. Only grass is buildable; everything else is an impassable boundary.

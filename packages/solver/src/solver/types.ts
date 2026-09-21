@@ -227,17 +227,19 @@ export interface BaselineAnomaly extends AnomalyBase {
 }
 
 /**
- * Cryo Nexus: every cooler on the island pays into one pool, taxed on the way
- * in, and the pool reaches every producer regardless of adjacency.
+ * Cryo Nexus: every cooler on the board pays into one pool that reaches every
+ * producer regardless of adjacency, and each is re-rated on the way in.
  *
- * This replaces the cooling distribution rather than scaling anything, which is
- * why it carries no multiplier on `EffectiveBuilding` — `contribution` is a tax
- * on what each cooler pays *into the pool*, not a re-rating of the cooler.
+ * Two rules in one, which is why this is the only shape that changes more than
+ * a building's figures. `coolerMultiplier` is an ordinary uniform scale on the
+ * cooler role — the game applies it to `CoolerBuilding.CoolingPerSec`, so it is
+ * what a cooler is *worth* and what the game shows for it, not a charge levied
+ * at the pool. The pool itself replaces the cooling half of the distribution.
  */
 export interface SharedCoolingAnomaly extends AnomalyBase {
   rule: "shared_cooling";
-  /** Fraction of its authored cooling each cooler contributes. */
-  contribution: number;
+  /** What every cooler's cooling is multiplied by while this is running. */
+  coolerMultiplier: number;
 }
 
 /**

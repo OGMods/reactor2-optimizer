@@ -348,6 +348,18 @@ export function buildIslandContext(
     n,
     waterAdjacent,
   );
+  // A uniform scale on one role, which is what Cryo Nexus does to coolers: the
+  // game applies its 0.88 to `CoolerBuilding.CoolingPerSec`, so it is what a
+  // cooler is worth rather than a charge levied at the pool.
+  //
+  // Only ever one of these two is in force, because only one anomaly runs at a
+  // time — so the product below is always a multiply by exactly 1.0 on one
+  // side, and never the two-factor rounding `scaleEffectiveBuilding` guards
+  // against.
+  const roleScale: Partial<Record<BuildingType, number>> | null =
+    anomaly.rule === "shared_cooling"
+      ? { cooler: anomaly.coolerMultiplier }
+      : null;
   const uniformRating = tileScale === null;
   // One cache per distinct scale, so a building is built at a given rating
   // once per island rather than once per placement. Keyed on the base object
@@ -416,11 +428,13 @@ export function buildIslandContext(
       );
     },
     rate(tile: number, building: EffectiveBuilding): EffectiveBuilding {
-      if (tileScale === null) return building;
+      if (tileScale === null && roleScale === null) return building;
       // Idempotent: a building arriving with another tile's rating is taken
-      // back to its roster entry first, so this is a function of the tile
-      // rather than of how many times it has been applied.
-      return scaledBy(building, tileScale[tile]);
+      // back to its roster entry first, so this is a function of the tile and
+      // the role rather than of how many times it has been applied.
+      const byTile = tileScale === null ? 1 : tileScale[tile];
+      const byRole = roleScale?.[building.type] ?? 1;
+      return scaledBy(building, byTile * byRole);
     },
     xs,
     ys,

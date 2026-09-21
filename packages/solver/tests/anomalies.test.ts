@@ -109,6 +109,133 @@ describe("scaling a resolved building", () => {
   });
 });
 
+describe("a shared cooling pool reaching the board", () => {
+  /*
+   * The one rule that reaches across the whole board rather than a tile or a
+   * neighbourhood. Two halves: every cooler is re-rated x0.88 — the game
+   * applies that to `CoolingPerSec`, so it is what a cooler is worth — and the
+   * cooling half of the distribution is replaced by one pool that ignores
+   * adjacency entirely.
+   */
+  const cryo = getAnomaly("cryo_nexus");
+  // A cooler deliberately smaller than two generators' waste, so "the pool
+  // falls short" is a case these boards can actually reach: 30 x 0.88 is 26.4
+  // against 25 of waste per generator.
+  const roster = basicRoster({ reactorValue: 500, coolerValue: 30 });
+  const [REACTOR, GENERATOR, COOLER] = roster;
+
+  const ctxFor = (rows: string[], anomaly = cryo) =>
+    buildIslandContext(makeGrid(rows), undefined, anomaly);
+
+  /** Place `spec` — `[x, y, building]` — rating each for its tile. */
+  const score = (
+    ctx: ReturnType<typeof ctxFor>,
+    spec: [number, number, EffectiveBuilding][],
+  ) => {
+    const at = new Map<string, number>();
+    for (let t = 0; t < ctx.n; t++) at.set(`${ctx.xs[t]},${ctx.ys[t]}`, t);
+    const placement: Placement = new Array(ctx.n).fill(null);
+    for (const [x, y, b] of spec) {
+      const tile = at.get(`${x},${y}`)!;
+      placement[tile] = ctx.rate(tile, b);
+    }
+    return simulateIsland(placement, ctx, true);
+  };
+
+  it("rates every cooler down, and nothing else", () => {
+    const ctx = ctxFor(["RRRR", "RGGR", "RRRR"]);
+    const tile = ctx.tiles[0];
+
+    expect(ctx.rate(tile, COOLER).effectiveValue).toBeCloseTo(30 * 0.88, 9);
+    // The authored tier is what identifies it and never moves.
+    expect(ctx.rate(tile, COOLER).baseValue).toBe(30);
+    expect(ctx.rate(tile, REACTOR)).toBe(REACTOR);
+    expect(ctx.rate(tile, GENERATOR)).toBe(GENERATOR);
+  });
+
+  it("cools a producer no cooler is anywhere near", () => {
+    /*
+     * The rule itself. The cooler is five tiles from the generator and on the
+     * far side of the board — under the base rules it reaches nothing and the
+     * generator is offline; pooled, distance stops existing.
+     */
+    const rows = ["RRRRRRRR", "RGGGGGGR", "RRRRRRRR"];
+    const spec: [number, number, EffectiveBuilding][] = [
+      [1, 1, REACTOR],
+      [2, 1, GENERATOR],
+      [6, 1, COOLER],
+    ];
+
+    expect(score(ctxFor(rows, getAnomaly("none")), spec).totalPower).toBe(0);
+    expect(score(ctxFor(rows), spec).totalPower).toBeGreaterThan(0);
+  });
+
+  it("runs the board or none of it, never part", () => {
+    /*
+     * Every source is served the same fraction of what it is owed, so a short
+     * pool leaves all of them under their waste at once. There is no layout
+     * where one cluster is sustainable and another is not.
+     */
+    const rows = ["RRRRRRRR", "RGGGGGGR", "RGGGGGGR", "RRRRRRRR"];
+
+    // Two independent hubs, one cooler between them — enough for one.
+    const short = score(ctxFor(rows), [
+      [1, 1, REACTOR],
+      [2, 1, GENERATOR],
+      [5, 1, REACTOR],
+      [6, 1, GENERATOR],
+      [1, 2, COOLER],
+    ]);
+    expect(
+      short.placements.filter((p) => p.powerGenerated > 0).length,
+      "a short pool runs nothing at all",
+    ).toBe(0);
+
+    // A second cooler, still nowhere near either generator, covers the board.
+    const covered = score(ctxFor(rows), [
+      [1, 1, REACTOR],
+      [2, 1, GENERATOR],
+      [5, 1, REACTOR],
+      [6, 1, GENERATOR],
+      [1, 2, COOLER],
+      [2, 2, COOLER],
+    ]);
+    expect(
+      covered.placements.filter((p) => p.powerGenerated > 0).length,
+      "and a sufficient one runs both hubs",
+    ).toBe(2);
+  });
+
+  it("reports each cooler its share of the work the pool did", () => {
+    // The game's own reporting rule: a cooler is credited with its share of
+    // what the pool actually absorbed, not with its whole rating.
+    const ctx = ctxFor(["RRRRRR", "RGGGGR", "RGGGGR", "RRRRRR"]);
+    const out = score(ctx, [
+      [1, 1, REACTOR],
+      [2, 1, GENERATOR],
+      [1, 2, COOLER],
+      [2, 2, COOLER],
+    ]);
+
+    const waste = out.placements.reduce(
+      (sum, p) => sum + p.wasteHeatGenerated,
+      0,
+    );
+    const provided = out.placements.reduce(
+      (sum, p) => sum + p.coolingProvided,
+      0,
+    );
+
+    expect(waste).toBeGreaterThan(0);
+    // The pool absorbed exactly the waste, and the two coolers split the
+    // credit for it evenly, being the same tier.
+    expect(provided).toBeCloseTo(waste, 6);
+    const each = out.placements.filter((p) => p.coolingProvided > 0);
+    expect(each.length).toBe(2);
+    expect(each[0].coolingProvided).toBeCloseTo(each[1].coolingProvided, 6);
+  });
+});
+
 describe("role isolation reaching the board", () => {
   /*
    * The one rule whose multiplier depends on the layout rather than on the

@@ -544,7 +544,7 @@ board splits into independent patches of connected grass and each can be solved
 on its own. Under this anomaly they are not independent.
 
 They are still *nearly* independent, and the shape of what survives is worth
-being precise about, because it is the whole basis of solving this efficiently:
+being precise about, because it is what decides how hard this is to solve:
 
 - **Heat is untouched.** Reactors still only reach adjacent generators, so which
   buildings a patch can bring online, and how much power it makes, is still a

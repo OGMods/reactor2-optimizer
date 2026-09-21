@@ -164,36 +164,45 @@ past: Magma Rift reported 119.9% layout efficiency before it did, and nothing el
 entitled to assume the bound holds either. It is loose where only part of an island qualifies,
 which is the right way to be wrong.
 
-`shared_cooling` is the odd one out entirely, and it is the one that costs this package
-something. **Its pool is the whole board** — the game's "island" is the map, Gale Hills and Ash
-Bay, and "cooling does not carry over to other islands" means it does not carry to a different
-map. So under Cryo Nexus the islands `splitGridIntoIslands` produces are **not independent**,
-which is the assumption the worker pool, the per-island budget split, `IslandBest` and
+`shared_cooling` is the odd one out entirely: it is the only shape that changes more than a
+building's figures. **Its pool is the whole board** — the game's "island" is the map, Gale Hills
+and Ash Bay, and "cooling does not carry over to other islands" means it does not carry to a
+different map. So under Cryo Nexus the components `splitGridIntoIslands` produces are **not**
+independent, which is the assumption the worker pool, the per-island budget split, `IslandBest` and
 `variants.ts` all rest on.
 
-What survives is more than it sounds. Heat stays adjacency-bound, so how much power an island can
-make is still a question about that island alone; the islands are coupled by exactly two scalars,
-the cooling they contribute and the waste they generate, and the board runs only if the first sums
-over the second. An island is therefore no longer described by "its best power" but by a frontier —
-power against net cooling it puts into or takes out of the pool — and the board-level problem is to
-combine those frontiers under one scalar budget. That keeps the per-island parallelism; it changes
-what a worker is asked for.
+**The resolution is to stop producing them.** `wholeBoardIsland` hands the board over as a single
+island, which makes the pool board-wide by construction and leaves every one of those assumptions
+true. It costs nothing elsewhere in the simulation: `runDistribution` already scopes its round
+budget and its repair to each connected component of the supplier/consumer graph, which is a finer
+partition than the island, so heat stays adjacency-bound. It is also what brings in the tiles no
+decomposition keeps — every grass tile is on the one island, including the 21 across the shipped
+maps that are otherwise dead ground, so `minIslandTiles` has no Cryo case to answer.
 
-Two smaller effects. The board is sustainable **together** — every power source is served the same
-fraction, so either the pool covers the board's whole waste or no part of it holds — which is what
-makes one scalar budget the right shape for the board-level problem. And **`minIslandTiles` returns
-1**: the 2-and-3-tile floors hold only because cooling has to cross a tile boundary, and under Cryo
-it does not. A lone tile takes a heat sink that pays into the pool, or a direct producer the pool
-pays for; a lone generator or reactor stays worthless, heat being adjacency-bound either way, and
-the search leaves that tile empty. The shipped maps have 21 such tiles between them, 0 to 6 each —
-small, but they are ground no other rule in the game can use. They arrive as degenerate one-tile
-islands; the budget split is proportional to tile count, so each draws a share to match.
+The price is per-island parallelism: one island is one pool task, so a board of two large
+landmasses searches on one core where it could have used two. On the shipped maps that is small —
+most are one landmass and a few scraps, so one island already holds about 95% of the budget — and
+it buys the entire board-level problem for nothing. The alternative is to describe each component
+by a frontier of power against the net cooling it contributes and combine those frontiers under one
+scalar budget, which is a different and much larger machine.
 
-`docs/game-logic.md` has the rules. Two are worth repeating here because they decide how much of a
-board this package has to look at: a pond is an obstacle and grants no shore bonus, while **off the
-board counts as water** — the shipped maps are rectangles cut from one global map that is open
-water between islands. The Tidal bonus lands on 36-45% of the grass of every shipped map, and on
-the whole perimeter of a custom one.
+**The pool needs no second code path through the rest of the simulation.** `simulateIsland`
+replaces the cooling distribution with the game's `DistributeCryoArea`: total the coolers, total
+what the sources are owed, and serve everyone the same fraction. Because the fraction is common, a
+short pool leaves *every* source under its waste at once — so the ordinary per-producer online test
+below it produces the board-wide all-or-nothing the rule describes, with no board-level flag
+anywhere. Each cooler is reported its share of what the pool actually absorbed, which is the game's
+own reporting rule.
+
+The x0.88 is not part of that. It is a uniform scale on the cooler role, applied through `ctx.rate`
+like any other multiplier, because the game applies it to `CoolerBuilding.CoolingPerSec` — it is
+what a cooler is worth and what the game shows for it, not a charge levied at the pool. `rate`
+therefore carries a per-role factor beside its per-tile one; only ever one of the two is in force,
+since only one anomaly runs at a time.
+
+It is worth real power, and most on a fragmented board, since the x0.88 has to be earned back
+first: map 7 at 25s goes 271AC to 294AC, map 3 at 20s 139AC to 145AC, and map 1 — one landmass,
+already at 98% of its bound — is unchanged.
 
 ### `island.ts` — the window an island is solved in
 

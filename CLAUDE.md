@@ -226,22 +226,42 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   than in `ui_prefs` because it is a **solve input** like the roster, not a
   preference about the app — which is also why `solveSignature()` counts it and
   a solve found under another anomaly restores as stale.
-- **Cryo Nexus pools across the whole board.** The game's "island" is the map,
-  so under it the islands `splitGridIntoIslands` produces **do** interact —
-  against the assumption the worker pool, the budget split, `IslandBest` and
-  `variants.ts` are built on. Heat stays adjacency-bound, so an island is still
-  solvable alone; it is just no longer described by its best power but by a
-  frontier of power against net cooling contributed, with the board combining
-  those under one scalar budget. See `docs/SOLVER.md`.
+- **Cryo Nexus pools across the whole board, so under it the board is one
+  island.** The game's "island" is the map, so the components
+  `splitGridIntoIslands` produces **do** interact — against the assumption the
+  worker pool, the budget split, `IslandBest` and `variants.ts` all rest on. The
+  answer is to stop producing them: `wholeBoardIsland` hands the board over
+  entire, which makes the pool board-wide by construction and leaves every one
+  of those assumptions true.
 
-  It also makes **`minIslandTiles` 1**. The 2-and-3-tile floors hold only
-  because cooling has to cross a tile boundary; a lone tile under Cryo takes a
-  heat sink that pays into the pool, or a direct producer the pool pays for.
-  That is 21 tiles across the shipped maps which no other rule in the game can
-  use. `splitGridIntoIslands` therefore takes the anomaly — the floor is a
-  property of the rules, so it cannot be applied after the split — and every
-  caller passes the same one the run is planned under, the app's two estimates
-  included, or the bound and the clock describe a different board from the run.
+  It costs nothing in the rest of the simulation, because `runDistribution`
+  already scopes its round budget and its repair to each connected component of
+  the supplier/consumer graph — a finer partition than the island — so heat
+  stays adjacency-bound. It is also what brings the unbuildable scraps in: every
+  grass tile is on the one island, including the 21 tiles across the shipped
+  maps that no decomposition keeps. `minIslandTiles` therefore has no Cryo case;
+  there is nothing to apply a floor to.
+
+  **The price is per-island parallelism** — one island is one pool task, so a
+  board of two large landmasses searches on one core where it could use two. A
+  small loss on the shipped maps, where one landmass already holds ~95% of the
+  budget, and it buys the whole board-level problem for nothing: the alternative
+  is describing each component by a frontier of power against net cooling
+  contributed and combining those under one scalar budget.
+
+  **The pool itself is in `simulateIsland` and needs no second code path.** It
+  serves every source the same fraction of what it is owed, so a short pool
+  leaves *all* of them under their waste and the ordinary per-producer online
+  test turns that into the board-wide all-or-nothing the rule describes. The
+  x0.88 is a uniform scale on the cooler role, applied through `ctx.rate` like
+  any other multiplier, because the game applies it to `CoolerBuilding.
+  CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
+  not a charge levied at the pool.
+
+  It is worth real power, and most on a fragmented board: map 7 at 25s goes
+  271AC to 294AC, map 3 at 20s 139AC to 145AC, and map 1 — one landmass, already
+  at 98% of its bound — is unchanged. The x0.88 has to be earned back before any
+  of that shows.
 - **Off the board counts as water**, which is a fact about our data rather than
   about the game: the game has one global map with open water between islands,
   and our eight boards are rectangles cut out of it, so the water past an edge is
