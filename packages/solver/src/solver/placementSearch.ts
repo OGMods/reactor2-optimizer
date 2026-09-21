@@ -71,6 +71,15 @@ import type {
 
 const MAX_TOP_REACTOR_COPIES = 3;
 const MAX_SECOND_REACTOR_COPIES = 3;
+/**
+ * The cooling a pooled seed sizes its hubs against: cooling from nowhere, so
+ * that no hub ever needs a cooler beside it. It has to be `Infinity` and not
+ * merely large — a fit counts `ceil(waste / cooling)` coolers, and any finite
+ * figure makes that one, not none. `snapToAuthoredPrecision` passes it through
+ * and the pool's `factor` compares with `<`, so the scratch simulation the
+ * shared fit runs against it is sound. Never written onto a real placement.
+ */
+const POOL_COOLER_VALUE = Infinity;
 
 /** How many reactor tiers the local-repair pass considers per tile. */
 const POLISH_REACTOR_TIERS = 3;
@@ -317,6 +326,8 @@ interface HubFit {
   r: number;
   c: number;
   power: number;
+  /** The waste the hub makes at that fill — what a pooled seed charges for. */
+  waste: number;
 }
 
 function bestHubFit(
@@ -346,7 +357,7 @@ function bestHubFit(
         if (r + c <= availableSlots) {
           const power = conversion.power;
           if (best === null || power > best.power) {
-            best = { generator, reactor, r, c, power };
+            best = { generator, reactor, r, c, power, waste };
           }
         }
         if (hIn >= generator.effectiveValue - EPS) break;
@@ -360,6 +371,7 @@ interface DpFit {
   dp: EffectiveBuilding;
   c: number;
   power: number;
+  waste: number;
 }
 
 function bestDpFit(
@@ -374,7 +386,7 @@ function bestDpFit(
       cooler.effectiveValue > 0 ? Math.ceil(waste / cooler.effectiveValue) : 0;
     if (c > availableSlots) continue;
     const power = dp.energy;
-    if (best === null || power > best.power) best = { dp, c, power };
+    if (best === null || power > best.power) best = { dp, c, power, waste };
   }
   return best;
 }
@@ -404,6 +416,7 @@ interface SharedFit {
   reactorTiers: EffectiveBuilding[];
   genPositions: number[];
   coolerPositions: number[];
+  waste: number;
 }
 
 /**
@@ -420,10 +433,28 @@ function bestSharedReactorFit(
   cooler: EffectiveBuilding,
   ctx: IslandContext,
   scratch: Placement,
+  pooled = false,
 ): SharedFit | null {
   if (reactors.length === 0) return null;
   const topReactor = reactors[0];
   const secondReactor = reactors.length > 1 ? reactors[1] : null;
+
+  // Under a pool `cooler` is the phantom and `c` is 0, so the arrangement is
+  // simulated with no cooler beside it — and a coolerless board is offline.
+  // The pool is stood in for by the phantom on any tile outside the
+  // neighbourhood; where the island has none, the arrangement cannot be
+  // measured and is not offered.
+  let poolTile = -1;
+  if (pooled) {
+    const local = new Set(neighbors);
+    for (let t = 0; t < ctx.n; t++) {
+      if (t !== tile && !local.has(t)) {
+        poolTile = t;
+        break;
+      }
+    }
+    if (poolTile < 0) return null;
+  }
 
   const connectivity = new Map<number, number>();
   for (const n of neighbors) {
@@ -509,6 +540,10 @@ function bestSharedReactorFit(
           put(scratch, ctx, n, cooler);
           touched.push(n);
         }
+        if (pooled) {
+          put(scratch, ctx, poolTile, cooler);
+          touched.push(poolTile);
+        }
 
         const { totalPower } = simulateIsland(scratch, ctx);
         for (const n of touched) scratch[n] = null;
@@ -530,6 +565,7 @@ function bestSharedReactorFit(
             reactorTiers,
             genPositions,
             coolerPositions,
+            waste: wasteTotal,
           };
         }
       }
@@ -567,6 +603,7 @@ function constructSeed(
   coolers: EffectiveBuilding[],
   directProducers: EffectiveBuilding[],
   deadlineMs: number,
+  pooled = false,
 ): Placement {
   const placement = emptyPlacement(ctx.n);
   const available = new Uint8Array(ctx.n);
@@ -583,6 +620,40 @@ function constructSeed(
     canHub &&
     Math.ceil(topReactor!.effectiveValue / topGenerator!.effectiveValue) >= 2;
 
+  // Under a cooling pool a hub is sized with a phantom cooler that covers any
+  // waste from nowhere, so every neighbour slot goes to reactors and no cooler
+  // is written beside a hub. The cooling it really needs is charged as a
+  // board-wide debt instead: counted into each candidate's rank as the
+  // fractional tiles it will cost, reserved out of the free tiles so a hub can
+  // never crowd out the coolers that keep it online, and paid off after the
+  // hubs are down onto the least-connected free tiles — the scraps no hub can
+  // use, which under the pool are worth exactly what a well-connected tile is.
+  const fitCooler: EffectiveBuilding | null =
+    pooled && topCooler !== null
+      ? { ...topCooler, effectiveValue: POOL_COOLER_VALUE }
+      : topCooler;
+  const coolerValue =
+    topCooler !== null ? ctx.rateRole(topCooler).effectiveValue : 0;
+  /** Coolers the pool needs for `waste`, at the rated figure. */
+  const coolersFor = (waste: number): number =>
+    waste > EPS && coolerValue > 0 ? Math.ceil(waste / coolerValue) : 0;
+  /** What the board's producers are owed so far, from the simulation. */
+  let debt = 0;
+  const actualWaste = (): number => {
+    const rows = simulateIsland(placement, ctx, true).placements;
+    let sum = 0;
+    for (let i = 0; i < rows.length; i++) sum += rows[i].wasteHeatGenerated;
+    return sum;
+  };
+  /** Whether claiming `tiles` still leaves room for the coolers `waste` needs. */
+  const reserves = (tiles: number, waste: number): boolean =>
+    !pooled || numAvailable - tiles >= coolersFor(debt + waste);
+  /** Tiles a candidate charges for: its own, plus the pool's share under one. */
+  const cost = (tiles: number, waste: number): number =>
+    pooled ? tiles + waste / coolerValue : tiles;
+  /** The tiles each claim took, newest last, for the pooled backstop. */
+  const groups: number[][] = [];
+
   const hubFitCache = new Map<number, HubFit | null>();
   const dpFitCache = new Map<number, DpFit | null>();
   const sharedScratch = emptyPlacement(ctx.n);
@@ -590,7 +661,7 @@ function constructSeed(
   const hubFit = (slots: number): HubFit | null => {
     let fit = hubFitCache.get(slots);
     if (fit === undefined) {
-      fit = canHub ? bestHubFit(slots, generators, reactors, topCooler!) : null;
+      fit = canHub ? bestHubFit(slots, generators, reactors, fitCooler!) : null;
       hubFitCache.set(slots, fit);
     }
     return fit;
@@ -599,7 +670,7 @@ function constructSeed(
   const dpFit = (slots: number): DpFit | null => {
     let fit = dpFitCache.get(slots);
     if (fit === undefined) {
-      fit = canDp ? bestDpFit(slots, directProducers, topCooler!) : null;
+      fit = canDp ? bestDpFit(slots, directProducers, fitCooler!) : null;
       dpFitCache.set(slots, fit);
     }
     return fit;
@@ -623,12 +694,17 @@ function constructSeed(
           entry = candidate;
       };
 
-      const hub = hubFit(neighbors.length);
+      // Under a pool the fit shrinks until its reactors and its coolers both
+      // fit in what is left; under the base rules the first fit is the one.
+      let hub = hubFit(neighbors.length);
+      while (hub !== null && !reserves(1 + hub.r, hub.waste)) {
+        hub = hub.r > 1 ? hubFit(hub.r - 1) : null;
+      }
       if (hub !== null) {
         const tilesUsed = 1 + hub.r + hub.c;
         if (hub.power > EPS && tilesUsed > 0) {
           consider({
-            powerPerTile: hub.power / tilesUsed,
+            powerPerTile: hub.power / cost(tilesUsed, hub.waste),
             kind: "hub",
             tile,
             neighbors,
@@ -638,11 +714,11 @@ function constructSeed(
       }
 
       const dp = dpFit(neighbors.length);
-      if (dp !== null) {
+      if (dp !== null && reserves(1, dp.waste)) {
         const tilesUsed = 1 + dp.c;
         if (dp.power > EPS && tilesUsed > 0) {
           consider({
-            powerPerTile: dp.power / tilesUsed,
+            powerPerTile: dp.power / cost(tilesUsed, dp.waste),
             kind: "dp",
             tile,
             neighbors,
@@ -657,18 +733,19 @@ function constructSeed(
           neighbors,
           reactors,
           topGenerator!,
-          topCooler!,
+          fitCooler!,
           ctx,
           sharedScratch,
+          pooled,
         );
         if (shared !== null) {
           const tilesUsed =
             shared.reactorTiles.length +
             shared.genPositions.length +
             shared.coolerPositions.length;
-          if (tilesUsed > 0) {
+          if (tilesUsed > 0 && reserves(tilesUsed, shared.waste)) {
             consider({
-              powerPerTile: shared.power / tilesUsed,
+              powerPerTile: shared.power / cost(tilesUsed, shared.waste),
               kind: "shared",
               tile,
               neighbors,
@@ -695,6 +772,29 @@ function constructSeed(
       }
     }
     if (best === null) break;
+
+    if (pooled) {
+      // The debt has grown since a candidate untouched by the last claim was
+      // sized, so it may no longer leave room for its coolers. Re-size every
+      // open tile against the debt as it stands: a candidate sized against the
+      // current debt passes this at once, so the loop cannot spin.
+      const tiles =
+        best.kind === "hub"
+          ? 1 + best.hub!.r
+          : best.kind === "dp"
+            ? 1
+            : best.shared!.reactorTiles.length + best.shared!.genPositions.length;
+      const waste =
+        best.kind === "hub"
+          ? best.hub!.waste
+          : best.kind === "dp"
+            ? best.dp!.waste
+            : best.shared!.waste;
+      if (!reserves(tiles, waste)) {
+        for (const tile of buildableOrder) if (available[tile]) stale[tile] = 1;
+        continue;
+      }
+    }
 
     const claimed: number[] = [];
     if (best.kind === "hub") {
@@ -746,6 +846,53 @@ function constructSeed(
         if (available[nb[k]]) stale[nb[k]] = 1;
       }
     }
+    if (pooled) {
+      groups.push(claimed);
+      // The simulated figure rather than the sum of the fits' estimates: two
+      // hubs down beside each other share reactors, and a generator fed by a
+      // neighbour's surplus makes waste no fit counted.
+      debt = actualWaste();
+    }
+  }
+
+  if (pooled && topCooler !== null) {
+    // Pay the debt off, least-connected tile first: a one-tile scrap holds a
+    // cooler as well as any tile does, and nothing else can use it. Ascending
+    // index breaks ties so the fill is a function of the board alone.
+    const free = buildableOrder
+      .filter((tile) => available[tile] === 1)
+      .sort(
+        (a, b) => ctx.neighbors[a].length - ctx.neighbors[b].length || a - b,
+      );
+    let cooling = 0;
+    let next = 0;
+    const payDown = () => {
+      while (next < free.length && !wasteIsCovered(debt, cooling)) {
+        const tile = free[next++];
+        put(placement, ctx, tile, topCooler);
+        cooling += placement[tile]!.effectiveValue;
+      }
+    };
+    payDown();
+
+    // A short pool is an all-offline board, and `stabilize` would then delete
+    // every producer. So the board has to come up here: one more cooler while
+    // there is a tile for it, and failing that the newest hub is taken back
+    // and its tiles spent on the pool instead.
+    while (debt > EPS && simulateIsland(placement, ctx).totalPower <= EPS) {
+      if (next < free.length) {
+        const tile = free[next++];
+        put(placement, ctx, tile, topCooler);
+        cooling += placement[tile]!.effectiveValue;
+        continue;
+      }
+      const group = groups.pop();
+      if (group === undefined) break;
+      for (const tile of group) placement[tile] = null;
+      for (const tile of group) free.push(tile);
+      debt = actualWaste();
+      payDown();
+    }
   }
 
   return placement;
@@ -761,71 +908,90 @@ function constructMultiStartSeed(
 ): Placement {
   const buildable = Array.from(ctx.tiles);
 
-  let bestSeed = constructSeed(
-    buildable,
-    ctx,
-    reactors,
-    generators,
-    coolers,
-    directProducers,
-    deadlineMs,
-  );
-  let bestPower = simulateIsland(bestSeed, ctx).totalPower;
-
-  if (bestPower <= EPS) {
-    // The deadline elapsed mid-construction and left a seed that powers
-    // nothing. One full greedy pass costs ~2ms even on the largest island in
-    // the game, so finish it: refining a degenerate seed wastes the whole
-    // budget and can return an empty layout for a solvable island.
-    bestSeed = constructSeed(
+  const passes = (pooled: boolean): { seed: Placement; power: number } => {
+    let bestSeed = constructSeed(
       buildable,
       ctx,
       reactors,
       generators,
       coolers,
       directProducers,
-      performance.now() + 1000,
+      deadlineMs,
+      pooled,
     );
-    bestPower = simulateIsland(bestSeed, ctx).totalPower;
-  }
+    let bestPower = simulateIsland(bestSeed, ctx).totalPower;
 
-  if (performance.now() >= deadlineMs - 50 || buildable.length < 6)
-    return bestSeed;
+    if (bestPower <= EPS) {
+      // The deadline elapsed mid-construction and left a seed that powers
+      // nothing. One full greedy pass costs ~2ms even on the largest island in
+      // the game, so finish it: refining a degenerate seed wastes the whole
+      // budget and can return an empty layout for a solvable island.
+      bestSeed = constructSeed(
+        buildable,
+        ctx,
+        reactors,
+        generators,
+        coolers,
+        directProducers,
+        performance.now() + 1000,
+        pooled,
+      );
+      bestPower = simulateIsland(bestSeed, ctx).totalPower;
+    }
 
-  const reversed = [...buildable].reverse();
-  const seedRev = constructSeed(
-    reversed,
-    ctx,
-    reactors,
-    generators,
-    coolers,
-    directProducers,
-    deadlineMs,
-  );
-  const powerRev = simulateIsland(seedRev, ctx).totalPower;
-  if (powerRev > bestPower + EPS) {
-    bestPower = powerRev;
-    bestSeed = seedRev;
-  }
+    if (performance.now() >= deadlineMs - 50 || buildable.length < 6)
+      return { seed: bestSeed, power: bestPower };
 
-  if (performance.now() < deadlineMs - 50) {
-    const rng = new Rng(42);
-    const shuffled = [...buildable];
-    rng.shuffle(shuffled);
-    const seedRand = constructSeed(
-      shuffled,
+    const reversed = [...buildable].reverse();
+    const seedRev = constructSeed(
+      reversed,
       ctx,
       reactors,
       generators,
       coolers,
       directProducers,
       deadlineMs,
+      pooled,
     );
-    const powerRand = simulateIsland(seedRand, ctx).totalPower;
-    if (powerRand > bestPower + EPS) bestSeed = seedRand;
-  }
+    const powerRev = simulateIsland(seedRev, ctx).totalPower;
+    if (powerRev > bestPower + EPS) {
+      bestPower = powerRev;
+      bestSeed = seedRev;
+    }
 
-  return bestSeed;
+    if (performance.now() < deadlineMs - 50) {
+      const rng = new Rng(42);
+      const shuffled = [...buildable];
+      rng.shuffle(shuffled);
+      const seedRand = constructSeed(
+        shuffled,
+        ctx,
+        reactors,
+        generators,
+        coolers,
+        directProducers,
+        deadlineMs,
+        pooled,
+      );
+      const powerRand = simulateIsland(seedRand, ctx).totalPower;
+      if (powerRand > bestPower + EPS) {
+        bestPower = powerRand;
+        bestSeed = seedRand;
+      }
+    }
+
+    return { seed: bestSeed, power: bestPower };
+  };
+
+  const local = passes(false);
+  if (ctx.anomaly.rule !== "shared_cooling") return local.seed;
+
+  // Under a pool the same three orders are run engine-first as well, and the
+  // strongest seed of the six starts the search. The local passes stay in:
+  // they are what the search started from before the pooled ones existed, and
+  // a pooled seed that comes back weaker is not an improvement.
+  const pooled = passes(true);
+  return pooled.power > local.power + EPS ? pooled.seed : local.seed;
 }
 
 // ---------------------------------------------------------------------------
@@ -954,10 +1120,11 @@ async function hillClimb(
   //
   // It is read off the PLAIN roster, so under a rule that rates a tile above it
   // the walk runs colder than this calibration intends — a move on a x1.67 shore
-  // is worth x1.67 of one here. Left alone deliberately: the previous, hotter
-  // calibration was itself the bug above, and nothing in this repo moves a tuning
-  // constant on an argument rather than a measurement. Whoever measures it should
-  // measure across several seeds and both anomalies.
+  // is worth x1.67 of one here. Scaling it by `islandRatingCeiling` was measured
+  // at 15s over three seeds: Tidal on map 3 went 176/178/179AC to 179/181/178AC,
+  // Singularity on map 3 142/142/139AC to 140/142/142AC and on map 7 271/271/271AC
+  // to 268/267/271AC — inside run-to-run noise, so the plain figure is kept.
+  // Anyone re-measuring should use a longer budget and more seeds than that.
   const moveScale =
     generators.length > 0
       ? generators[0].effectiveValue * generatorEnergyRatio(generators[0])
@@ -1039,6 +1206,13 @@ async function hillClimb(
       if (uncooled.length > 0 && topCooler !== null && rng.random() < 0.6) {
         const target = rng.choice(uncooled);
         const adj = ctx.neighbors[target.idx];
+        // Beside the starved producer, which is the only place a cooler can
+        // reach it. Under a pool any tile would do and a short pool starves
+        // every producer at once, so this writes over a random occupied
+        // neighbour there — often the reactor feeding the very producer it
+        // means to save. Aiming it at an empty tile instead was measured on
+        // maps 3 and 7 at 15s over three seeds and changed nothing, so the one
+        // shape is kept.
         if (adj.length > 0) {
           const tile = adj[rng.int(adj.length)];
           const old = current[tile];
@@ -1251,8 +1425,9 @@ function targetCompositions(
  * 1.49e23, so the stage never ran at any realistic budget.
  *
  * Scaling the target by one island-wide factor is the move `estimateTotalMaxPower`
- * already makes to keep its bound a bound (`islandMaxScale`), and it is sound for
- * the same reason: a composition's power is positively homogeneous of degree 1 in
+ * makes to keep its bound a bound wherever its mask cannot say which tiles carry
+ * the factor (`islandMaxScale`), and it is sound for the same reason: a
+ * composition's power is positively homogeneous of degree 1 in
  * the roster's figures, so rating the whole island at its best tile is an upper
  * bound on rating each tile at its own. Loose where only part of an island
  * qualifies, which is the right way to be wrong here — a ceiling that is too low
@@ -2056,17 +2231,27 @@ export async function solveIsland(
   );
   if (ctx.n === 0) return { placements: [], powerOutput: 0.0 };
 
+  // The pools every stage draws on, in the units the board will hold: a rule
+  // that scales a whole role (a cooling pool's x0.88) is folded in here, so the
+  // stages that count from the roster rather than place on a tile count the
+  // right figure. `rate` is idempotent, so a pool entry that already carries
+  // its role's rating is handed straight back at the write.
+  const pool = (b: EffectiveBuilding) => ctx.rateRole(b);
   const reactors = effectiveBuildings
     .filter(isReactor)
+    .map(pool)
     .sort((a, b) => b.effectiveValue - a.effectiveValue);
   const generators = effectiveBuildings
     .filter((b) => b.type === "generator")
+    .map(pool)
     .sort((a, b) => b.effectiveValue - a.effectiveValue);
   const coolers = effectiveBuildings
     .filter((b) => b.type === "cooler")
+    .map(pool)
     .sort((a, b) => b.effectiveValue - a.effectiveValue);
   const directProducers = effectiveBuildings
     .filter(isDirectProducer)
+    .map(pool)
     .sort((a, b) => b.energy - a.energy);
 
   const canHub = reactors.length > 0 && generators.length > 0;

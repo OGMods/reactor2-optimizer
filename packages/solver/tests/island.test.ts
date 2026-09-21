@@ -16,6 +16,11 @@ import { EPS } from "../src/solver/constants";
 import { buildIslandContext } from "../src/solver/context";
 import { makeGrid } from "../src/grid";
 import { getAnomaly } from "../src/data/anomalies";
+import { BUILDINGS, allUpgradesUnlocked } from "../src/data/buildings";
+import {
+  getEffectiveBuildings,
+  scaleEffectiveBuilding,
+} from "../src/data/effectiveBuildings";
 import { ISLAND_TEMPLATES } from "../src/data/maps";
 import { decodeBlueprint } from "../src/encoding/blueprint";
 import {
@@ -532,9 +537,11 @@ describe("the theoretical max-power bound", () => {
      * A CLI run on Magma Rift reported 119.9% layout efficiency before the
      * bound learned about the anomaly.
      *
-     * The board is bare grass, so every tile of it is on the board's edge and
-     * every building is bonused — the worst case for the bound, and the one
-     * where being loose is no excuse.
+     * The board is bare grass, so every tile but the centre is on the board's
+     * edge and eight of the nine buildings are bonused — close to the worst
+     * case for the bound, and the one where being loose is no excuse. The
+     * mixed-board case, where the two-class bound has real work to do, is
+     * `the two-class bound under a terrain bonus` below.
      */
     const tidal = getAnomaly("tidal_ascendancy");
     const roster = basicRoster({ dpValue: 120, dpWasteRatio: 0.2 });
@@ -623,8 +630,9 @@ describe("the theoretical max-power bound", () => {
      * adjacency — a cooler on the far side of the board now cools everything —
      * and the bound is safe because it never assumed any: it relaxes adjacency
      * away and asks only what the tile counts allow. The 0.88 on every cooler
-     * only ever costs cooling, so the island scale stays 1 and the bound is the
-     * plain one.
+     * goes into the roster the bound is run on, so it is the plain bound over a
+     * roster whose coolers are worth 0.88 of their tier — below the plain one,
+     * never above it.
      *
      * The board is handed over whole here, as `wholeBoardIsland` does, because
      * that is what the pool is defined over.
@@ -644,7 +652,18 @@ describe("the theoretical max-power bound", () => {
       island.waterAdjacent,
     );
 
-    expectClose(bound, boundFor(island, roster));
+    expectClose(
+      bound,
+      boundFor(
+        island,
+        roster.map((b) =>
+          b.type === "cooler" ? scaleEffectiveBuilding(b, 0.88) : b,
+        ),
+      ),
+    );
+    // Equal here rather than below: this roster is bound by its direct
+    // producers, not by cooling, so the rated coolers move nothing.
+    expect(bound).toBeLessThanOrEqual(boundFor(island, roster));
 
     const rng = new Rng(20260921);
     const options: (EffectiveBuilding | null)[] = [...roster, null];
@@ -666,9 +685,13 @@ describe("the theoretical max-power bound", () => {
   it("rises with a terrain bonus only where a tile qualifies", () => {
     const tidal = getAnomaly("tidal_ascendancy");
     const roster = basicRoster();
-    // Bare grass: every tile is on the board's edge, so the whole island is
-    // shore and the bound is the plain one scaled by the multiplier.
-    const shore = islandFor(["GGG", "GGG", "GGG"], roster);
+    // Two rows of bare grass: every tile is on the board's edge, so the whole
+    // island is shore and the bound is the plain one scaled by the multiplier
+    // — the two-class figure has one class, and it is spelled as the figure it
+    // always was. (A bare 3x3 is *not* this: its centre tile has all eight
+    // neighbours on the board, and that one inland tile is enough for the
+    // two-class bound to come in under the scaled one.)
+    const shore = islandFor(["GGGG", "GGGG"], roster);
     // Walled in and away from every edge: nothing qualifies, so the bound is
     // untouched and stays as tight as it was.
     const inland = islandFor(
@@ -684,6 +707,177 @@ describe("the theoretical max-power bound", () => {
       estimateTotalMaxPower([inland], roster, tidal),
       estimateTotalMaxPower([inland], roster),
     );
+  });
+
+  describe("the two-class bound under a terrain bonus", () => {
+    /*
+     * Rating a whole island at its best tile is a bound, and on the shipped
+     * maps it is a quarter loose: the coast is 36-44% of the grass, and the
+     * scaled figure rates every inland tile as if it stood on it. The
+     * two-class bound splits the tile budget by class instead — a shore
+     * building is worth its shore figures, an inland one its plain ones, and
+     * both pay into the one heat and the one cooling total. These pin that it
+     * is still a bound, that it is tighter, and that it collapses to the old
+     * figure at either end.
+     */
+    const tidal = getAnomaly("tidal_ascendancy");
+
+    /** The figure the two-class bound replaced: the plain LP at the multiplier. */
+    const wholeIslandFigure = (
+      island: IslandSubGrid,
+      roster: EffectiveBuilding[],
+    ): number => estimateTotalMaxPower([island], roster) * 1.67;
+
+    it("is never beaten by a random layout on a mixed board", () => {
+      /*
+       * A 5x5 of bare grass: a ring of sixteen shore tiles round nine inland
+       * ones, so a random layout straddles the coast every time. The roster
+       * has a direct producer because the producer/cooler split is the one
+       * part of the bound that is relaxed to fractions, and a board with no
+       * producers would never exercise it.
+       */
+      const roster = basicRoster({ dpValue: 120, dpWasteRatio: 0.2 });
+      const island = islandFor(
+        ["GGGGG", "GGGGG", "GGGGG", "GGGGG", "GGGGG"],
+        roster,
+      );
+      const bound = estimateTotalMaxPower([island], roster, tidal);
+      expect(bound).toBeLessThan(wholeIslandFigure(island, roster));
+
+      const ctx = buildIslandContext(
+        island.grid,
+        island.buildable,
+        tidal,
+        island.waterAdjacent,
+      );
+      let shore = 0;
+      let inland = 0;
+      for (let t = 0; t < ctx.n; t++) {
+        if (ctx.rate(t, roster[0]) === roster[0]) inland++;
+        else shore++;
+      }
+      expect([shore, inland], "the board is mixed").toEqual([16, 9]);
+
+      const rng = new Rng(20260922);
+      const options: (EffectiveBuilding | null)[] = [...roster, null];
+      for (let attempt = 0; attempt < 500; attempt++) {
+        const placement: Placement = Array.from({ length: ctx.n }, (_, t) => {
+          const pick = rng.choice(options);
+          return pick === null ? null : ctx.rate(t, pick);
+        });
+
+        const { totalPower } = simulateIsland(placement, ctx);
+
+        expect(
+          totalPower,
+          `a layout beat the 'upper' bound on attempt ${attempt}`,
+        ).toBeLessThanOrEqual(bound + EPS);
+      }
+    });
+
+    it("is not beaten by a layout built to the bound's own shape", () => {
+      /*
+       * Random placement rarely comes near the bound, so this layout is built
+       * by hand to lean the way the LP's optimum leans — every reactor and
+       * generator on the coast, the coolers inland, no cluster straddling the
+       * shoreline — which is the shape a real search converges on. A bound
+       * this layout beat would be one the search beats too.
+       *
+       *     R G R G      the top and bottom rows and the two ends are shore;
+       *     G C C G      the inner 2x2 is inland and takes the coolers. The
+       *     R G R G      generators straddle nothing: each touches a shore
+       *                  reactor and an inland cooler.
+       */
+      const roster = basicRoster({ reactorValue: 100, generatorValue: 50 });
+      const island = islandFor(["GGGG", "GGGG", "GGGG"], roster);
+      const bound = estimateTotalMaxPower([island], roster, tidal);
+      expect(bound).toBeLessThan(wholeIslandFigure(island, roster));
+
+      const ctx = buildIslandContext(
+        island.grid,
+        island.buildable,
+        tidal,
+        island.waterAdjacent,
+      );
+      const shape = placeOn(ctx, ["RGRG", "GCCG", "RGRG"], {
+        R: roster[0],
+        G: roster[1],
+        C: roster[2],
+      });
+      const placement: Placement = shape.map((b, t) =>
+        b === null ? null : ctx.rate(t, b),
+      );
+
+      const { totalPower } = simulateIsland(placement, ctx);
+      expect(totalPower).toBeLessThanOrEqual(bound + EPS);
+      expect(totalPower).toBeGreaterThan(0);
+    });
+
+    it("comes in under the whole-island figure once an island has inland tiles", () => {
+      const roster = basicRoster();
+      // The bare 3x3's centre is the only inland tile, and it is enough.
+      const nearlyShore = islandFor(["GGG", "GGG", "GGG"], roster);
+      const half = islandFor(
+        ["RRRRRRR", "RGGGGGR", "RGGGGGR", "RGGGGGR", "R.....R"],
+        roster,
+      );
+
+      for (const island of [nearlyShore, half]) {
+        const bound = estimateTotalMaxPower([island], roster, tidal);
+        expect(bound).toBeLessThan(wholeIslandFigure(island, roster));
+        // And never below what the plain rules allow: a bonus cannot make a
+        // layout worth less than it is without one.
+        expect(bound).toBeGreaterThanOrEqual(
+          estimateTotalMaxPower([island], roster),
+        );
+      }
+    });
+
+    it("never reads looser than the whole-island figure, however small the island", () => {
+      /*
+       * The producer/cooler split is fractional, and on an island of a few
+       * tiles a fractional cooler is worth more than a whole one — enough to
+       * put the two-class figure *above* the whole-island one it exists to
+       * tighten. The smaller of the two is taken, so the bound is never worse
+       * than it was.
+       */
+      const roster = basicRoster({ dpValue: 120, dpWasteRatio: 0.2 });
+      // Three grass tiles walled in by rock, one of them beside water: two
+      // inland, one shore.
+      const island = islandFor(["RRRRR", "RGGG.", "RRRRR"], roster);
+
+      expect(estimateTotalMaxPower([island], roster, tidal)).toBeLessThanOrEqual(
+        wholeIslandFigure(island, roster) + EPS,
+      );
+    });
+
+    it("tightens the shipped maps by about a quarter", async () => {
+      /*
+       * The measurement that justified the construction: at full unlocks the
+       * two-class bound sits at 0.758-0.771 of the whole-island figure on
+       * every shipped map, and Magma Rift's best 15s layout reads 93% of it
+       * where it read 72% before. Pinned against the codes the app ships, so a
+       * re-authored map that changed its coastline would move this on purpose.
+       */
+      const roster = getEffectiveBuildings(BUILDINGS, allUpgradesUnlocked());
+      for (const template of ISLAND_TEMPLATES) {
+        const { grid } = await decodeBlueprint(template.code);
+        const islands = splitGridIntoIslands(
+          grid,
+          canCoolDirectProducer(roster),
+          tidal,
+        );
+        const bound = estimateTotalMaxPower(islands, roster, tidal);
+        const whole = islands.reduce(
+          (sum, island) => sum + wholeIslandFigure(island, roster),
+          0,
+        );
+        const base = estimateTotalMaxPower(islands, roster);
+
+        expect(bound, template.id).toBeLessThanOrEqual(0.8 * whole);
+        expect(bound, template.id).toBeGreaterThanOrEqual(base);
+      }
+    });
   });
 
   it("errs high for a terrain list the shore mask cannot decide", () => {

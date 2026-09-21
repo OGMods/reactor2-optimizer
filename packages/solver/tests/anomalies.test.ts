@@ -32,8 +32,8 @@ import {
   estimateTotalMaxPower,
   splitGridIntoIslands,
 } from "../src/solver/island";
-import { solveIsland } from "../src/solver/placementSearch";
-import { basicCatalogue, basicRoster, cooler } from "./helpers";
+import { internals, solveIsland } from "../src/solver/placementSearch";
+import { basicCatalogue, basicRoster, cooler, reactor } from "./helpers";
 import type {
   AnomalyDefinition,
   EffectiveBuilding,
@@ -259,6 +259,95 @@ describe("a shared cooling pool reaching the board", () => {
     const each = out.placements.filter((p) => p.coolingProvided > 0);
     expect(each.length).toBe(2);
     expect(each[0].coolingProvided).toBeCloseTo(each[1].coolingProvided, 6);
+  });
+});
+
+describe("the seed under a shared cooling pool", () => {
+  /*
+   * Under a pool a cooler's position contributes nothing but the tile it
+   * stands on, so a seed that spends a hub's own neighbours on coolers is
+   * spending the best-connected tiles on the one building that needs none —
+   * and it never fills a scrap, because no hub fits there, though a cooler on
+   * one is pure gain. The pooled seed builds every hub engine-first and pays
+   * for its cooling on the least-connected free tiles.
+   *
+   * A 4x4 block beside three scraps: one tile on its own and a pair. Two-tile
+   * hubs (one reactor fills one generator) fit the block exactly eight times,
+   * and the waste those make needs three coolers at x0.88 — the three scraps.
+   */
+  const BOARD = ["GGGGRG", "GGGGRR", "GGGGRG", "GGGGRG"];
+  const roster = basicRoster();
+  const [REACTOR, GENERATOR, COOLER] = roster;
+
+  const seedFor = (anomaly: AnomalyDefinition) => {
+    const ctx = buildIslandContext(makeGrid(BOARD), undefined, anomaly);
+    const pool = (b: EffectiveBuilding) => ctx.rateRole(b);
+    const seed = internals.constructMultiStartSeed(
+      ctx,
+      [pool(REACTOR)],
+      [pool(GENERATOR)],
+      [pool(COOLER)],
+      [],
+      performance.now() + 2_000,
+    );
+    const isScrap = (t: number) => ctx.xs[t] === 5;
+    const coolers: number[] = [];
+    const besideGenerator: number[] = [];
+    for (let t = 0; t < ctx.n; t++) {
+      if (seed[t]?.type !== "cooler") continue;
+      coolers.push(t);
+      const nb = ctx.neighbors[t];
+      for (let k = 0; k < nb.length; k++) {
+        if (seed[nb[k]]?.type === "generator") {
+          besideGenerator.push(t);
+          break;
+        }
+      }
+    }
+    return {
+      ctx,
+      seed,
+      power: simulateIsland(seed, ctx).totalPower,
+      coolers,
+      onScraps: coolers.filter(isScrap),
+      besideGenerator,
+      emptyScraps: Array.from(ctx.tiles).filter(
+        (t) => isScrap(t) && seed[t] === null,
+      ),
+    };
+  };
+
+  it("puts no cooler beside a hub while a less-connected tile is free", () => {
+    const out = seedFor(getAnomaly("cryo_nexus"));
+
+    // Alive: a short pool is an all-offline board, and `stabilize` would then
+    // delete every producer the seed placed.
+    expect(out.power).toBeGreaterThan(EPS);
+    expect(out.coolers.length).toBeGreaterThan(0);
+    // Every cooler on a scrap, so none beside a generator — the block is all
+    // engine.
+    expect(out.onScraps.length).toBe(out.coolers.length);
+    expect(out.besideGenerator).toEqual([]);
+    expect(out.emptyScraps).toEqual([]);
+    // And the pool it bought covers the waste it makes, with nothing spare:
+    // the block holds eight hubs and the scraps their three coolers.
+    expect(out.coolers.length).toBe(3);
+    expect(out.power).toBeCloseTo(8 * GENERATOR.energy, 6);
+  });
+
+  it("is a branch taken only under the pool", () => {
+    /*
+     * The same board under the base rules keeps the seed the fixtures pin:
+     * coolers beside the hubs they serve, and the scraps — where no hub fits —
+     * left empty. This is what makes the case above non-vacuous, and it is the
+     * base path's byte-identity stated at the one board where the two differ.
+     */
+    const out = seedFor(getAnomaly("none"));
+
+    expect(out.power).toBeGreaterThan(EPS);
+    expect(out.besideGenerator.length).toBeGreaterThan(0);
+    expect(out.onScraps).toEqual([]);
+    expect(out.emptyScraps.length).toBe(3);
   });
 });
 
@@ -508,6 +597,37 @@ describe("a terrain bonus reaching the board", () => {
     expect(ctx.rate(ctx.tiles[0], base).effectiveValue).toBeCloseTo(88, 9);
     // Only the cooler role, and the same answer on every tile.
     expect(ctx.rate(ctx.tiles[1], base)).toBe(ctx.rate(ctx.tiles[0], base));
+  });
+
+  it("hands the counting stages the role's rating, with no tile to ask about", () => {
+    /*
+     * `rateRole` is the per-role half of `rate` on its own. The stages that
+     * count from the roster rather than place on a tile — hub fits, the
+     * composition targets — reason from it, so under a pool they count a
+     * cooler at what the board will hold. Counted from the plain figure, every
+     * target the retarget stage proposed under Cryo was 8-14% short of the
+     * waste it planned to make, which under a pool is a board that is offline
+     * entirely — so the stage never produced a layout that could beat the one
+     * in hand, and did so silently.
+     */
+    const pooled = contextFor(["GGGGG", "GGGGG"], getAnomaly("cryo_nexus"));
+    const base = cooler(100);
+    const rated = pooled.rateRole(base);
+
+    expect(rated.effectiveValue).toBeCloseTo(88, 9);
+    // The same object `rate` hands out, so a pool entry written onto a tile is
+    // handed straight back rather than scaled a second time.
+    expect(pooled.rate(pooled.tiles[0], rated)).toBe(rated);
+    expect(pooled.rate(pooled.tiles[0], base)).toBe(rated);
+    // Only the role the rule names.
+    expect(pooled.rateRole(reactor(100))).toEqual(reactor(100));
+
+    // The identity wherever no rule scales a whole role, a terrain bonus
+    // included: that one is a property of the tile, not of the role.
+    for (const id of ["none", "singularity_isolation", "tidal_ascendancy"]) {
+      const ctx = contextFor(["GGGGG", "GGGGG"], getAnomaly(id));
+      expect(ctx.rateRole(base), id).toBe(base);
+    }
   });
 
   it("reports a power the same layout re-rates to", async () => {

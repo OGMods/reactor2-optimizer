@@ -159,6 +159,20 @@ export interface IslandContext {
    */
   rate(tile: number, building: EffectiveBuilding): EffectiveBuilding;
   /**
+   * The per-role half of `rate` alone: `building` at whatever a rule scales its
+   * whole role by, on every tile alike, and the building itself where no rule
+   * does.
+   *
+   * For the stages that count rather than place — hub fits, composition
+   * targets, the polish candidates — which have no tile to ask `rate` about and
+   * yet must reason in the units the board will hold. Under a shared cooling
+   * pool every cooler is worth x0.88 wherever it stands, and a count made from
+   * the plain figure under-provisions cooling by exactly that: every target the
+   * retarget proposed was short by 8-14%, and under a pool a short board is an
+   * offline board.
+   */
+  rateRole(building: EffectiveBuilding): EffectiveBuilding;
+  /**
    * The role-isolation rule in force, or `null` under every other anomaly.
    *
    * This one cannot be folded into a tile the way a terrain bonus can: a
@@ -438,6 +452,10 @@ export function buildIslandContext(
         building,
         crowded ? isolation.crowded : isolation.isolated,
       );
+    },
+    rateRole(building: EffectiveBuilding): EffectiveBuilding {
+      if (roleScale === null) return building;
+      return scaledBy(building, roleScale[building.type] ?? 1);
     },
     rate(tile: number, building: EffectiveBuilding): EffectiveBuilding {
       if (tileScale === null && roleScale === null) return building;

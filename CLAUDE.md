@@ -270,6 +270,15 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   271AC to 294AC, map 3 at 20s 139AC to 145AC, and map 1 — one landmass, already
   at 98% of its bound — is unchanged. The x0.88 has to be earned back before any
   of that shows.
+
+  **The seed is the one stage that branches on the rule.** Under a pool
+  `constructSeed` builds every hub engine-first — a phantom cooler sizes the
+  fit, so the neighbour slots all go to reactors — charges the cooling as a
+  board-wide debt in each candidate's rank, reserves the tiles for it, and pays
+  it off onto the least-connected free tiles, scraps first; the base seed spent
+  a hub's best-connected tiles on coolers and never filled a scrap. The seed
+  goes from ~76% of the bound to ~99% on maps 3, 7 and 8 and map 7 now returns
+  its bound at 5s; `docs/SOLVER.md` has the tables.
 - **Off the board counts as water**, which is a fact about our data rather than
   about the game: the game has one global map with open water between islands,
   and our eight boards are rectangles cut out of it, so the water past an edge is
@@ -411,24 +420,38 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   one a real layout walks past, and "no layout may ever beat it" is an invariant
   the rest of the solver is entitled to assume: Magma Rift reported 119.9%
   layout efficiency before the terrain case existed, and a generator-bound
-  roster on a 3x3 under Singularity read 163.8% before the isolation case did
-  (65.5% now). The bound rates a whole island at its best tile
-  (`islandMaxScale`), which is loose where only part of it qualifies — or where
-  only part of the roster is scaled — and is the right trade: a bound that can
-  be beaten is worthless, one that is generous only makes the efficiency figure
-  read low. Scaling the estimate's *result* is sound because it is positively
-  homogeneous of degree 1 in the roster's figures, which is also what lets a
-  rule scaling one role be answered with one island-wide number.
+  roster on a 3x3 under Singularity read 163.8% before the isolation case did.
+  A rule that scales a whole role goes **into the roster** the bound is run on
+  (`roleRatedRoster`: coolers ×0.88 under a pool, generators ×2.5 under
+  Singularity), where the bound is exact in it; scaling the LP's result by the
+  largest factor instead rated reactors and coolers up too and left the
+  Singularity bound 2.3x the tight one, so a near-optimal layout read 40%. A
+  rule that scales a *tile* splits the island's tile budget by class
+  (`estimateIslandBound`, `estimateMixedIslandMaxPower`): a shore building is
+  worth the shore-scaled roster, an inland one the plain roster, and both pay
+  into the one heat and the one cooling total, since the bound relaxes
+  adjacency away. Rating the whole island at its best tile (`islandMaxScale`,
+  kept as the ceiling) had every inland tile standing on the coast, and the
+  coast is 36-44% of the shipped grass — a quarter loose, with Magma Rift's
+  best 15s layout reading 72% of it against 93% now. The engine side is
+  enumerated integer and the producer/cooler remainder is a fractional
+  knapsack, which is what keeps it under 10ms; a mixed island takes the
+  smaller of that and the whole-island figure — both are bounds, so the
+  minimum is, and a two-tile island's fractional cooler cannot make it looser
+  than it was. An all-shore island is the plain LP at the multiplier, bit for
+  bit; an all-inland one the plain LP. Scaling a result is sound because the
+  estimate is positively homogeneous of degree 1 in the roster's figures, and
+  that is still what the ceiling rests on where the mask cannot say which
+  tiles it reaches.
 
-  **`islandMaxScale` is an exhaustive switch with no `default`**, so a fifth
-  rule shape fails to typecheck here rather than silently returning 1 — which is
-  precisely what `role_isolation` did while a layout beat the bound by 64%. It
-  allows both variants of an isolation multiplier, since which one a tile gets
-  is a function of the layout and a search free to keep generators apart rates
-  every one of them at the bonus; it is 1 for the shipped pool, whose ×0.88 only
-  ever costs cooling; and under a terrain list it errs high wherever the shore
-  mask cannot decide the question, which is any list that is not exactly
-  `["water"]`.
+  **Both switches are exhaustive with no `default`**, so a fifth rule shape
+  fails to typecheck rather than silently returning 1 or the plain roster —
+  which is precisely what `role_isolation` did while a layout beat the bound by
+  64%. The roster allows both variants of an isolation multiplier, since which
+  one a tile gets is a function of the layout and a search free to keep
+  generators apart rates every one of them at the bonus; and under a terrain
+  list the tile half errs high wherever the shore mask cannot decide the
+  question, which is any list that is not exactly `["water"]`.
 
   The anomaly crosses the worker boundary **as an id**, resolved again on the
   far side, so the message stays a string rather than a table entry that has to

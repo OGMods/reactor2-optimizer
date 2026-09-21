@@ -230,32 +230,73 @@ stage's *gate* into the layout's units, which is above and is not a tuning choic
 still scored from the plain roster, and nothing in the tree retargets toward the bonus.
 
 **The bound takes the anomaly too, and every rule of it.** `estimateTotalMaxPower` rates each
-island at its best tile (`islandMaxScale`), because a bound computed on the plain roster is one a
-rated layout walks past — and "no layout may ever beat it" is an invariant the rest of the solver
+island under the rule in force (`estimateIslandBound`), because a bound computed on the plain
+roster is one a rated layout walks past — and "no layout may ever beat it" is an invariant the rest of the solver
 is entitled to assume, not a presentation detail. Magma Rift reported 119.9% layout efficiency
 before the terrain case existed, and a generator-bound roster on a 3×3 under Singularity read
-163.8% before the isolation case did; both are now the intended side of 100%, the 3×3 at 65.5%.
+163.8% before the isolation case did; both are now the intended side of 100%.
 
-`islandMaxScale` is an exhaustive switch with **no `default`**, deliberately: a fifth rule shape
-added to `AnomalyDefinition` fails to typecheck here — "function lacks ending return statement" —
-rather than silently returning 1, which is what `role_isolation` did while a layout was walking
-past the bound by 64%. It answers `max(isolated, crowded, 1)` under a role isolation, because which
-of the two variants a tile gets is a function of the layout rather than of the island and a search
-free to keep generators apart rates every one of them at the bonus; `max(coolerMultiplier, 1)`
-under a shared pool, which is 1 for the shipped ×0.88 and leaves the bound untouched; and the
-multiplier under a terrain list it cannot fully decide. It can decide only a list that is exactly
-`["water"]`, since the shore mask is the one thing that knows off-board counts as water, while
-`terrainScales` tests rock and tree against the grid — so a landlocked island under a
-`["water", "rock"]` anomaly errs high rather than staying at 1.
+**A rule that scales a whole role goes into the roster; one that scales a tile scales the result.**
+`roleRatedRoster` rates the roster's coolers ×0.88 under a pool and its generators
+×max(isolated, crowded) under a role isolation, and the LP runs on that roster — where the bound is
+exact in the rule. It used to scale the LP's *result* by the largest factor instead, which under
+Singularity rated reactors and coolers ×2.5 as well: 2.3× the tight bound on map 1, so a
+near-optimal layout read as 40% layout efficiency, and on a generator-bound roster (where the
+bonus genuinely pays, +28% over the base rules on map 3) 51% for a layout at 97.5% of the tight
+one. Both variants of an isolation are allowed because which one a tile gets is a function of the
+layout rather than of the island, and a search free to keep generators apart rates every one of
+them at the bonus. The pool's ×0.88 lowers the bound only where cooling binds — a roster bound by
+its direct producers reads the same either way.
+
+`islandMaxScale` keeps the per-tile half as a **ceiling**: the multiplier under a terrain rule that
+reaches any tile of the island, and 1 for the role-shaped rules, whose factor is already in the
+roster. Where the shore mask can say *which* tiles it reaches, `estimateIslandBound` goes on to the
+two-class bound below; anywhere else it scales the plain LP by the ceiling. The mask can decide
+only a list that is exactly `["water"]` (`ratedTileCount`), since it is the one thing that knows
+off-board counts as water, while `terrainScales` tests rock and tree against the grid — so a
+landlocked island under a `["water", "rock"]` anomaly errs high rather than staying at 1. Both
+switches are exhaustive with **no `default`**, deliberately: a fifth rule shape added to
+`AnomalyDefinition` fails to typecheck in each — "function lacks ending return statement" — rather
+than silently returning 1 or the plain roster, which is what `role_isolation` did while a layout
+was walking past the bound by 64%.
+
+**The two-class bound is the same LP with the tile budget split by class.** Rating a whole island
+at its best tile treats every inland tile as if it stood on the coast, and on the shipped maps the
+coast is 36-44% of the grass: the bound ran a quarter loose, and Magma Rift's best 15s layout read
+72% of it. `estimateMixedIslandMaxPower` gives the shore tiles and the inland tiles separate tile
+budgets, rates a shore building at the shore-scaled roster (`scaleEffectiveBuilding` at the
+multiplier, so the snapped waste is the one the layout carries) and an inland one at the plain
+roster, and lets both pay into the one heat total and the one cooling total — a shore reactor may
+feed an inland generator and an inland cooler may cover a shore generator's waste, because the
+bound relaxes adjacency away, and any layout that respects adjacency is feasible in the relaxation
+with an objective no larger. What stays integer is chosen for cost. The engine — how many tiles of
+each class, and the reactor/generator split within each — is enumerated exactly; the tiles each
+class has left go to direct producers or coolers *fractionally*, which makes the remainder one
+fractional knapsack over three items (heat, inland producers, shore producers), filled by power per
+unit of cooling. Enumerating that split integer too was measured at 250ms on the largest island
+against under 10ms for this, and the two agree to the last bit on every shipped map: at full
+unlocks no direct producer competes with an engine, so the relaxed split never moves. The generator
+ratios are taken across *both* rosters — a shore generator's re-derived waste ratio is not
+bit-identical to the inland one, and a bound has to allow the greedier of each.
+
+Three things about how it is joined on. An island with no inland tile *is* one class, so it is
+spelled as the plain LP at the multiplier — the figure it always was, bit for bit — and one with no
+shore tile is the plain LP. A mixed island takes the **smaller** of the two-class figure and the
+whole-island one: both are bounds, so the minimum is, and it is what keeps an island of two or
+three tiles, where a fractional cooler is worth more than a whole one, from reading looser than it
+did before the split existed. And it is never below the base bound, because every shore figure is
+at least the plain one. At full unlocks it sits at 0.758-0.771 of the whole-island figure on all
+eight maps, and `--map 3 --anomaly tidal_ascendancy --time 15` reads 93% of it against 72% before;
+`island.test.ts` pins that ratio, the bound property on a mixed board, and both ends.
 
 Scaling the estimate's *result* is sound because `estimateIslandMaxPower` is positively homogeneous
 of degree 1 in the roster's figures: multiply every one of them by `k` and each of `hFirst`,
 `dRest`, `dFirst` and `hRest` scales by `k` while every ratio in it is invariant. That is also what
-lets a rule scaling only *some* buildings be answered with one island-wide number — any layout
-feasible under the partial scaling is feasible in the all-scaled world with an objective no larger.
-It is loose where only part of an island qualifies, or where only part of the roster is scaled,
-which is the right way to be wrong: a bound that can be beaten is worthless, one that is generous
-only makes the efficiency figure read low.
+lets a rule scaling only *some* buildings be answered by scaling only those entries — any layout
+feasible under the rule is feasible in that roster with an objective no larger. The ceiling is loose
+where only part of an island qualifies and the mask cannot say which part, which is the right way
+to be wrong: a bound that can be beaten is worthless, one that is generous only makes the
+efficiency figure read low.
 
 `shared_cooling` is the odd one out entirely: it is the only shape that changes more than a
 building's figures. **Its pool is the whole board** — the game's "island" is the map, Gale Hills
@@ -293,21 +334,55 @@ what a cooler is worth and what the game shows for it, not a charge levied at th
 therefore carries a per-role factor beside its per-tile one; only ever one of the two is in force,
 since only one anomaly runs at a time.
 
+**The stages that count rather than place read that role factor too**, through `ctx.rateRole`:
+`solveIsland` rates its four pools by role before anything draws on them, so a hub fit, a
+composition target and the polish candidates all count a cooler at what the board will hold. They
+counted the plain figure once, and under a pool that is exactly ×0.88 too little cooling: every
+target the retarget proposed on maps 3 and 7 came out 8–14% short of the waste it planned to make,
+which under a pool is a board that is offline *entirely* — so the stage never produced a layout that
+could beat the one in hand, silently. With the pools rated, map 7 at 15s over three seeds went
+288/281/288AC to 294/294/294AC and map 3 144/144/144AC to 145/145/144AC. `rate` is idempotent, so a
+pool entry already carrying its role's rating is handed straight back at the write; under every
+other rule `rateRole` is the identity and the pools are the roster's own objects.
+
 It is worth real power, and most on a fragmented board, since the x0.88 has to be earned back
 first: map 7 at 25s goes 271AC to 294AC, map 3 at 20s 139AC to 145AC, and map 1 — one landmass,
 already at 98% of its bound — is unchanged.
 
-**One open question, deliberately left open.** `hillClimb`'s `moveScale` — the figure the annealing
-temperature is derived from — is read off the **plain** roster: the top generator's energy at full
-fill. Under any rule that rates a tile above the roster the moves the walk is judging are worth
-more than that calibration assumes, so the walk runs colder than intended: up to ×1.67 under Tidal
-and ×2.5 under Singularity. It is plausible that it costs something and nobody has measured how
-much. It is left alone because the previous, *hotter* calibration was itself the bug the comment
-above it records — scaling by total power made large islands accept ~23% of moves each costing 7%
-of the layout, and the walk never climbed back — and because this repo does not move a tuning
-constant on an argument. Settling it means the usual measurement: several seeds at a realistic
-budget, on both a shore-heavy map under Tidal and a fragmented one under Singularity, against the
-unchanged search. Don't change it blind, and don't assume it is fine because nothing fails.
+**The seed is built engine-first under the pool**, and it is the one stage that does branch on
+the rule. The base seed places each hub's coolers on the generator's own neighbours and never fills
+a scrap, because no hub fits there — right where cooling is adjacency-bound, and exactly wrong
+under a pool, where a cooler's position contributes nothing but the tile it stands on. So under
+`shared_cooling` `constructSeed` sizes every hub against a phantom cooler (`POOL_COOLER_VALUE`,
+`Infinity`, never written onto a placement) so all of a hub's neighbour slots go to reactors, ranks
+each candidate by power per tile with the coolers it will need counted as a fractional board-wide
+cost, reserves those tiles out of the free ones before each claim (the debt is re-simulated after
+every claim rather than summed from the fits, since hubs down beside each other share reactors),
+and then pays the debt off onto the least-connected free tiles, scraps first. A short pool is an
+all-offline board that `stabilize` would strip to nothing, so the fill adds coolers until the board
+simulates alive, and takes the newest hub back if it runs out of tiles first. The same three orders
+run engine-first as well as locally and the strongest of the six seeds starts the search, so the
+pooled path can never hand the walk a weaker start than the base one did.
+
+At full unlocks the seed itself goes from 75–77% of the bound to 98–99% on maps 3, 7 and 8, with
+every scrap filled where before 5–16 tiles were left empty. What the search returns moved with it,
+same seeds, three runs each: map 7 went 293.8/293.8/293.8AC to 297.6/297.6/297.6AC at both 5s and
+15s — the bound — map 8 at 5s 337.5/337.4/337.5AC to 343.8/343.8/343.8AC and at 15s
+341.5/341.5/343.8AC to 343.8/343.8/343.8AC, and map 3 at 5s 145.4/143.6/143.6AC to 145.4 in all
+three. Nothing came back lower anywhere. `anomalies.test.ts` pins the seed on a block beside three
+scraps: every cooler on a scrap and none beside a generator under the pool, the reverse under the
+base rules, and a seed that simulates alive.
+
+**Two calibrations were measured under the rules and left as they are.** `hillClimb`'s
+`moveScale` — the figure the annealing temperature is derived from — is read off the **plain**
+roster, so under a rule that rates a tile above it the walk runs colder than intended, up to ×1.67
+under Tidal and ×2.5 under Singularity. Scaling it by `islandRatingCeiling` was measured at 15s over
+three seeds: Tidal on map 3 went 176/178/179AC to 179/181/178AC, Singularity on map 3 142/142/139AC
+to 140/142/142AC and on map 7 271/271/271AC to 268/267/271AC — inside run-to-run noise either way.
+And the walk's "add a cooler beside a starved producer" move, which under a short pool starves every
+producer at once and so writes over a random occupied neighbour, was aimed at an empty tile instead:
+identical power on maps 3 and 7 over the same three seeds. Neither pays for a second code path, so
+neither is in. A longer budget and more seeds than that is the least a re-measurement should use.
 
 ### `island.ts` — the window an island is solved in
 
