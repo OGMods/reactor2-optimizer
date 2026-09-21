@@ -207,12 +207,21 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   and the worker boundary.
 - Every stat anomaly is a **uniform** scale on a building's three figures
   (`scaleEffectiveBuilding`), so a bonus is never free power — the cooling it
-  needs grows with it. **Waste is derived rather than scaled**: the game
-  recomputes `snapToAuthoredPrecision(heat - energy)` from the fully scaled pair,
-  so research and anomaly have to meet at one multiply with a single snap after
-  it. `scaleEffectiveBuilding` multiplies `waste` directly instead — which holds
-  for one factor and breaks for two, in the last digit, where the fixtures assert
-  exactly. Fixing that is what an anomaly reaching the roster depends on.
+  needs grows with it. **Waste is derived rather than scaled**:
+  `scaleEffectiveBuilding` recomputes `snapToAuthoredPrecision(heat - energy)`
+  from the pair it just scaled, because that is the game's runtime getter and
+  carrying the authored waste through the same multiply disagrees in the last
+  digit, where the fixtures assert exactly. Only the two roles that *have* waste
+  derive one — `heat - energy` over a cooler or a reactor would turn its whole
+  output into waste.
+
+  **Research and anomaly arrive as two successive calls, in that order**, which
+  is how the game applies them (the Time Lab in the SO getter, the anomaly in
+  the runtime getter) and is not the same double as one combined factor:
+  generator7's first tier under x5 then x2.5 is 1.3875000000000001e22, against
+  1.3875e22 for x12.5. `scaling.test.ts` pins both, against the shipped
+  catalogue rather than round numbers — every divergence here is in the last bit,
+  so a test on tidy figures passes under either reading.
 - `configState.anomalyId` is the live choice, persisted under its own key rather
   than in `ui_prefs` because it is a **solve input** like the roster, not a
   preference about the app — which is also why `solveSignature()` counts it and
