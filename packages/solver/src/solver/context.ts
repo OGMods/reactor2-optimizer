@@ -123,12 +123,22 @@ export interface IslandContext {
    */
   readonly anomaly: AnomalyDefinition;
   /**
-   * True when every tile on this island rates a building the same way, which is
-   * every anomaly but a terrain bonus.
+   * True when `rate` is the identity: no tile and no role on this island rates a
+   * building as anything but itself, so `ctx.rate(t, b) === b` for every pair.
    *
    * Hoisted out of `rate` so the common case is a single boolean rather than a
    * per-tile array read, and so a stage can skip the call entirely where that
-   * reads better.
+   * reads better — which is exactly why the flag has to promise `rate`'s whole
+   * behaviour rather than only its per-tile half. It read `tileScale === null`
+   * once, which was true under a shared cooling pool while every cooler was
+   * being scaled by 0.88: a stage taking the invitation above would have rated
+   * Cryo coolers at their unscaled figures and returned a layout over-cooled on
+   * paper that the game shuts down board-wide, with nothing failing anywhere.
+   *
+   * So it is false under a terrain bonus (a per-tile scale) *and* under a role
+   * scale, and true under the rules that leave the roster alone — including
+   * `role_isolation`, which is resolved by `simulateIsland` through
+   * `rateIsolated` rather than by `rate`.
    */
   readonly uniformRating: boolean;
   /**
@@ -360,7 +370,9 @@ export function buildIslandContext(
     anomaly.rule === "shared_cooling"
       ? { cooler: anomaly.coolerMultiplier }
       : null;
-  const uniformRating = tileScale === null;
+  // Exactly `rate`'s own early-out below, so the flag cannot promise more than
+  // the call it stands in for delivers.
+  const uniformRating = tileScale === null && roleScale === null;
   // One cache per distinct scale, so a building is built at a given rating
   // once per island rather than once per placement. Keyed on the base object
   // because the roster is shared by every tile and its entries are stable for

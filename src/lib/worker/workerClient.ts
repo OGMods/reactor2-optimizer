@@ -47,10 +47,22 @@ export interface SolveRunOptions {
   /**
    * The timeline's anomaly, by id. Omitted means the base rules.
    *
-   * Carried the whole way to `solveIsland` and **not yet acted on** — the
-   * rules are modelled and threaded, not implemented. Time Lab research needs
-   * nothing here: it resolves into `unlockedUpgrades`' effective roster before
-   * a run starts.
+   * Carried the whole way to `solveIsland`, where each rule is resolved
+   * wherever its inputs are settled: a terrain bonus per tile when the island
+   * context is built, a role isolation per layout inside `simulateIsland`, and
+   * a shared cooling pool by handing the board over whole rather than split.
+   * Every one of those is downstream of here, so this field is the only thing
+   * that decides whether the search runs the timeline the player is in — omit
+   * it and a run comes back with a layout that is perfectly valid under rules
+   * nobody is playing under, which nothing on screen would contradict.
+   *
+   * It stays an **id** rather than the resolved table entry: it has a worker
+   * boundary to cross, and a string survives structured cloning without
+   * anything having to be true about the shape of `AnomalyDefinition`. The far
+   * side resolves it again through `getAnomaly`, which is total.
+   *
+   * Time Lab research needs nothing here: it resolves into `unlockedUpgrades`'
+   * effective roster before a run starts.
    */
   anomalyId?: AnomalyId;
   /**

@@ -20,7 +20,9 @@
  */
 import { deflateSync, inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
+import { ANOMALIES } from "../src/data/anomalies";
 import { BUILDINGS } from "../src/data/buildings";
+import { PRESTIGE_UPGRADES } from "../src/data/prestige";
 import { makeGrid } from "../src/grid";
 import {
   BLUEPRINT_VERSION,
@@ -421,6 +423,82 @@ describe("the rules section", () => {
       [...blueprintKey(GRID, [])].map((c) => c.charCodeAt(0)),
     );
     expect(blueprintKey(GRID, [])).toBe(blueprintKey(GRID, []));
+  });
+
+  /*
+   * The two byte tables against the two tables they are parallel to, the same
+   * way every shipped building is held to a round-trip above.
+   *
+   * The maps are keyed on `AnomalyId` and `PrestigeUpgradeId`, so a shipped id
+   * with no byte no longer compiles — but a compile-time key check says nothing
+   * about whether the byte written comes back as the id that was put in, which
+   * is the property a share code actually rests on. A transposed pair of bytes
+   * type-checks perfectly and decodes as the other anomaly.
+   */
+  it.each(ANOMALIES.map((a) => a.id))(
+    "round-trips %s, so no shipped anomaly is missing a byte",
+    async (anomalyId) => {
+      const decoded = await decodeBlueprint(
+        await encodeBlueprint(GRID, [], {}, blueprintRules(anomalyId, {})),
+      );
+
+      expect(decoded.rules?.anomalyId).toBe(anomalyId);
+    },
+  );
+
+  it.each(PRESTIGE_UPGRADES.map((u) => u.id))(
+    "round-trips %s, so no shipped research is missing a byte",
+    async (id) => {
+      const decoded = await decodeBlueprint(
+        await encodeBlueprint(
+          GRID,
+          [],
+          {},
+          // A non-zero level, because a level is an index and 0 is a real one:
+          // an entry dropped on the way out would still leave `research` empty
+          // whatever level it carried, and this is the pair that must survive.
+          blueprintRules("none", { [id]: 3 }),
+        ),
+      );
+
+      expect(decoded.rules?.research).toEqual({ [id]: 3 });
+    },
+  );
+
+  it("drops a research id the byte table has no entry for", async () => {
+    // The compatibility rule the encoder applies in the one direction it can:
+    // a reader from a later build names a research this one cannot spell, and
+    // the rest of the section still crosses.
+    const decoded = await decodeBlueprint(
+      await encodeBlueprint(
+        GRID,
+        [],
+        {},
+        blueprintRules("none", { not_a_research: 2, absolute_zero: 1 }),
+      ),
+    );
+
+    expect(decoded.rules?.research).toEqual({ absolute_zero: 1 });
+  });
+
+  it("writes an unknown anomaly id as no anomaly", async () => {
+    // `rules.anomalyId` is a plain string — it arrives off `localStorage` and
+    // across the worker boundary — so this is the one miss the closed key type
+    // cannot catch. It is the same total reading `getAnomaly` makes, and it must
+    // not take the research with it.
+    const decoded = await decodeBlueprint(
+      await encodeBlueprint(
+        GRID,
+        [],
+        {},
+        blueprintRules("not_an_anomaly", { stellar_forge: 0 }),
+      ),
+    );
+
+    expect(decoded.rules).toEqual({
+      anomalyId: "none",
+      research: { stellar_forge: 0 },
+    });
   });
 });
 

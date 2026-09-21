@@ -50,9 +50,16 @@ export const PRESTIGE_UPGRADES: readonly PrestigeUpgrade[] = [
     description:
       "Improves all Generators and Wind Turbines, increasing Energy output, " +
       "Heat, and overheat thresholds.",
-    // The three figures it names are `EffectiveBuilding`'s three, so this is a
-    // uniform scale like the stat anomalies -- and like them, not free power:
-    // the overheat threshold it raises is the waste that must then be cooled.
+    // A uniform scale like the stat anomalies: energy and heat are two of
+    // `EffectiveBuilding`'s three figures, and the third -- waste -- is derived
+    // as `snap(heat - energy)` from the pair after they are scaled, so it grows
+    // with them. That is what keeps this from being free power: a generator
+    // rated x5 makes x5 the waste and needs x5 the cooling to stay online.
+    //
+    // The overheat threshold it also names is not modelled and is not the
+    // reason. It sizes a power source's waste-heat *store*, not the waste it
+    // makes, and a sustainable layout never fills it, so per
+    // `docs/game-logic.md` it is never the binding constraint.
     roles: ["generator", "direct_producer"],
     bonuses: [1.0, 1.5, 2.25, 3.0, 4.0],
   },
@@ -62,21 +69,21 @@ export const PRESTIGE_UPGRADES: readonly PrestigeUpgrade[] = [
     effect: "Heat Output",
     description: "Boosts the Heat output of all Heat Producers.",
     /*
-     * Reactors only — and this is the **one uncertain call in this file**.
+     * Reactors only, and the boundary is the **class of building** rather than
+     * the catalogue's grouping.
      *
      * The game's own category `heat_producer` holds reactors *and* direct
      * producers (see `BuildingDefinition`), so "all Heat Producers" read
-     * literally would take the wind turbine too. Against that: `infinite_grid`
-     * above goes out of its way to name "Generators and Wind Turbines", which
-     * is only worth saying if the turbine is not already covered here, and
-     * scaling a direct producer's heat alone would be the only non-uniform
-     * effect in the game -- its energy and waste are authored separately and
-     * this names neither.
+     * literally would take the wind turbine too. It does not: a turbine's SO
+     * inherits `PowerSourceBuildingSO` and reads `infinite_grid`, while this
+     * research is read only by `HeatProducerBuildingSO`. That is why
+     * `infinite_grid` above goes out of its way to name "Generators and Wind
+     * Turbines" -- worth saying precisely because the turbine is not covered
+     * here.
      *
-     * If it does cover turbines, the cost of being wrong is close to nothing:
-     * the wind turbine is the weakest building in the roster and, per
-     * `docs/game-logic.md`, almost never earns a tile. Worth confirming in
-     * game all the same.
+     * So the rule is "every heat producer", and a reactor is the only one the
+     * shipped roster has; it would cover any other the game added. Modelling it
+     * as `["reactor"]` is that rule, not an approximation of it.
      */
     roles: ["reactor"],
     bonuses: [1.0, 1.5, 2.25, 3.0, 4.0],

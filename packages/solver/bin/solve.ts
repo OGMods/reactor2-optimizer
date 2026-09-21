@@ -31,15 +31,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import {
-  ANOMALIES,
-  DEFAULT_ANOMALY_ID,
-  getAnomaly,
-} from "../src/data/anomalies";
+import { ANOMALIES, DEFAULT_ANOMALY_ID } from "../src/data/anomalies";
 import { BUILDINGS, allUpgradesUnlocked } from "../src/data/buildings";
 import { getEffectiveBuildings } from "../src/data/effectiveBuildings";
 import {
   blueprintKey,
+  blueprintRules,
   decodeBlueprint,
   encodeBlueprint,
   placementTiers,
@@ -61,6 +58,7 @@ import { Leaderboard } from "./leaderboard";
 import { DEFAULT_MAP_NUM, MAPS, MAPS_BY_NUM, type CliMap } from "./maps";
 import { WorkerPool } from "./pool";
 import {
+  anomalyLine,
   printRunComparison,
   printSessionReport,
   printSummary,
@@ -107,7 +105,11 @@ const DEFAULT_TOP_N = 3;
  */
 const SEED_STRIDE = 100003;
 
-const TEST_FILENAME_RE = /^test_(\d+)\.txt$/;
+// The optional tail is the anomaly tag `anomalyTag` appends. It has to be
+// matched here rather than left to a looser pattern elsewhere: this regex is what
+// finds the previous ids, so a tagged filename it could not see would restart
+// numbering at 1 and overwrite an untagged run.
+const TEST_FILENAME_RE = /^test_(\d+)(?:_[a-z_]+)?\.txt$/;
 const ISLAND_FILENAME_RE = /^(\d+)_island_\d+_\d+.*\.txt$/;
 
 function nextOutputId(pattern: RegExp): number {
@@ -198,15 +200,51 @@ async function solveWithPool(
   return buildOptimizationResult(plan, results);
 }
 
+/**
+ * A run's blueprint code — the one code writer all three CLI paths go through.
+ *
+ * It states the rules as well as the tiers, which a share code must: a code with
+ * no rules section decodes as "rules unknown", and the app's preview then rates
+ * the board under *no* anomaly and no research. A coast-hugging Tidal layout
+ * would come back at roughly its baseline figure with nothing on screen saying
+ * why.
+ *
+ * The research table is **empty rather than absent**, which is a truthful
+ * statement and not the same claim: the CLI solves at full building unlocks and
+ * no Time Lab (there is no flag for one), so "the author had no research" is
+ * exactly what it knows. `DEFAULT_ANOMALY_ID` spells the absence of `--anomaly`
+ * for the same reason — "no anomaly" is a real choice, and stating it is what
+ * keeps a reader off their own.
+ */
 async function codeFor(
   grid: Tile[][],
   result: OptimizationResult,
+  anomalyId: AnomalyId | undefined,
 ): Promise<string> {
   return encodeBlueprint(
     grid,
     result.placements,
     placementTiers(result.placements),
+    blueprintRules(anomalyId ?? DEFAULT_ANOMALY_ID, {}),
   );
+}
+
+/**
+ * The anomaly marked into a filename, or nothing under the base rules.
+ *
+ * The same argument `anomalyLine` makes about a header, applied to the artifact:
+ * `solves/` accumulates across runs and a code says nothing from the outside, so
+ * a directory of three timelines is unreadable without opening every file. The
+ * precedent is `formatNumberForFilename` and the app's `layoutImageFilename` —
+ * the figure that identifies an artifact belongs in its name.
+ *
+ * The full id rather than an abbreviation of it: there is no second table to
+ * keep in step, and it is what `--anomaly` takes, so a filename can be pasted
+ * back into the flag that produced it. Empty under `none`, so every existing
+ * filename is unchanged.
+ */
+function anomalyTag(anomalyId: AnomalyId | undefined): string {
+  return !anomalyId || anomalyId === DEFAULT_ANOMALY_ID ? "" : `_${anomalyId}`;
 }
 
 async function solveMap(
@@ -239,7 +277,7 @@ async function solveMap(
       runNum,
       result,
       elapsedS: (Date.now() - started) / 1000,
-      code: await codeFor(grid, result),
+      code: await codeFor(grid, result, anomalyId),
     });
   }
 
@@ -264,30 +302,25 @@ async function runSingle(
   pool: WorkerPool | null,
 ): Promise<void> {
   const testId = nextOutputId(TEST_FILENAME_RE);
+  const filename = `test_${testId}${anomalyTag(anomalyId)}.txt`;
   const runs = await solveMap(
     gameMap,
     unlockedUpgrades,
     1,
     timeLimitS,
     `Solving map ${gameMap.num} (test ID: ${testId})`,
-    () => `test_${testId}.txt`,
+    () => filename,
     seed,
     anomalyId,
     pool,
   );
 
   const run = runs[0];
-  // Named only when there is one, so the ordinary line-up is unchanged. The
-  // power figures mean something different under each set of rules, and a
-  // `solves/` directory of codes solved under three timelines otherwise says
-  // nothing about which is which.
-  if (anomalyId && anomalyId !== DEFAULT_ANOMALY_ID)
-    console.log(`Anomaly:                ${getAnomaly(anomalyId).name}`);
+  const rules = anomalyLine(anomalyId);
+  if (rules) console.log(rules);
   printSummary(run.result, run.elapsedS);
   console.log(`Blueprint: ${run.code}`);
-  console.log(
-    `Test output written to: ${path.join(SOLVES_DIR, `test_${testId}.txt`)}\n`,
-  );
+  console.log(`Test output written to: ${path.join(SOLVES_DIR, filename)}\n`);
 }
 
 async function runComparison(
@@ -300,14 +333,15 @@ async function runComparison(
   pool: WorkerPool | null,
 ): Promise<void> {
   const sessionId = nextOutputId(ISLAND_FILENAME_RE);
+  const tag = anomalyTag(anomalyId);
 
   for (let idx = 0; idx < gameMaps.length; idx++) {
     const gameMap = gameMaps[idx];
     const filenameFor = (run: SolveRun, bestPower: number): string => {
       if (run.result.totalPower >= bestPower)
-        return `${sessionId}_island_${gameMap.num}_${run.runNum}_${formatNumberForFilename(bestPower)}.txt`;
+        return `${sessionId}_island_${gameMap.num}_${run.runNum}_${formatNumberForFilename(bestPower)}${tag}.txt`;
       const diff = formatNumberForFilename(bestPower - run.result.totalPower);
-      return `${sessionId}_island_${gameMap.num}_${run.runNum}_minus_${diff}.txt`;
+      return `${sessionId}_island_${gameMap.num}_${run.runNum}_minus_${diff}${tag}.txt`;
     };
 
     const mapRuns = await solveMap(
@@ -322,7 +356,7 @@ async function runComparison(
       pool,
     );
 
-    printRunComparison(sessionId, gameMap.num, mapRuns);
+    printRunComparison(sessionId, gameMap.num, mapRuns, anomalyId);
     const best = mapRuns.reduce((a, b) =>
       b.result.totalPower > a.result.totalPower ? b : a,
     );
@@ -355,6 +389,7 @@ async function runSession(
     estimatedMaxPower: 0,
     topN: args.top,
     workers: inFlight,
+    anomalyId: args.anomalyId,
     powers: [],
     top: [],
     elapsedS: 0,
@@ -404,7 +439,7 @@ async function runSession(
           power: result.totalPower,
           attempt,
           activeTiles: result.activeTilesCount,
-          code: await codeFor(grid, result),
+          code: await codeFor(grid, result, args.anomalyId),
           key: blueprintKey(grid, result.placements),
         };
         board.offer(candidate);
@@ -481,7 +516,9 @@ options:
                  accepted and ignored, exactly as in the app.
 
 This renders no picture. Each run writes its blueprint code to solves/, named
-after what it found; paste one into the app's Import to see the board.`;
+after what it found and after the anomaly it found it under; paste one into the
+app's Import to see the board. The code states its tiers and its anomaly, so the
+app rates the layout the way this run did.`;
 
 function parseArgs(argv: string[]): Args | null {
   const args: Args = {

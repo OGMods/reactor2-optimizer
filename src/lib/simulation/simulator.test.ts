@@ -23,13 +23,14 @@
  *   is a finer partition than the island.
  */
 import { describe, it, expect } from "vitest";
-import { simulatePlacedBuildings } from "./simulator";
+import { ratedPlacementAt, simulatePlacedBuildings } from "./simulator";
 import { getAnomaly } from "@reactor2/solver";
 import { buildIslandContext } from "@reactor2/solver";
 import { splitGridIntoIslands } from "@reactor2/solver";
 import { simulateIsland } from "@reactor2/solver";
 import { Rng } from "@reactor2/solver";
 import type {
+  AnomalyDefinition,
   BuildingDefinition,
   EffectiveBuilding,
   PlacedBuilding,
@@ -421,5 +422,167 @@ describe("the readout rates a board under the same rules the search does", () =>
     );
 
     expect(powerOf(withNone)).toBeCloseTo(powerOf(inland), 6);
+  });
+});
+
+describe("a rated ceiling is what the row beside it was measured against", () => {
+  const TIDAL = getAnomaly("tidal_ascendancy");
+  const CRYO = getAnomaly("cryo_nexus");
+  const SINGULARITY = getAnomaly("singularity_isolation");
+
+  /** A board walled in by rock, so no tile of it is on the board's edge. */
+  const inlandGrid = (w: number, h: number): Tile[][] =>
+    Array.from({ length: h }, (_, y) =>
+      Array.from({ length: w }, (_, x) => ({
+        x,
+        y,
+        type:
+          x === 0 || y === 0 || x === w - 1 || y === h - 1
+            ? ("rock" as const)
+            : ("grass" as const),
+      })),
+    );
+
+  /*
+   * The readout prints every figure as `used / total`, and the total has to be
+   * what the *tile* rated the tier at rather than what the roster authors it.
+   *
+   * These are the two ways that went wrong, and both were visible on screen
+   * with nothing failing anywhere. A shore cooler under Tidal Ascendancy cooled
+   * 8.35 against a printed total of 8 — a used figure past the ceiling it was
+   * measured against — while a Cryo Nexus cooler at full tilt reported 7.04 of
+   * a total of 8 it could never reach, because the 0.88 is in what the cooler
+   * *is* and not in what the pool charges it.
+   *
+   * So every case here asserts the same two things: the ceiling carries the
+   * rule's factor, and the live figure sits inside it.
+   */
+  const chain = (x: number, y: number): Spec => [
+    [x, y, "reactor", VALUES.reactor],
+    [x + 1, y, "generator", VALUES.generator],
+    [x + 2, y, "cooler", VALUES.cooler],
+  ];
+
+  const rowAt = (rows: PlacedBuilding[], x: number, y: number) =>
+    rows.find((r) => r.x === x && r.y === y)!;
+
+  /** Scores a board and reads one tile's ceilings back off it. */
+  function scoreAndRate(
+    grid: Tile[][],
+    spec: Spec,
+    x: number,
+    y: number,
+    anomaly: AnomalyDefinition,
+  ) {
+    const placed = place(spec);
+    return {
+      rows: simulatePlacedBuildings(grid, DEFS, placed, undefined, anomaly),
+      max: ratedPlacementAt(grid, DEFS, placed, x, y, undefined, anomaly)!,
+    };
+  }
+
+  it("bonuses the ceiling of a shore tile, so the live figure fits inside it", () => {
+    // Every tile of a bare board is on its edge, and off the edge is water.
+    const grid = grassGrid(5, 1);
+    const cooler = scoreAndRate(grid, chain(0, 0), 2, 0, TIDAL);
+    const reactor = scoreAndRate(grid, chain(0, 0), 0, 0, TIDAL);
+
+    expect(cooler.max.effectiveValue).toBeCloseTo(VALUES.cooler * 1.67, 6);
+    expect(reactor.max.effectiveValue).toBeCloseTo(VALUES.reactor * 1.67, 6);
+
+    // The bug: measured against the plain roster, both of these were above 1.
+    expect(
+      rowAt(cooler.rows, 2, 0).coolingProvided / cooler.max.effectiveValue,
+    ).toBeLessThanOrEqual(1);
+    expect(
+      rowAt(reactor.rows, 0, 0).heatProduced / reactor.max.effectiveValue,
+    ).toBeLessThanOrEqual(1);
+    // ...and the used figure is genuinely past the authored tier, so this is
+    // not a ceiling that happens to fit an unscaled board: the reactor is
+    // moving more heat than the roster says it can, which is exactly what the
+    // card printed as `1.34k / 1k`.
+    expect(rowAt(reactor.rows, 0, 0).heatProduced).toBeGreaterThan(
+      VALUES.reactor,
+    );
+  });
+
+  it("rates a generator's energy and heat ceilings for its tile", () => {
+    const grid = grassGrid(5, 1);
+    const { rows, max } = scoreAndRate(grid, chain(0, 0), 1, 0, TIDAL);
+    const generator = rowAt(rows, 1, 0);
+
+    expect(max.effectiveValue).toBeCloseTo(VALUES.generator * 1.67, 6);
+    expect(max.energy).toBeCloseTo(VALUES.generator * 0.75 * 1.67, 6);
+    expect(generator.heatConsumed).toBeLessThanOrEqual(max.effectiveValue);
+    expect(generator.powerGenerated).toBeLessThanOrEqual(max.energy);
+  });
+
+  it("rates a Cryo cooler down, so a cooler at full tilt reaches its total", () => {
+    // Waste this pool cannot cover, so every cooler on the board is working
+    // flat out: `coolingProvided` is then exactly what the cooler is worth.
+    const grid = grassGrid(6, 1);
+    const spec: Spec = [
+      [0, 0, "reactor", HELIO],
+      [1, 0, "generator", G1],
+      [2, 0, "cooler", VALUES.cooler],
+    ];
+    const { rows, max } = scoreAndRate(grid, spec, 2, 0, CRYO);
+
+    expect(max.effectiveValue).toBeCloseTo(VALUES.cooler * 0.88, 6);
+    expect(rowAt(rows, 2, 0).coolingProvided).toBeCloseTo(
+      max.effectiveValue,
+      6,
+    );
+  });
+
+  it("resolves a role isolation from the layout, not from the tile", () => {
+    /*
+     * The one rule that cannot be answered by a tile: a generator's rating is a
+     * function of what its neighbours *are*, so the ceiling for one tile is a
+     * function of every other placement on the board. Two boards identical
+     * except for a second generator beside the first rate it x2.5 and x0.8.
+     */
+    const grid = inlandGrid(9, 3);
+    const alone = scoreAndRate(grid, chain(2, 1), 3, 1, SINGULARITY);
+    const crowded = scoreAndRate(
+      grid,
+      [...chain(2, 1), [4, 1, "generator", VALUES.generator]],
+      3,
+      1,
+      SINGULARITY,
+    );
+
+    expect(alone.max.effectiveValue).toBeCloseTo(VALUES.generator * 2.5, 6);
+    expect(crowded.max.effectiveValue).toBeCloseTo(VALUES.generator * 0.8, 6);
+    expect(rowAt(crowded.rows, 3, 1).heatConsumed).toBeLessThanOrEqual(
+      crowded.max.effectiveValue,
+    );
+  });
+
+  it("is the authored tier under no anomaly, and null off the board", () => {
+    const grid = grassGrid(5, 1);
+    const spec = chain(0, 0);
+    const none = getAnomaly(undefined);
+    const max = ratedPlacementAt(
+      grid,
+      DEFS,
+      place(spec),
+      0,
+      0,
+      undefined,
+      none,
+    )!;
+
+    expect(max.effectiveValue).toBe(VALUES.reactor);
+    expect(max.baseValue).toBe(VALUES.reactor);
+    // An empty tile and a tile that is not on the board are both "nothing to
+    // rate" — a ceiling invented for either would be the only figure on the
+    // card that was not measured.
+    expect(
+      ratedPlacementAt(grid, DEFS, place(spec), 4, 0, undefined, none),
+    ).toBeNull();
+    expect(
+      ratedPlacementAt(grid, DEFS, place(spec), 99, 0, undefined, none),
+    ).toBeNull();
   });
 });

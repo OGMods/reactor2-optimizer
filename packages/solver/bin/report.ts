@@ -2,10 +2,30 @@
  * Console reporting: everything the CLI prints, and nothing the engine needs.
  */
 
+import { DEFAULT_ANOMALY_ID, getAnomaly } from "../src/data/anomalies";
 import { formatNumber, formatNumberForFilename } from "../src/utils/formatters";
-import type { OptimizationResult } from "../src/solver/types";
+import type { AnomalyId, OptimizationResult } from "../src/solver/types";
 import { formatDurationS, isTty } from "./status";
 import type { CliMap } from "./maps";
+
+/**
+ * The line that names the timeline a run was solved under, or nothing under the
+ * base rules.
+ *
+ * Every path that prints a header prints this one, and that is the point: the
+ * power figures mean something different under each set of rules, so a session
+ * scrollback — or a `solves/` directory — of three timelines otherwise says
+ * nothing about which is which. Named only when there *is* an anomaly, so the
+ * ordinary line-up is unchanged.
+ *
+ * Research would belong here too and is absent because the CLI has no input for
+ * it: it solves at full unlocks and no Time Lab, which is what the codes it
+ * writes state.
+ */
+export function anomalyLine(anomalyId: AnomalyId | undefined): string | null {
+  if (!anomalyId || anomalyId === DEFAULT_ANOMALY_ID) return null;
+  return `Anomaly:                ${getAnomaly(anomalyId).name}`;
+}
 
 /**
  * The same two tiers `formatNumberForFilename` spells, with a space where a
@@ -60,6 +80,7 @@ export function printRunComparison(
   sessionId: number,
   mapNum: number,
   runs: SolveRun[],
+  anomalyId?: AnomalyId,
 ): void {
   const powers = runs.map((r) => r.result.totalPower);
   const bestPower = Math.max(...powers);
@@ -68,6 +89,8 @@ export function printRunComparison(
 
   console.log("=".repeat(70));
   console.log(`RUN COMPARISON REPORT (ID: ${sessionId}, Map: ${mapNum})`);
+  const rules = anomalyLine(anomalyId);
+  if (rules) console.log(rules);
   console.log("=".repeat(70));
   console.log(
     `${pad("Run #", 6)} | ${pad("Total Power", 16)} | ${pad("Active Tiles", 12)} | ${pad("Time (s)", 10)} | Status`,
@@ -112,6 +135,8 @@ export interface SessionReport {
   estimatedMaxPower: number;
   topN: number;
   workers: number;
+  /** The timeline the session is solving under; absent means the base rules. */
+  anomalyId: AnomalyId | undefined;
   powers: number[];
   top: Candidate[];
   elapsedS: number;
@@ -124,8 +149,10 @@ export function sessionHeader(report: SessionReport): string {
     `${attempts} attempt${attempts === 1 ? "" : "s"} at a ` +
     `${formatDurationS(report.timeLimitS)} budget, ${report.workers} at a time`;
   const projected = (attempts * report.timeLimitS) / report.workers;
+  const rules = anomalyLine(report.anomalyId);
   return (
     `Map ${gameMap.num} (${gameMap.name}): ${plan}, top ${report.topN} kept.\n` +
+    (rules ? `${rules}\n` : "") +
     `Roughly ${formatDurationS(projected)}. Ctrl-C stops and reports.\n`
   );
 }
@@ -176,6 +203,11 @@ export function printSessionReport(report: SessionReport): void {
     `SESSION REPORT -- map ${report.gameMap.num} (${report.gameMap.name})` +
       (report.interrupted ? "  [interrupted]" : ""),
   );
+  // Again in the closing block, not only in the opening one: a long session has
+  // scrolled its header away by the time the codes appear, and the codes are the
+  // part that gets copied out.
+  const rules = anomalyLine(report.anomalyId);
+  if (rules) console.log(rules);
   console.log(rule);
   console.log(`Estimated max: ${formatNumberPair(report.estimatedMaxPower)}`);
 

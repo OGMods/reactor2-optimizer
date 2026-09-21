@@ -121,14 +121,58 @@ describe("two multipliers compose as two calls, not as one product", () => {
     expect(both.effectiveValue).not.toBe(1.11e21 * (5 * 2.5));
   });
 
-  it("re-derives waste at each step, so the last one wins", () => {
-    // Waste after two calls is the snapped difference of the twice-scaled pair,
-    // never the once-derived waste carried through a second multiply.
-    const both = scaleEffectiveBuilding(scaleEffectiveBuilding(atTier(1), 5), 1.67);
+  it("applies them in that order, research first, anomaly second", () => {
+    // Which of the two calls comes first is itself observable, and the factors
+    // above cannot see it: 5 x 2.5 and 2.5 x 5 land on the same double. The
+    // game's order is the Time Lab in the SO getter and the anomaly in the
+    // runtime getter — research first — and on generator7's fourth tier under
+    // Infinite Grid maxed (x5) then a Tidal shore (x1.67) the two orders differ
+    // in the last bit: 7.38975e22 against 7.389749999999999e22.
+    //
+    // Nothing above this line in the stack would notice: the roster resolves
+    // research into its three figures and the context rates the result, so
+    // reversing the two produces a board rated a few ULPs off — and the golden
+    // fixtures pass no anomaly, so they cannot see it either.
+    const researchFirst = scaleEffectiveBuilding(
+      scaleEffectiveBuilding(atTier(3), 5),
+      1.67,
+    );
+    const anomalyFirst = scaleEffectiveBuilding(
+      scaleEffectiveBuilding(atTier(3), 1.67),
+      5,
+    );
 
+    expect(researchFirst.effectiveValue).toBe(8.85e21 * 5 * 1.67);
+    expect(researchFirst.effectiveValue).toBe(7.38975e22);
+    expect(anomalyFirst.effectiveValue).toBe(7.389749999999999e22);
+    expect(researchFirst.effectiveValue).not.toBe(anomalyFirst.effectiveValue);
+  });
+
+  it("re-derives waste at each step, so the last one wins", () => {
+    /*
+     * Waste after two calls is the snapped difference of the twice-scaled pair,
+     * never the once-derived waste carried through a second multiply — and not
+     * the authored waste scaled twice either.
+     *
+     * The tier and the factors are chosen so the three readings actually part
+     * company, which most pairs do not: generator7's fourth tier (8.85e21 /
+     * 6.64e21) under Infinite Grid at level 4 (x4.5) and then a x0.8 penalty
+     * gives 7.95599999999999e21 derived against 7.956e21 either other way. The
+     * assertion against the identity alone is how `scaleEffectiveBuilding`
+     * computes waste, so it holds for any deriving implementation and cannot
+     * fail on its own.
+     */
+    const once = scaleEffectiveBuilding(atTier(3), 4.5);
+    const both = scaleEffectiveBuilding(once, 0.8);
+
+    expect(both.waste).toBe(7.95599999999999e21);
     expect(both.waste).toBe(
       snapToAuthoredPrecision(both.effectiveValue - both.energy),
     );
+    // The once-derived waste carried through the second multiply...
+    expect(both.waste).not.toBe(snapToAuthoredPrecision(once.waste * 0.8));
+    // ...and the authored waste scaled by both factors. Both are 7.956e21.
+    expect(both.waste).not.toBe(2.21e21 * 4.5 * 0.8);
   });
 });
 

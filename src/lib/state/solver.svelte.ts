@@ -342,9 +342,15 @@ class SolverState {
     if (!effectiveBuildings.length) return 0;
 
     const hasCoolingSupport = canCoolDirectProducer(effectiveBuildings);
-    // The same anomaly the run will be planned under: under a shared cooling
-    // pool the split keeps one-tile patches, and a bound that decomposed the
-    // board differently from the run would be measured against another board.
+    // The same anomaly the run will be planned under, because the anomaly
+    // changes the decomposition itself: under a shared cooling pool there are
+    // no islands at all — `splitGridIntoIslands` hands the whole board over as
+    // one, unbuildable scraps and one-tile patches included, since a pool that
+    // spans the map makes every grass tile part of one problem. A bound that
+    // decomposed the board differently from the run would be measured against
+    // another board. It is passed to the estimate below for a second reason: a
+    // terrain bonus rates some tiles above the roster, so a bound computed on
+    // the plain roster is one a real layout walks past.
     const subGrids = splitGridIntoIslands(
       grid,
       hasCoolingSupport,
@@ -776,9 +782,12 @@ class SolverState {
         {
           attempts: mode.attempts,
           attemptBudgetMs: mode.attemptBudgetMs,
-          // The rules this timeline runs under. The research is folded into
-          // the roster the coordinator resolves and lands; the anomaly is
-          // carried the whole way and not yet acted on.
+          // The rules this timeline runs under, and both halves have to be
+          // here: the research reaches the search only through `prestige`,
+          // because the coordinator resolves the roster itself, and the anomaly
+          // only through `anomalyId`, because every rule that reads it is
+          // resolved on the far side of the worker boundary — per tile, per
+          // layout, or in how the board is split.
           anomalyId: configState.activeAnomaly.id,
           prestige: configState.prestige,
         },

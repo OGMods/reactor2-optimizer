@@ -165,8 +165,25 @@ export interface EffectiveBuilding {
  * which the UI numbers 1. An upgrade absent from the player's record is not
  * researched at all and multiplies by 1, so there is no zero entry.
  */
+/**
+ * Which Time Lab research an entry is, as a closed union — the same shape
+ * `AnomalyId` is, and for the same reason: the blueprint codec keeps a byte per
+ * id, and a research the table has no byte for is dropped from a share code
+ * *silently*. Closing the union makes a missing byte a compile error instead,
+ * which is the only check that fires before the code is written rather than
+ * after somebody reads it.
+ *
+ * Only the three the solver can feel are here; `PRESTIGE_UPGRADES` lists the
+ * seven that are not and why. Adding one to the table therefore means naming it
+ * here, and naming it here means giving it a byte.
+ */
+export type PrestigeUpgradeId =
+  | "absolute_zero"
+  | "infinite_grid"
+  | "stellar_forge";
+
 export interface PrestigeUpgrade {
-  id: string;
+  id: PrestigeUpgradeId;
   name: string;
   /** The game's own label for what it changes, e.g. "Cooling Output". */
   effect: string;
@@ -402,20 +419,31 @@ export interface SolveOptions {
   /**
    * The timeline's anomaly, by id. Omitted means the base rules.
    *
-   * Accepted but **not yet honoured** — the rules are modelled and threaded,
-   * not implemented; see `docs/game-logic.md`. Time Lab research is a different
-   * matter and already lands, because it resolves into the roster before a
-   * solve ever starts.
+   * Honoured, and each rule is resolved wherever its inputs are settled rather
+   * than in one place: a terrain bonus per tile as `IslandContext` is built (so
+   * it costs the search nothing), a role isolation per layout inside
+   * `simulateIsland` (a building's rating is a function of what its neighbours
+   * *are*, so one write re-rates up to eight tiles), and a shared cooling pool
+   * in the decomposition — `splitGridIntoIslands` stops producing islands and
+   * hands the board over whole, which is what keeps "islands never interact"
+   * true under a rule that pools across the map.
+   *
+   * It is an id rather than the resolved definition because the same field has
+   * to cross the worker boundary below, where a string survives cloning and a
+   * table entry is something to keep in step. `getAnomaly` is total, so the far
+   * side resolving an id it does not know gets the baseline rather than a
+   * crash. See `docs/game-logic.md` for what each rule does.
    */
   anomalyId?: AnomalyId;
   /**
    * Time Lab research, already folded to one factor per role.
    *
-   * Unlike the anomaly this **is** honoured, because it needs nothing from the
-   * search: it resolves into the roster here and the `EffectiveBuilding[]` that
-   * crosses the worker boundary already carries it in its three numbers. That
-   * is also why the worker protocol below has no field for it — sending it
-   * again would be sending it twice.
+   * Unlike the anomaly it needs nothing from the search at all: it resolves
+   * into the roster here, and the `EffectiveBuilding[]` that crosses the worker
+   * boundary already carries it in its three numbers. That is why the worker
+   * protocol below has no field for it — sending it again would be sending it
+   * twice — and why the anomaly, whose rules need a tile, a layout or the whole
+   * board, has to be sent instead of folded in.
    */
   prestige?: PrestigeScales;
 }

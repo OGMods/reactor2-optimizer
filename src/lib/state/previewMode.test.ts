@@ -17,7 +17,7 @@ import { layoutState } from "./layout.svelte";
 import { editorState } from "./editor.svelte";
 import { encodeBlueprint } from "@reactor2/solver";
 import { buildShareUrl, readSharedCode } from "../encoding/shareLink";
-import { findBuilding, levelValue } from "@reactor2/solver";
+import { findBuilding, getAnomaly, levelValue } from "@reactor2/solver";
 import type { Tile } from "../types";
 
 /** The tier the author had, and the (lower) tier the reader has unlocked. */
@@ -196,6 +196,77 @@ describe("preview mode", () => {
       /transformers/,
     );
     expect(layoutState.isPreview).toBe(true);
+  });
+
+  /*
+   * The author's rules are as much a property of the preview as the author's
+   * tiers, and they end with it.
+   *
+   * What is observable is the pair of accessors: a previewed board reads the
+   * rules its own code names, and the visitor's board reads the player's. What
+   * is not observable — and is why `previewAnomalyId` went — is the held record
+   * between those two, which is cleared alongside `#previewCode` so that the
+   * `isPreview` branch in each accessor is a check rather than the only thing
+   * standing between a re-scored board and a stranger's timeline.
+   */
+  const RULED = {
+    anomalyId: "tidal_ascendancy",
+    research: { absolute_zero: 4 },
+  };
+
+  const ruledCode = () =>
+    encodeBlueprint(
+      grass(3, 2),
+      [{ x: 0, y: 0, buildingId: "cooler1" }],
+      undefined,
+      RULED,
+    );
+
+  it("rates a previewed board under the rules its own code names", async () => {
+    await layoutState.loadPreview(await ruledCode(), READER_UNLOCKS);
+
+    expect(layoutState.placementAnomaly.id).toBe("tidal_ascendancy");
+    expect(layoutState.placementPrestige?.cooler).toBeGreaterThan(1);
+  });
+
+  it("hands the player's own rules back when the preview ends", async () => {
+    layoutState.setAnomaly(getAnomaly("cryo_nexus"));
+    try {
+      await layoutState.loadPreview(await ruledCode(), READER_UNLOCKS);
+      expect(layoutState.placementAnomaly.id).toBe("tidal_ascendancy");
+
+      await layoutState.exitPreview(READER_UNLOCKS);
+
+      expect(layoutState.placementAnomaly.id).toBe("cryo_nexus");
+      expect(layoutState.placementPrestige).toBeUndefined();
+    } finally {
+      layoutState.setAnomaly(getAnomaly(undefined));
+    }
+  });
+
+  it("keeps the author's rules when an adoption is refused", async () => {
+    // Refused at the transformer rule, so the visitor is still reading the
+    // author's board — and it is still the author's rules that rate it. The
+    // rules are dropped before the import writes, for the same reason the code
+    // is, so this is the restore on the way back.
+    const twoTransformers = await encodeBlueprint(
+      [
+        [
+          { x: 0, y: 0, type: "transformer" },
+          { x: 1, y: 0, type: "transformer" },
+        ],
+      ],
+      [],
+      undefined,
+      RULED,
+    );
+    await layoutState.loadPreview(twoTransformers, READER_UNLOCKS);
+
+    await expect(layoutState.adoptPreview(READER_UNLOCKS)).rejects.toThrow(
+      /transformers/,
+    );
+    expect(layoutState.isPreview).toBe(true);
+    expect(layoutState.placementAnomaly.id).toBe("tidal_ascendancy");
   });
 
   it("reports an unreadable code rather than half-loading it", async () => {

@@ -3,7 +3,13 @@ import {
   levelIndexForValue,
   type BuildingId,
 } from "../data/buildings";
-import type { PlacedBuilding, Tile, TileType } from "../solver/types";
+import type {
+  AnomalyId,
+  PlacedBuilding,
+  PrestigeUpgradeId,
+  Tile,
+  TileType,
+} from "../solver/types";
 
 /**
  * Binary layout codec — terrain *and* buildings in one payload.
@@ -134,15 +140,24 @@ export const MIN_GRID_DIM = 5;
  * 0 free — for anomalies it is the genuine "no anomaly" choice, and for
  * research it is a value no writer emits, so a stray zero decodes as nothing
  * rather than as the first upgrade.
+ *
+ * Both are keyed on their **closed id union** rather than on `string`, so an
+ * anomaly or a research added to `ANOMALIES` / `PRESTIGE_UPGRADES` without a
+ * byte here fails to compile. Those two tables are hand-owned — a new anomaly is
+ * brought across by hand — and the failure a missing byte produces is silent in
+ * both directions: an anomaly would be written as 0 and a research dropped
+ * altogether, so the recipient rates the board under rules its author never ran
+ * and a figure is printed for it either way. A compile error is the only check
+ * that arrives before the code is shared.
  */
-const ANOMALY_BYTE_MAP: Record<string, number> = {
+const ANOMALY_BYTE_MAP: Record<AnomalyId, number> = {
   none: 0,
   cryo_nexus: 1,
   tidal_ascendancy: 2,
   singularity_isolation: 3,
 };
 
-const RESEARCH_BYTE_MAP: Record<string, number> = {
+const RESEARCH_BYTE_MAP: Record<PrestigeUpgradeId, number> = {
   absolute_zero: 1,
   infinite_grid: 2,
   stellar_forge: 3,
@@ -386,8 +401,16 @@ function buildPayload(
       if (level === undefined) continue;
       research.push(byte, Math.max(0, Math.min(255, Math.round(level))));
     }
+    /*
+     * The fallback can no longer be a shipped anomaly missing a byte — the map
+     * is keyed on `AnomalyId`, so that would not have compiled. What is left is
+     * a `rules.anomalyId` that is not an anomaly id at all, which is reachable
+     * because the field is a plain string: it arrives from `localStorage` and
+     * across the worker boundary. Writing 0 for one says "no anomaly", which is
+     * the same total reading `getAnomaly` makes of an id it does not know.
+     */
     ruleBytes.push(
-      ANOMALY_BYTE_MAP[rules.anomalyId] ?? ANOMALY_BYTE_MAP.none,
+      ANOMALY_BYTE_MAP[rules.anomalyId as AnomalyId] ?? ANOMALY_BYTE_MAP.none,
       research.length / 2,
       ...research,
     );
@@ -622,23 +645,6 @@ export async function decodeBlueprint(code: string): Promise<DecodedBlueprint> {
  * two, the first wins, which is the same arbitrary-but-stable answer the wire
  * format could hold anyway.
  */
-/**
- * The rules record for a share code: the anomaly running and the research the
- * player has.
- *
- * Beside `placementTiers` below and for the same reason — the app's Share
- * button and the CLI both write share codes, and neither should be spelling
- * this out itself. Research is copied rather than filtered: an id this build
- * does not carry a byte for is simply dropped at encode time, which is where
- * the format's own compatibility rule lives.
- */
-export function blueprintRules(
-  anomalyId: string,
-  research: Record<string, number>,
-): BlueprintRules {
-  return { anomalyId, research: { ...research } };
-}
-
 export function placementTiers(
   placements: readonly PlacedBuilding[],
 ): BlueprintTiers {
@@ -650,4 +656,26 @@ export function placementTiers(
     tiers[p.buildingId] = levelIndexForValue(def, p.baseValue);
   }
   return tiers;
+}
+
+/**
+ * The rules record for a share code: the anomaly running and the research the
+ * player has.
+ *
+ * Beside `placementTiers` above and for the same reason — the app's Share button
+ * and the CLI both write share codes, and neither should be spelling this out
+ * itself. Research is copied rather than filtered: an id this build does not
+ * carry a byte for is simply dropped at encode time, which is where the format's
+ * own compatibility rule lives.
+ *
+ * An **empty** `research` is a statement, not an omission: it says the author
+ * had none, which is what the CLI (which has no research input) truthfully
+ * knows. Omitting the whole section instead would say "rules unknown" and leave
+ * a reader rating the board under its own timeline.
+ */
+export function blueprintRules(
+  anomalyId: string,
+  research: Record<string, number>,
+): BlueprintRules {
+  return { anomalyId, research: { ...research } };
 }

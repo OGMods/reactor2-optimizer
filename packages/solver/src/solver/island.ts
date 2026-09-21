@@ -376,6 +376,15 @@ function estimateIslandMaxPower(
   if (wasteRatio === Infinity || wasteRatio <= 0)
     wasteRatio = GENERATOR_WASTE_RATIO;
 
+  // The same 3-and-2 reasoning `minIslandTiles` owns — a reactor + generator +
+  // cooler chain is 3 tiles, a direct producer + cooler pair is 2 — restated
+  // here rather than read from it, because that function answers "is this patch
+  // worth keeping?" for a whole board and this asks "can this split produce
+  // anything?" for one island already kept. They must not be allowed to
+  // disagree: raise the floor there and these two numbers have to follow, or the
+  // bound goes on allowing a layout the decomposition no longer admits (which is
+  // still a bound, so nothing would fail) — or worse, lower it there and the
+  // bound becomes one a real layout beats.
   const canHub = rVal > 0 && gVal > 0 && buildableTiles >= 3;
   const canDp = hasDp && buildableTiles >= 2;
   if (!canHub && !canDp) return 0.0;
@@ -448,31 +457,79 @@ function bestHeatForEngineTiles(
  * The largest multiplier any building on this island can be rated at.
  *
  * One number for the island rather than one per tile, because it is used to
- * keep the bound a bound: the estimate below is homogeneous in the roster's
- * figures — scale every one of them by `k` and the bound scales by `k` — so
- * rating the whole island at its best tile is an upper bound on rating each
- * tile at its own.
+ * keep the bound a bound: `estimateIslandMaxPower` is positively homogeneous of
+ * degree 1 in the roster's figures — `hFirst`, `dRest`, `dFirst` and `hRest` all
+ * scale by `k` and every ratio in it is invariant — so scaling its *result* by
+ * `k` is the same thing as scaling every roster figure by `k`, and rating the
+ * whole island at its best tile is an upper bound on rating each tile at its
+ * own.
  *
- * It is loose by construction where only part of an island qualifies, and that
- * is the right trade: a bound that can be beaten is worthless, while one that
- * is generous only makes the efficiency figure read low.
+ * That argument is what lets a rule that scales only *some* buildings be
+ * answered with one island-wide number: any layout feasible under the partial
+ * scaling is feasible in the all-scaled world with an objective no larger.
+ * Under generator-only scaling, say, `H <= min(nReact * rVal, nGen * k * gVal)
+ * <= k * heatCap`, the cooling constraint at `k * dpWaste` is implied by the
+ * real one since `H / k <= H`, and the objective at `k * dpNet` dominates.
+ *
+ * It is loose by construction where only part of an island qualifies, or where
+ * only part of the roster is scaled, and that is the right trade: a bound that
+ * can be beaten is worthless, while one that is generous only makes the
+ * efficiency figure read low.
+ *
+ * The switch is exhaustive without a `default`, deliberately: a fifth rule shape
+ * added to `AnomalyDefinition` then fails to typecheck here — "function lacks
+ * ending return statement" — rather than silently defaulting to 1, which is what
+ * `role_isolation` did until a partial roster walked past the bound by 64%.
  */
 function islandMaxScale(
   island: IslandSubGrid,
   anomaly?: AnomalyDefinition,
 ): number {
-  if (anomaly?.rule !== "terrain_affinity") return 1;
-  if (anomaly.multiplier <= 1) return 1;
-  // Only water can lie off the board, so the mask answers the whole question
-  // for the one terrain any shipped anomaly names; anything else is inside the
-  // window and would need the grid. Erring high keeps this a bound.
-  if (!anomaly.terrain.includes("water")) return anomaly.multiplier;
+  if (anomaly === undefined) return 1;
 
-  for (let i = 0; i < island.buildable.length; i++) {
-    if (island.buildable[i] === 1 && island.waterAdjacent[i] === 1)
-      return anomaly.multiplier;
+  switch (anomaly.rule) {
+    case "baseline":
+      return 1;
+
+    case "shared_cooling":
+      // A scale on the cooler role alone. The shipped 0.88 only ever *costs*
+      // cooling, so this is 1 today and the bound is untouched; a pool that
+      // paid more than it took would raise the cooling budget, and by the
+      // homogeneity above that is bounded by scaling the whole roster.
+      return Math.max(anomaly.coolerMultiplier, 1);
+
+    case "role_isolation":
+      // Both variants, because which one a tile gets is a function of the
+      // layout rather than of the island: `simulateIsland` re-rates a generator
+      // from what its neighbours are, so a search free to keep generators apart
+      // rates every one of them at `isolated`. The bound has to allow that even
+      // though it is the *penalty* that is usually binding — a roster whose
+      // generator intake is the short side of `min(nReact * rVal, nGen * gVal)`
+      // gets x2.5 of its heat cap, and a 3x3 layout beat the "TRUE upper bound"
+      // by 64% before this case existed.
+      return Math.max(anomaly.isolated, anomaly.crowded, 1);
+
+    case "terrain_affinity": {
+      if (anomaly.multiplier <= 1) return 1;
+      // Water is the one terrain that can lie *off* the board, and the shore
+      // mask is the only thing that knows it — so the scan below answers the
+      // question exactly when water is the whole of the list. A list naming
+      // anything else qualifies a tile on a neighbour this window can see but
+      // the mask cannot speak for (`terrainScales` tests rock and tree against
+      // the grid), and one that mixed the two would need both answers at once.
+      // Erring high there keeps this a bound; a landlocked island under a
+      // `["water", "rock"]` anomaly would otherwise rate its tiles at the
+      // multiplier while the bound stayed at 1.
+      if (anomaly.terrain.length !== 1 || anomaly.terrain[0] !== "water")
+        return anomaly.multiplier;
+
+      for (let i = 0; i < island.buildable.length; i++) {
+        if (island.buildable[i] === 1 && island.waterAdjacent[i] === 1)
+          return anomaly.multiplier;
+      }
+      return 1;
+    }
   }
-  return 1;
 }
 
 /**

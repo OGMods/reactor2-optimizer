@@ -11,6 +11,26 @@ import type { EffectiveBuilding, PlacedBuilding, Placement } from "./types";
  */
 export interface SimPlacedBuilding extends PlacedBuilding {
   idx: number;
+  /**
+   * The capacity this building actually ran at on this tile — its
+   * `effectiveValue` as the layout rated it, anomaly and all.
+   *
+   * The pair with `baseValue` is the whole point of the field, and they must
+   * not be confused. `baseValue` is the **authored** tier value and never
+   * moves, because a placement's tier is resolved back out of it; this is what
+   * the tile was rated for, which is the figure every other number in the row
+   * was measured against. Under a terrain bonus or a role isolation rule the
+   * two differ by the multiplier, and a consumer comparing a delivery against
+   * the wrong one silently reads a full tile as a starved one (or the reverse):
+   * the walk's "under-fed reactor" move measured `heatProduced` against
+   * `baseValue` for a while and stopped firing below x1/k fill — 20% under a
+   * x5 research, 60% on a Tidal shore — with nothing failing anywhere.
+   *
+   * It stays on `SimPlacedBuilding` rather than on `PlacedBuilding`, so it does
+   * not cross the worker boundary: it is the search's own units, meaningless to
+   * a caller that does not hold the island's ratings.
+   */
+  ratedValue: number;
 }
 
 export interface SimulationResult {
@@ -251,9 +271,12 @@ export function simulateIsland(
       // What each cooler is doing, for the readout: its own share of the work
       // the pool actually did, which is the game's own reporting rule.
       const share =
-        totalCooling > 0 && totalAccepted > 0 ? totalAccepted / totalCooling : 0;
+        totalCooling > 0 && totalAccepted > 0
+          ? totalAccepted / totalCooling
+          : 0;
       for (let i = 0; i < numCoolers; i++)
-        heatOut[coolerTiles[i]] = layout[coolerTiles[i]]!.effectiveValue * share;
+        heatOut[coolerTiles[i]] =
+          layout[coolerTiles[i]]!.effectiveValue * share;
     } else {
       for (let i = 0; i < numCoolers; i++) {
         d.supplierCap[i] = layout[coolerTiles[i]]!.effectiveValue;
@@ -310,7 +333,11 @@ export function simulateIsland(
   return { totalPower, placements };
 }
 
-/** Report rows for a layout that produces nothing — every field but the base value is zero. */
+/**
+ * Report rows for a layout that produces nothing — every measured field is
+ * zero, leaving each building's two capacity figures (`baseValue` and the
+ * rating it would have run at) and nothing else.
+ */
 function inertPlacements(
   placement: Placement,
   ctx: IslandContext,
@@ -344,6 +371,11 @@ function row(
     // The authored tier value, never the scaled one — a placement's tier is
     // resolved back out of this. See `EffectiveBuilding.baseValue`.
     baseValue: b.baseValue,
+    // ...and beside it what the tile was actually rated for, which is the
+    // figure the rest of this row was measured against. `b` is the building as
+    // the layout holds it, so this is already the scaled one wherever a rule
+    // scaled it.
+    ratedValue: b.effectiveValue,
     powerGenerated,
     heatProduced,
     heatConsumed,

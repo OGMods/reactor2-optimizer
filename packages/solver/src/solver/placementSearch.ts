@@ -133,7 +133,32 @@ function put(
   tile: number,
   building: EffectiveBuilding | null,
 ): void {
-  placement[tile] = building === null ? null : ctx.rate(tile, building);
+  placement[tile] = ratedFor(ctx, tile, building);
+}
+
+/**
+ * Exactly what `put` would write onto `tile` — the building as that tile rates
+ * it, or `null`.
+ *
+ * This is how a move asks "would writing this change anything?", and it has to
+ * be asked in the tile's own units: a placement holds RATED buildings, so
+ * comparing a plain roster entry against one is never equal on a scaled tile,
+ * and the guard that should have skipped the move instead writes back an
+ * identical object, runs a full `simulateIsland`, and hands `accept` a delta of
+ * zero — which it "accepts". No number moves, and the walk quietly spends a
+ * slice of a budget whose only product is steps per second.
+ *
+ * The comparison is exact rather than approximate because `ctx.rate` caches one
+ * object per (scale, roster entry) pair, so two tiles of the same scale holding
+ * the same building hold the *same* object — and it is cheap for the same
+ * reason: a lookup, not a multiply.
+ */
+function ratedFor(
+  ctx: IslandContext,
+  tile: number,
+  building: EffectiveBuilding | null,
+): EffectiveBuilding | null {
+  return building === null ? null : ctx.rate(tile, building);
 }
 
 function copyInto(dst: Placement, src: Placement): void {
@@ -214,6 +239,23 @@ function offlineProducers(
     if (producer && p.powerGenerated <= EPS) offline.push(p.idx);
   }
   return offline;
+}
+
+/**
+ * A supplier sending out less than the tile it stands on was rated to carry —
+ * the walk's cue that a generator beside it would have somewhere to put the
+ * rest.
+ *
+ * Against `ratedValue`, never `baseValue`: `heatProduced` is what the
+ * distribution actually sent, capped by the tile's RATING, so measuring it
+ * against the authored tier compares a scaled delivery with an unscaled ceiling
+ * and only calls a reactor under-fed below 1/k fill — 60% on a Tidal shore, 20%
+ * under a x5 Stellar Forge. The move then stops firing on almost everything it
+ * exists for, with no number anywhere disagreeing. It is a named function so
+ * that the reading can be pinned by a test rather than only stated here.
+ */
+function isUnderFed(row: SimPlacedBuilding): boolean {
+  return row.heatProduced > EPS && row.heatProduced < row.ratedValue - EPS;
 }
 
 /** Allocation-free `offlineProducers(...).length > 0`, for the search's inner loops. */
@@ -909,6 +951,13 @@ async function hillClimb(
   // wherever it happens, so scaling by total power made large islands run far
   // too hot: on the 67-tile map 1 island, ~23% of moves that each cost 7% of
   // the layout were being accepted, and the walk never climbed back.
+  //
+  // It is read off the PLAIN roster, so under a rule that rates a tile above it
+  // the walk runs colder than this calibration intends — a move on a x1.67 shore
+  // is worth x1.67 of one here. Left alone deliberately: the previous, hotter
+  // calibration was itself the bug above, and nothing in this repo moves a tuning
+  // constant on an argument rather than a measurement. Whoever measures it should
+  // measure across several seeds and both anomalies.
   const moveScale =
     generators.length > 0
       ? generators[0].effectiveValue * generatorEnergyRatio(generators[0])
@@ -982,7 +1031,7 @@ async function hillClimb(
         ) {
           uncooled.push(p);
         }
-        if (p.heatProduced > EPS && p.heatProduced < p.baseValue - EPS) {
+        if (isUnderFed(p)) {
           wastedReactors.push(p);
         }
       }
@@ -993,7 +1042,9 @@ async function hillClimb(
         if (adj.length > 0) {
           const tile = adj[rng.int(adj.length)];
           const old = current[tile];
-          if (old !== topCooler) {
+          // In the tile's units, or the guard never fires on a rated tile —
+          // see `ratedFor`.
+          if (ratedFor(ctx, tile, topCooler) !== old) {
             put(current, ctx, tile, topCooler);
             const trial = simulateIsland(current, ctx);
             if (!accept(trial.totalPower, trial.placements))
@@ -1011,7 +1062,7 @@ async function hillClimb(
         if (adj.length > 0) {
           const tile = adj[rng.int(adj.length)];
           const old = current[tile];
-          if (old !== topGenerator) {
+          if (ratedFor(ctx, tile, topGenerator) !== old) {
             put(current, ctx, tile, topGenerator);
             const trial = simulateIsland(current, ctx);
             if (!accept(trial.totalPower, trial.placements))
@@ -1035,7 +1086,16 @@ async function hillClimb(
 
       const val1 = current[tile1];
       const val2 = current[tile2];
-      if (val1 === val2) continue;
+      // A swap that writes each tile what it already holds. On one scale class
+      // that is `val1 === val2`; across two it is not, because the same roster
+      // entry is a different object on each — so the test is on what the writes
+      // would land, which covers both.
+      if (
+        ratedFor(ctx, tile1, val2) === val1 &&
+        ratedFor(ctx, tile2, val1) === val2
+      ) {
+        continue;
+      }
 
       put(current, ctx, tile1, val2);
       put(current, ctx, tile2, val1);
@@ -1051,7 +1111,10 @@ async function hillClimb(
     const tile = rng.int(ctx.n);
     const old = current[tile];
     const replacement = randomCandidate(pools, rng);
-    if (replacement === old) continue;
+    // The commonest move in the walk, and the commonest no-op: `randomCandidate`
+    // returns the top tier of a pool with p ~ 0.7, so a packed island proposes
+    // the building a tile already holds constantly.
+    if (ratedFor(ctx, tile, replacement) === old) continue;
 
     put(current, ctx, tile, replacement);
     const trial = simulateIsland(current, ctx);
@@ -1171,6 +1234,87 @@ function targetCompositions(
   // enumerated in and the walk is reproducible.
   scored.sort((a, b) => b.power - a.power);
   return scored.slice(0, topK);
+}
+
+/**
+ * The largest factor anything on this island can be rated at — 1 under the rules
+ * that leave the roster alone.
+ *
+ * `targetCompositions` scores a target from the plain roster, and it is right to:
+ * which buildings to use is a counting problem over the roster, and the counting
+ * is the same whatever the tiles are worth. But the layout the caller compares it
+ * against has been rated tile by tile, so the two figures are in different units,
+ * and a target's ceiling read as-is says "this cannot beat what I have" about
+ * every target on the list. The gate is a `break`, so the whole stage goes with
+ * it — silently, and hardest under the anomaly that most needs it: on island3
+ * under Tidal a 0.6s run already returns 1.68e23 against a top target of
+ * 1.49e23, so the stage never ran at any realistic budget.
+ *
+ * Scaling the target by one island-wide factor is the move `estimateTotalMaxPower`
+ * already makes to keep its bound a bound (`islandMaxScale`), and it is sound for
+ * the same reason: a composition's power is positively homogeneous of degree 1 in
+ * the roster's figures, so rating the whole island at its best tile is an upper
+ * bound on rating each tile at its own. Loose where only part of an island
+ * qualifies, which is the right way to be wrong here — a ceiling that is too low
+ * skips a stage that would have helped, while one that is too high costs a few
+ * arrangement attempts that fail to beat the layout in hand.
+ *
+ * It is asked of the context rather than read off the anomaly so that a rule
+ * resolved per tile (`rate`) and one resolved per layout (`rateIsolated`) are
+ * both answered by the code that actually applies them, and a fifth rule shape
+ * needs nothing here at all.
+ */
+function islandRatingCeiling(
+  ctx: IslandContext,
+  probes: readonly EffectiveBuilding[],
+): number {
+  if (ctx.uniformRating && ctx.isolation === null) return 1;
+
+  let ceiling = 1;
+  const consider = (factor: number): void => {
+    if (factor > ceiling) ceiling = factor;
+  };
+
+  for (const probe of probes) {
+    if (probe.effectiveValue <= 0) continue;
+    if (!ctx.uniformRating) {
+      for (let tile = 0; tile < ctx.n; tile++) {
+        consider(ctx.rate(tile, probe).effectiveValue / probe.effectiveValue);
+      }
+    }
+    if (ctx.isolation !== null) {
+      // Both variants, because which one a tile gets is a function of the
+      // layout: a search free to keep generators apart rates every one of them
+      // at the bonus. The same reasoning `islandMaxScale` carries.
+      consider(
+        ctx.rateIsolated(probe, false).effectiveValue / probe.effectiveValue,
+      );
+      consider(
+        ctx.rateIsolated(probe, true).effectiveValue / probe.effectiveValue,
+      );
+    }
+  }
+  return ceiling;
+}
+
+/**
+ * Whether a composition target could still beat the layout in hand, which is what
+ * decides whether the retarget stage runs at all.
+ *
+ * `target.power` is the power a perfect arrangement of the target would reach at
+ * the PLAIN roster's figures and `bestPower` is what a rated layout actually
+ * scored, so the ceiling is what puts the two in the same units — see
+ * `islandRatingCeiling`. The caller's gate is a `break` over a descending list,
+ * so answering `false` once ends the stage: a named function so the reading can
+ * be pinned, since it is the difference between a stage that runs and one that is
+ * silently never entered.
+ */
+function targetCanBeat(
+  target: ScoredComposition,
+  bestPower: number,
+  ratingCeiling: number,
+): boolean {
+  return target.power * ratingCeiling > bestPower + EPS;
 }
 
 function sameFill(a: EffectiveBuilding[], b: EffectiveBuilding[]): boolean {
@@ -1333,11 +1477,15 @@ async function arrangeComposition(
       }
 
       const [a, b] = pairs[index];
-      // Swapping identical buildings changes nothing.
-      if (current[a] === current[b]) continue;
-
       const valA = current[a];
       const valB = current[b];
+      // Swapping identical buildings changes nothing — asked in each tile's own
+      // units, so two scale classes holding the same roster entry still count
+      // as identical. See `ratedFor`.
+      if (ratedFor(ctx, a, valB) === valA && ratedFor(ctx, b, valA) === valB) {
+        continue;
+      }
+
       put(current, ctx, a, valB);
       put(current, ctx, b, valA);
 
@@ -1438,7 +1586,10 @@ async function greedyPolish(
 
       const held = current[tile];
       for (const building of candidates) {
-        if (building === held) continue;
+        // The candidate list is the plain roster, `held` is rated for this tile:
+        // asked the wrong way round, a scaled tile re-simulates its own layout
+        // once per sweep for nothing. See `ratedFor`.
+        if (ratedFor(ctx, tile, building) === held) continue;
 
         put(current, ctx, tile, building);
         const trial = simulateIsland(current, ctx);
@@ -1569,6 +1720,47 @@ function tileLoad(building: EffectiveBuilding, row: SimPlacedBuilding): number {
   return row.heatConsumed;
 }
 
+/**
+ * The capacity `candidate` would actually run at on `tile` in this layout —
+ * `tileLoad`'s units, so the two can be compared.
+ *
+ * `ctx.rate` answers this for every rule but one: a role isolation multiplier is
+ * a function of what a tile's NEIGHBOURS are, so `rate` is the identity under it
+ * and `simulateIsland` resolves it per layout through `rateIsolated` instead.
+ * That leaves right-sizing measuring a x2.5 load against a x1 capacity: an
+ * isolated generator authored 320, rated 800 and absorbing 300, was never
+ * offered the authored 120 tier that covers it at its own rating of 300, so the
+ * pass left 500 of intake nobody pays it to have — which is exactly the money it
+ * exists to hand back. In the other direction the plain figure is over-generous,
+ * and there the re-simulation below catches it, so only the waste escaped.
+ *
+ * The neighbour scan mirrors `simulateIsland`'s: it reads what a neighbour *is*,
+ * which the swap cannot change — the ladder is one role deep, so a re-tiered
+ * generator is still a generator and every tile's crowding survives the pass.
+ */
+function ratedCapacity(
+  ctx: IslandContext,
+  placement: Placement,
+  tile: number,
+  candidate: EffectiveBuilding,
+): number {
+  const isolation = ctx.isolation;
+  if (isolation === null || candidate.type !== isolation.role) {
+    return candidate.effectiveValue;
+  }
+
+  const neighbors = ctx.neighbors[tile];
+  let crowded = false;
+  for (let k = 0; k < neighbors.length; k++) {
+    const other = placement[neighbors[k]];
+    if (other !== null && other.type === isolation.role) {
+      crowded = true;
+      break;
+    }
+  }
+  return ctx.rateIsolated(candidate, crowded).effectiveValue;
+}
+
 /** Each downgradable role's roster entries, smallest capacity first. */
 function downgradeTiers(
   effectiveBuildings: EffectiveBuilding[],
@@ -1656,9 +1848,15 @@ export function downgradeOversized(
         // Ascending order survives the rating, since one tile scales every
         // candidate by the same factor.
         const rated = ctx.rate(tile, candidate);
-        // Ascending, so nothing smaller is left to try.
+        // Ascending, so nothing smaller is left to try. Both sides are `rate`'s
+        // units, and one tile scales every candidate by the same factor, so the
+        // ladder's order survives whichever units this is asked in.
         if (rated.effectiveValue >= building.effectiveValue) break;
-        if (!covers(rated.effectiveValue, load)) continue;
+        // Covering the load is asked in the layout's units, which is `rate`'s
+        // plus whatever `simulateIsland` resolves per layout — see
+        // `ratedCapacity`. `load` came off a row it measured, so this is the one
+        // comparison here that cannot be made in the roster's units.
+        if (!covers(ratedCapacity(ctx, current, tile, rated), load)) continue;
 
         put(current, ctx, tile, rated);
         const trial = simulateIsland(current, ctx);
@@ -1931,6 +2129,14 @@ export async function solveIsland(
     deadlineMs,
     performance.now() + timeBudgetMs * COMPOSITION_SHARE,
   );
+  // A target is scored from the plain roster and `bestPower` is a rated layout's
+  // power, so the skip test needs the two in the same units or it throws the
+  // whole stage away — see `islandRatingCeiling`. One number for the island,
+  // resolved once: the loop below runs three times.
+  const ratingCeiling = islandRatingCeiling(
+    ctx,
+    [reactors[0], generators[0], coolers[0]].filter((b) => b !== undefined),
+  );
   for (const target of targetCompositions(
     ctx.n,
     reactors,
@@ -1940,7 +2146,7 @@ export async function solveIsland(
     if (
       performance.now() >= compositionDeadlineMs ||
       pacer.stopRequested ||
-      target.power <= bestPower + EPS
+      !targetCanBeat(target, bestPower, ratingCeiling)
     ) {
       break;
     }
@@ -2080,7 +2286,11 @@ export const internals = {
   DOWNGRADE_ROLES,
   constructMultiStartSeed,
   downgradeTiers,
+  greedyPolish,
   hillClimb,
+  islandRatingCeiling,
+  isUnderFed,
+  targetCanBeat,
   offlineProducers,
   pruneDeadWeight,
   targetCompositions,

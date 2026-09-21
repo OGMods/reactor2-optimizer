@@ -10,12 +10,13 @@
     viewportState,
   } from "../../state";
   import {
-    effectiveAtValue,
+    BUILDINGS,
     findBuilding,
     formatNumber,
     levelIndexForValue,
   } from "@reactor2/solver";
   import { placementStatus } from "../../data/placements";
+  import { ratedPlacementAt } from "../../simulation/simulator";
   import {
     asset,
     formatDuration,
@@ -260,10 +261,11 @@
    * with no reactor beside it reads `0 / 17.7AC`, which says both that it does
    * nothing and how much it is missing. Bare figures could not tell those apart.
    *
-   * The ceilings come from `effectiveAtValue`, so they are the tier the
-   * building was *placed* at — the same one the scorer ran it at. Reading the
-   * player's current unlock level instead would re-rate a building the moment
-   * an upgrade is bought behind it, and the ratio would stop meaning anything.
+   * The ceilings come from the scorer, so they are the tier the building was
+   * *placed* at, rated for the tile it stands on — the same figures the row
+   * beside them was measured against. Reading the player's current unlock level
+   * instead would re-rate a building the moment an upgrade is bought behind it,
+   * and the ratio would stop meaning anything.
    *
    * Cooling is the one row measured against a live figure rather than a
    * ceiling: what a building needs is the waste it is actually making, which
@@ -275,13 +277,38 @@
     const def = findBuilding(building.buildingId);
     if (!def) return [];
 
-    // The scales the board on screen was scored under, which on a previewed
-    // board are the author's and not the reader's — see `placementPrestige`.
-    const max = effectiveAtValue(
-      def,
-      building.baseValue,
+    /*
+     * What this building was rated for on the board it stands on — the whole
+     * board, because a rule can rate a tile by what its neighbours are.
+     *
+     * Resolved by the scorer rather than from `effectiveAtValue` here, and that
+     * is the difference between a ceiling and a ceiling that is true. A
+     * placement carries only its *authored* tier value, which is right and must
+     * stay so — the tier is resolved back out of it — but the figures beside it
+     * were measured against what the tile rated that tier at. Against the plain
+     * roster a shore cooler printed `8.35AC / 8AC`, past a total it had already
+     * walked through, and a Cryo cooler at full tilt could never reach one.
+     *
+     * `boardPlacements` rather than `layoutState.placements`: the rows above are
+     * whichever board this panel describes, and the ceilings have to come off
+     * the same one. The rules are `layoutState`'s, which on a previewed board
+     * are the author's and not the reader's — see `placementPrestige`.
+     *
+     * Nothing to fall back to when the tile is not on the board: a building the
+     * scorer cannot place is one every figure beside it is zero for anyway, and
+     * a ceiling invented for it would be the only number on the card that was
+     * not measured.
+     */
+    const max = ratedPlacementAt(
+      layoutState.grid,
+      BUILDINGS,
+      boardPlacements,
+      building.x,
+      building.y,
       layoutState.placementPrestige,
+      layoutState.placementAnomaly,
     );
+    if (!max) return [];
 
     // A waste producer that is not getting the cooling it needs is shut down,
     // and this row is the only place the board admits it. The test is

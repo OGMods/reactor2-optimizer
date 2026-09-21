@@ -673,6 +673,14 @@ class LayoutState {
   async exitPreview(unlockedUpgrades: Record<string, number>) {
     if (!this.isPreview) return;
     this.#previewCode = null;
+    // Dropped with the code, and it has to be: the rules are the *author's*
+    // timeline, and `hydrate()` below brings back a board that was never built
+    // under them. Both accessors that read them branch on `isPreview` first, so
+    // nothing would have printed a wrong figure today — but leaving the
+    // author's research hanging on the singleton makes that guard the only
+    // thing standing between a re-scored board and someone else's timeline,
+    // and a guard is a weaker guarantee than there being nothing to guard.
+    this.#previewRules = null;
     await this.hydrate(unlockedUpgrades);
   }
 
@@ -691,16 +699,24 @@ class LayoutState {
   ): Promise<IslandTemplate> {
     const code = this.#previewCode;
     if (code === null) throw new Error("There is no shared layout to import.");
+    const rules = this.#previewRules;
 
     // Cleared first: importBlueprint writes, and writes are barred in preview.
+    // The rules go with the code, for the reason `exitPreview` gives — and here
+    // there is a second: the adopted board is re-based to the visitor's own
+    // unlocks on the way in, so keeping the author's research would rate their
+    // own buildings under a timeline they were never in.
     this.#previewCode = null;
+    this.#previewRules = null;
     try {
       return await this.importBlueprint(code, unlockedUpgrades);
     } catch (err) {
       // The import was refused — at the island cap, or a board with two
       // transformers. Put the visitor back in front of what they were reading
-      // rather than dropping them onto a board they did not ask for.
+      // rather than dropping them onto a board they did not ask for, rules and
+      // all: they are still reading the author's board.
       this.#previewCode = code;
+      this.#previewRules = rules;
       throw err;
     }
   }
@@ -1117,11 +1133,6 @@ class LayoutState {
    */
   get placementPrestige(): PrestigeScales | undefined {
     return this.isPreview ? this.#previewPrestige : this.#prestige;
-  }
-
-  /** The anomaly a previewed board was built under, or null if unstated. */
-  get previewAnomalyId(): string | null {
-    return this.#previewRules?.anomalyId ?? null;
   }
 
   setPrestige(scales: PrestigeScales) {

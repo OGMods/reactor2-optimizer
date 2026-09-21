@@ -98,21 +98,49 @@ Two things about the shapes are load-bearing:
   covers every such anomaly there will be. It is not free power: a scaled producer needs
   proportionally more cooling and goes offline just as readily.
 
-  **Waste is derived, not scaled, and every factor has to be in hand before it is.** The game
-  recomputes `snapToAuthoredPrecision(heat − energy)` from the *fully scaled* heat and energy, so
-  the snap must happen once, after research and anomaly have both been applied — scaling the
-  authored waste instead disagrees in the last digit, and the fixtures assert exactly. That is
-  why an anomaly cannot simply be a second `scaleEffectiveBuilding` call layered on the prestige
-  one: the two factors have to arrive at a single multiply. See `docs/game-logic.md`.
+  **Waste is derived, not scaled, and it is re-derived at every step.** A scaled building's
+  waste is `snapToAuthoredPrecision(heat − energy)` recomputed from the pair that was just
+  scaled, never the authored waste carried through the same multiply — the snap is a decimal
+  rounding applied to the *difference*, so the two disagree in the last digit and the fixtures
+  assert exactly. Only the two roles that *have* waste derive one; `heat − energy` over a cooler
+  or a reactor would turn its whole output into waste.
+
+  **Research and anomaly are two successive calls, research first, and that is not the same
+  double as one combined factor.** The game applies the Time Lab in the ScriptableObject getter
+  and the anomaly in the runtime getter, so what a building is rated at is
+  `(authored × research) × anomaly` — `scaleEffectiveBuilding` called once by
+  `getEffectiveBuildings` as it resolves the roster, and again by whatever applies the anomaly.
+  Generator7's first tier under ×5 then ×2.5 is 1.3875000000000001e22 against 1.3875e22 for
+  ×12.5, and the *order* is observable too: its fourth tier under ×5 then a ×1.67 shore is
+  7.38975e22 where the reverse is 7.389749999999999e22. Each call re-derives the waste, so the
+  last one wins. `tests/scaling.test.ts` pins both readings against the shipped catalogue rather
+  than round numbers — every divergence here is in the last bit, where a test on tidy figures
+  passes under either. Nothing above the roster would notice a reversal: the fixtures pass no
+  anomaly, so they cannot see it either. See `docs/game-logic.md`.
 - **`role_isolation` depends on the layout, the other shapes do not.** A terrain bonus is fixed
   per tile and can be folded into the board; a generator's isolation multiplier changes every
   time the search moves a neighbour, so a placed building's figures have to be resolved per
   layout — which `simulateIsland` does, below.
 
-`terrain_affinity` is the one rule implemented. `terrainScales` resolves it into a per-tile
-multiplier when the context is built — nothing about a layout can change which tiles qualify — and
-`IslandContext.rate(tile, building)` is then a lookup, so the rule costs the search nothing.
-`uniformRating` is true under every other anomaly and `rate` is the identity.
+**All four shapes are implemented**, `baseline` being the one that has nothing to do. Each is
+resolved wherever its inputs are settled and nowhere else: a terrain bonus per tile as the context
+is built, a role isolation per layout inside `simulateIsland`, and a shared cooling pool in the
+decomposition, before there is an island at all. The three sections below take them in that order.
+
+`terrain_affinity` is resolved by `terrainScales` into a per-tile multiplier when the context is
+built — nothing about a layout can change which tiles qualify — and `IslandContext.rate(tile,
+building)` is then a lookup, so the rule costs the search nothing.
+
+`uniformRating` is the flag that says `rate` is the **identity**: `ctx.rate(t, b) === b` for every
+tile and every building, so a stage may skip the call entirely. It is hoisted out of `rate` so the
+common case is one boolean rather than a per-tile array read, and it has to promise the whole of
+`rate`'s behaviour rather than only its per-tile half — `rate` carries a per-role factor beside its
+per-tile one (see `shared_cooling` below), and a flag reading `tileScale === null` alone was true
+under a pool while every cooler was being scaled by 0.88. A stage taking the invitation would then
+have rated Cryo coolers at their unscaled figures and returned a layout over-cooled on paper that
+the game shuts down board-wide, with nothing failing anywhere. So it is false under a tile scale
+*and* under a role scale, and true under `baseline` and under `role_isolation` — which `rate` does
+not answer at all, since `simulateIsland` resolves it through `rateIsolated`.
 
 Two things about where it is applied:
 
@@ -128,6 +156,47 @@ Two things about where it is applied:
   scaled building. `downgradeOversized` is the one place that also has to rate a *candidate* before
   comparing it, since the ladder is the plain roster while the building it is replacing and the
   load it measured are both in the tile's units.
+
+**A placement holds rated buildings, so everything compared against one has to be in the tile's
+units.** The roster is what every stage reaches for — pools of candidates, a composition's score,
+the downgrade ladder — and none of those figures mean the same thing as what is on the board once a
+rule rates a tile above or below the roster. Each of the four comparisons that gets this wrong
+fails silently, and in a different way:
+
+- **The no-op guards.** A move asks "would writing this change anything?", and the answer has to be
+  `ratedFor(ctx, tile, candidate) === current[tile]` rather than a comparison against the plain
+  entry, which is never equal on a scaled tile. The guard then stops firing, the move writes back
+  an identical object, a full `simulateIsland` runs and `accept` is handed a delta of zero, which
+  it accepts. No number moves and the walk spends a slice of its budget on steps per second. The
+  comparison is exact because `ctx.rate` caches one object per (scale, roster entry) pair, which is
+  also what makes it a lookup rather than a multiply.
+- **The under-fed-reactor move** (`isUnderFed`) measures what a supplier actually sent against
+  `ratedValue`, the capacity the tile was rated for. Against `baseValue` it compares a scaled
+  delivery with an unscaled ceiling and only calls a reactor under-fed below `1/k` fill — 60% on a
+  Tidal shore, 20% under a ×5 Stellar Forge — so the move stops firing on nearly everything it
+  exists for.
+- **The composition retarget's gate** (`targetCanBeat`). A target is scored from the plain roster,
+  which is right — which buildings to use is a counting problem over the roster — but `bestPower`
+  is a rated layout's power, so the target is scaled by `islandRatingCeiling` before the two are
+  compared. The gate is a `break` over a descending list, so answering `false` once ends the stage
+  outright: on island3 under Tidal a 0.6s run already returns 1.68e23 against a top target of
+  1.49e23, and the stage never ran at any realistic budget. Restoring it took the stage from 1 of 3
+  targets attempted to 3 of 3; the power difference sat inside run-to-run noise, so this buys the
+  stage back rather than a number.
+- **Right-sizing** (`ratedCapacity`) sizes a candidate the way the layout will rate it, which for
+  `role_isolation` means asking `rateIsolated` rather than `rate`. An isolated generator authored
+  320, rated 800 and absorbing 300 was never offered the authored 120 tier that covers 300 at its
+  own rating, so the pass left 500 of intake nobody pays it to have — exactly the money the stage
+  exists to hand back. The other direction is caught by the re-simulation, so only the waste
+  escaped.
+
+`islandRatingCeiling` is one number for the island, resolved once per solve, and it is asked of the
+**context** rather than read off the anomaly — so a rule resolved per tile and one resolved per
+layout are both answered by the code that applies them, and a fifth rule shape needs nothing there.
+Scaling a plain-roster figure by one island-wide factor is the same move the bound makes, sound for
+the same homogeneity reason, and loose in the same place. Loose is the right way to be wrong here:
+a ceiling too low skips a stage that would have helped, one too high costs a few arrangement
+attempts that fail to beat the layout in hand.
 
 **A terrain bonus is a harder search, not just a bigger number.** A shore generator makes x1.67 the
 waste while an inland cooler still covers x1, so a cluster straddling the coast goes offline — a
@@ -156,13 +225,37 @@ bites, and the penalty is avoidable by keeping generators apart. Map 3 at 15s co
 against a 1.4202e23 baseline, where the baseline layout *re-rated* under the anomaly is 1.2849e23 —
 so the search recovers most of the penalty and there is no gain to find. Sizing the composition
 retarget from the isolated rating, which is the only stage that can propose the different mix the
-bonus would need, was measured and changed nothing.
+bonus would need, was measured and changed nothing. That is a different thing from putting the
+stage's *gate* into the layout's units, which is above and is not a tuning choice: targets are
+still scored from the plain roster, and nothing in the tree retargets toward the bonus.
 
-**The bound takes the anomaly too.** `estimateTotalMaxPower` rates each island at its best tile
-(`islandMaxScale`), because a bound computed on the plain roster is one a bonused layout walks
-past: Magma Rift reported 119.9% layout efficiency before it did, and nothing else in the solver is
-entitled to assume the bound holds either. It is loose where only part of an island qualifies,
-which is the right way to be wrong.
+**The bound takes the anomaly too, and every rule of it.** `estimateTotalMaxPower` rates each
+island at its best tile (`islandMaxScale`), because a bound computed on the plain roster is one a
+rated layout walks past — and "no layout may ever beat it" is an invariant the rest of the solver
+is entitled to assume, not a presentation detail. Magma Rift reported 119.9% layout efficiency
+before the terrain case existed, and a generator-bound roster on a 3×3 under Singularity read
+163.8% before the isolation case did; both are now the intended side of 100%, the 3×3 at 65.5%.
+
+`islandMaxScale` is an exhaustive switch with **no `default`**, deliberately: a fifth rule shape
+added to `AnomalyDefinition` fails to typecheck here — "function lacks ending return statement" —
+rather than silently returning 1, which is what `role_isolation` did while a layout was walking
+past the bound by 64%. It answers `max(isolated, crowded, 1)` under a role isolation, because which
+of the two variants a tile gets is a function of the layout rather than of the island and a search
+free to keep generators apart rates every one of them at the bonus; `max(coolerMultiplier, 1)`
+under a shared pool, which is 1 for the shipped ×0.88 and leaves the bound untouched; and the
+multiplier under a terrain list it cannot fully decide. It can decide only a list that is exactly
+`["water"]`, since the shore mask is the one thing that knows off-board counts as water, while
+`terrainScales` tests rock and tree against the grid — so a landlocked island under a
+`["water", "rock"]` anomaly errs high rather than staying at 1.
+
+Scaling the estimate's *result* is sound because `estimateIslandMaxPower` is positively homogeneous
+of degree 1 in the roster's figures: multiply every one of them by `k` and each of `hFirst`,
+`dRest`, `dFirst` and `hRest` scales by `k` while every ratio in it is invariant. That is also what
+lets a rule scaling only *some* buildings be answered with one island-wide number — any layout
+feasible under the partial scaling is feasible in the all-scaled world with an objective no larger.
+It is loose where only part of an island qualifies, or where only part of the roster is scaled,
+which is the right way to be wrong: a bound that can be beaten is worthless, one that is generous
+only makes the efficiency figure read low.
 
 `shared_cooling` is the odd one out entirely: it is the only shape that changes more than a
 building's figures. **Its pool is the whole board** — the game's "island" is the map, Gale Hills
@@ -204,6 +297,18 @@ It is worth real power, and most on a fragmented board, since the x0.88 has to b
 first: map 7 at 25s goes 271AC to 294AC, map 3 at 20s 139AC to 145AC, and map 1 — one landmass,
 already at 98% of its bound — is unchanged.
 
+**One open question, deliberately left open.** `hillClimb`'s `moveScale` — the figure the annealing
+temperature is derived from — is read off the **plain** roster: the top generator's energy at full
+fill. Under any rule that rates a tile above the roster the moves the walk is judging are worth
+more than that calibration assumes, so the walk runs colder than intended: up to ×1.67 under Tidal
+and ×2.5 under Singularity. It is plausible that it costs something and nobody has measured how
+much. It is left alone because the previous, *hotter* calibration was itself the bug the comment
+above it records — scaling by total power made large islands accept ~23% of moves each costing 7%
+of the layout, and the walk never climbed back — and because this repo does not move a tuning
+constant on an argument. Settling it means the usual measurement: several seeds at a realistic
+budget, on both a shore-heavy map under Tidal and a fragmented one under Singularity, against the
+unchanged search. Don't change it blind, and don't assume it is fine because nothing fails.
+
 ### `island.ts` — the window an island is solved in
 
 An `IslandSubGrid` is the component's bounding box **padded by one tile on every side**, carrying
@@ -224,8 +329,17 @@ not in it — and an absent cell there is indistinguishable from the window's ow
 off-board counts as water, a shore flag resolved from inside an `IslandSubGrid` reads every border
 tile as inland, which on a custom island is the entire perimeter and the whole of the anomaly's
 effect. So `computeWaterAdjacency` runs **once on the full grid** before decomposition and each
-sub-grid carries a copy indexed like `buildable`. `island.test.ts` pins it on a board where the
-window is clamped against three edges.
+sub-grid carries a copy indexed like `buildable`.
+
+**The copy is translated by the window's own origin, and that is the half worth a test.** The mask
+is read at `origY * originalWidth + origX`, and a window clamped against the board on both axes has
+a pad origin of (0, 0), so the offset cancels and a mis-indexed read is right by accident — which
+is every small hand-built case. On the shipped boards it is not: a mis-indexed copy was measured
+against the correct mask at between 28 and 166 mismatched tiles per map, which under Tidal is that
+many tiles rated at the wrong multiplier on the boards players actually solve, with nothing
+failing. The fixtures pass no anomaly and could not see it, and neither could anything else in the
+suite. `island.test.ts` now pins the mask on a board clamped against three edges, on a component
+inset from two, and on every island of all eight shipped codes.
 
 `splitGridIntoIslands` takes the anomaly for the same class of reason: `minIslandTiles` is a
 property of the rules in force rather than of the grid, so it cannot be applied after the split.
@@ -268,8 +382,21 @@ produces an identical result — the out-of-order completion a worker pool actua
 ### `simulateIsland`'s `fullReport` flag
 
 `simulateIsland` short-circuits a layout that cannot bring anything online — no producers, or no
-coolers — and returns rows carrying nothing but each building's base value. That is right for a
-search, which only wants power and is about to throw the layout away.
+coolers — and returns rows with every measured field zero, leaving each building's two capacity
+figures and nothing else. That is right for a search, which only wants power and is about to throw
+the layout away.
+
+**The two capacity figures are `baseValue` and `ratedValue`, and confusing them is silent.**
+`baseValue` is the **authored** tier value and never moves, because a placement's tier is resolved
+back out of it by matching the catalogue — report a scaled one and it matches a *higher* tier and
+gets scaled a second time, which is wrong in the readout's ceilings, the `Lv.` chip and the tier
+table of every share code at once. `ratedValue` is what the tile was actually rated for, which is
+the figure every other number in the row was measured against; under a terrain bonus or a role
+isolation the two differ by the multiplier. A consumer comparing a delivery against the wrong one
+reads a full tile as a starved one or the reverse, which is exactly how the under-fed-reactor move
+stopped firing. `ratedValue` lives on `SimPlacedBuilding` rather than on `PlacedBuilding`, so it
+**does not cross the worker boundary**: it is the island's own units and means nothing to a caller
+that does not hold its ratings.
 
 The app has a caller that wants more: `lib/simulation/simulator.ts` scores the board a player is
 looking at, and a board with no coolers on it still has heat moving through it that the inspector
@@ -408,13 +535,22 @@ the change was intentional; that is the harness doing its job.
 
 ## The rest of the suite
 
-The fixtures pin behaviour; the rest of `tests/` pins meaning. Two files are worth knowing about
-before changing anything in the search:
+The fixtures pin behaviour; the rest of `tests/` pins meaning. These are the ones worth knowing
+about before changing anything in the search:
 
 - **`goldenLayouts.test.ts`** — proven optima for islands of 3 to 9 tiles, each confirmed by
   exhaustive brute force rather than by running the solver and writing down what it said. **These
   numbers must never go down.** Each size is checked twice: once against the simulator, pinning
   the exact layout deterministically, and once against the search, which must reproduce it.
+- **`anomalies.test.ts`**, **`scaling.test.ts`** and **`placementSearch.rating.test.ts`** — the
+  rules, which the fixtures cannot reach at all because every fixture is solved under the base
+  ones. Between them they pin each rule reaching the layout the search reports, the search running
+  end to end under every one of them, the research-then-anomaly ordering and the re-derived waste
+  down to the last bit, a report row's two capacity figures, the island rating ceiling that keeps
+  the retarget stage alive, the no-op guards skipping rather than simulating on a rated tile,
+  right-sizing a layout whose ratings come from its own shape, and that every building a seed
+  writes is already rated for the tile it landed on. A rule that is threaded but never applied
+  fails nothing on its own, so this is the layer that notices.
 - **`distribution.test.ts`** — the worked examples from `docs/game-logic.md`, plus layouts built
   in the live game with per-building power read off the screen. Those are observations, not
   derivations: the spec was wrong about leftover handling until those runs corrected it. It also
@@ -437,6 +573,21 @@ It renders no picture — the app draws boards far better, and a picture is the 
 layout you cannot paste back into anything. Each run writes its **blueprint code** to `solves/`
 instead, named after what it found (`3_island_7_2_91AC-296AB.txt`); paste one into the app's
 Import dialog to see the board.
+
+**A code states the rules it was found under, and so does the filename.** `codeFor` is the one
+code writer all three paths go through and it always passes `blueprintRules`, so the app's preview
+rates a CLI layout the way the run did rather than under the reader's own timeline — a
+coast-hugging Tidal board would otherwise come back at roughly its baseline figure with nothing
+saying why. The research table it writes is **empty rather than absent**, which is a different
+claim and a true one: the CLI solves at full unlocks and no Time Lab, and there is no flag for one,
+so "the author had no research" is exactly what it knows, where an absent section would mean "rules
+unknown". `--anomaly` also tags the filename (`test_4_tidal_ascendancy.txt`) and every header names
+the timeline, because a `solves/` directory or a session scrollback holding three timelines is
+otherwise unreadable from the outside — the same argument `formatNumberForFilename` makes about the
+power figure. The tag is the full id, so a filename pastes straight back into the flag that
+produced it, and it is empty under `none`, so existing names are unchanged. `TEST_FILENAME_RE`
+matches the optional tail, since that regex is what finds the previous ids: a tagged filename it
+could not see would restart numbering at 1 and overwrite an untagged run.
 
 `--attempts` runs a batch session: N whole solves through a worker pool, with a leaderboard of
 distinct layouts at the end. Ctrl-C stops it and still prints the report.

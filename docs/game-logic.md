@@ -464,27 +464,46 @@ wrong.** A power source's waste is never an independent figure: it is always the
 difference between its heat and its energy, recomputed from whatever those two
 currently are. So the order of operations for a generator or direct producer is:
 
+The two multipliers also enter at **two different points**, and the waste is
+re-derived at each. The Time Lab lands in the ScriptableObject getter and the
+anomaly in the runtime getter that reads it, so the order of operations is:
+
 ```
-heat     = authoredHeat     × timeLab × anomaly
-energy   = authoredEnergy   × timeLab × anomaly
-capacity = authoredCapacity × timeLab × anomaly
-waste    = snapToAuthoredPrecision(heat − energy)     ← once, at the end
+        ← the ScriptableObject getter, Time Lab research
+heat     = authoredHeat     × timeLab
+energy   = authoredEnergy   × timeLab
+capacity = authoredCapacity × timeLab
+waste    = snapToAuthoredPrecision(heat − energy)
+
+        ← the runtime getter, the anomaly, reading the figures above
+heat     = heat     × anomaly
+energy   = energy   × anomaly
+capacity = capacity × anomaly
+waste    = snapToAuthoredPrecision(heat − energy)     ← again, from the new pair
 ```
 
 Scaling the authored waste directly instead — `authoredWaste × timeLab ×
 anomaly` — is wrong. It agrees to about fifteen digits and disagrees in the
 last, because the snap is a decimal rounding and it is applied to the *scaled*
-difference, not carried along from the table.
+difference, not carried along from the table. The same is true of carrying a
+once-derived waste through the second multiply: the last derivation wins.
 
 Nothing else is snapped. Heat, energy, capacity and a cooler's cooling are left
 as raw products, because a multiplier is a runtime multiply rather than an
-authored table entry; the derived waste is the single exception, and it is
-snapped exactly once no matter how many multipliers went into it.
+authored table entry; the derived waste is the only exception, and it is
+re-derived wherever the pair it comes from is scaled again.
 
 **Anomaly and research compose multiplicatively.** A generator under Singularity
 Isolation (×2.5) with Infinite Grid maxed (×5) is rated ×12.5. That is a
 *rating*, not a promise of 12.5× the power: what it actually produces still
 depends on how much heat reaches it.
+
+It is also not the same double as one ×12.5 multiply, and the difference is
+real rather than pedantic: generator7's first tier is 1.3875000000000001e22 as
+two successive scalings and 1.3875e22 as one combined factor. The **order**
+matters for the same reason — its fourth tier under ×5 then a ×1.67 shore bonus
+is 7.38975e22 where the reverse is 7.389749999999999e22 — so research first,
+anomaly second, exactly as the two getters run.
 
 And **overheat capacity scaling changes nothing for a sustainable layout**,
 since the store it sizes never fills. It is listed because the game lists it.
