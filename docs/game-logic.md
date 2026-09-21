@@ -19,7 +19,9 @@ afterward, which already-heated buildings get to actually turn on.
 
 The grid is made of tiles. Grass tiles are buildable — you can put anything on
 them. Everything else (water, rock, trees, ponds, transformers) is just scenery:
-you can't build there, and it has no effect on anything.
+you can't build there, and under the base rules it has no effect on anything.
+(Tidal Ascendancy is the one exception in the game, and the only rule anywhere
+where an unbuildable tile does something — see Anomalies.)
 
 Only one building fits per tile.
 
@@ -39,6 +41,9 @@ A cluster needs a minimum amount of room to ever produce any power at all:
 
 Anything smaller than that is a dead zone — it will never generate power, no matter
 what you put there.
+
+Both numbers are consequences of cooling being adjacency-bound, so both stop
+holding under Cryo Nexus: see that anomaly below, where the minimum is one tile.
 
 ---
 
@@ -235,20 +240,60 @@ fixed, meaningful rule of the game, not just an implementation quirk.
 
 ---
 
-## Cooling Is All-Or-Nothing
+## Cooling Decides What Keeps Running
 
 Once heat has been settled and every generator's power is locked in, cooling
-gets distributed the same way. Then comes the real test: a generator or direct
-producer only actually runs — and only actually produces its power — if the
-cooling it received covers _all_ of its waste heat. Getting cooled exactly as
-much as its waste amount is fine; that still counts as fully covered.
+gets distributed the same way. What cooling decides is not whether a building
+produces **this** tick — it decides whether it can go on producing.
 
-If it falls even slightly short, the building shuts down completely and
-produces zero power. There's no partial credit, and nothing gets undone or
-sent back — the heat it already received during heat delivery is not returned
-to any reactor, and it can't be reassigned to a different generator just
-because this building couldn't stay cooled. A building with no cooling routed
-to it at all can never run, no matter how much heat it received.
+### Production, the waste store, and overheating
+
+There is no admission test. A power source produces whenever it is neither
+overheated nor booting, and what it produces is proportional to the heat it
+actually received: at 60% of its intake capacity it makes 60% of its energy and
+60% of its waste. Cooling is not consulted.
+
+Instead, every power source carries a **store of waste heat** and a capacity for
+it — the overheat threshold. Each tick it adds the waste it just made, and
+cooling removes what it can. So:
+
+- Cooled at least as fast as it makes waste, the store stays empty and the
+  building runs forever.
+- Cooled more slowly, the store climbs a little every tick. When it reaches
+  99.5% of the threshold the building **latches overheated** and drops to zero
+  power. It stays there until cooling has drained the store to nothing, then
+  reboots — a tick of nothing — and starts climbing again.
+
+Production and the overheat latch both happen **before** that tick's cooling, so
+a building can tip over on the same tick it produced.
+
+Nothing gets undone or sent back either way: the heat a building received during
+heat delivery is not returned to any reactor, and it cannot be reassigned to a
+different generator just because this one could not stay cooled.
+
+### Sustainable layouts, and the rule that describes them
+
+A layout whose cooling does not cover its waste still produces, on a sawtooth,
+cycling between running and latched. It is unbuildable in any useful sense: its
+output depends on how long it has been running, it is not a number you can put
+on a card, and no player wants a board that stalls.
+
+So the whole of this document, and the solver behind it, is about **sustainable**
+layouts: ones where every power source's cooling covers the waste it is actually
+making, every tick, so no store ever fills. For those layouts the simpler rule is
+exactly equivalent, and it is the one used everywhere below:
+
+> A generator or direct producer counts as online, and contributes its power,
+> only if the cooling routed to it covers _all_ of its waste heat. Cooled exactly
+> as much as its waste is fine — that still counts as covered. Anything short and
+> it counts for nothing.
+
+Two consequences of drawing the line there are worth being explicit about. A
+building with no cooling routed to it at all can never be part of a sustainable
+layout, whatever heat it received. And because a sustainable layout never
+accumulates waste, the overheat threshold is **never the binding constraint** —
+which is why no figure for it appears anywhere else in this document, and why an
+anomaly or a research that scales it changes nothing here.
 
 ---
 
@@ -324,7 +369,8 @@ A few things always hold true no matter how you arrange things:
 - A reactor can never send out more heat than its own maximum.
 - A generator can never take in more heat than its own maximum.
 - Heat is always settled completely before cooling is even looked at.
-- A generator or direct producer only contributes power if it's fully cooled.
+- A generator or direct producer only contributes power if it's fully cooled —
+  that being the sustainability rule above, not an admission test the game runs.
 
 And ultimately, what matters isn't how many buildings you've placed, or how much
 heat or cooling moved around the grid — it's the total amount of power actually
@@ -332,11 +378,56 @@ being produced by whatever's still online at the end.
 
 ---
 
+## Prestige Changes the Numbers Twice
+
+Prestiging ("Time Jump") ends a timeline and starts a new one. It touches this
+document in two independent ways: the player spends Chronons on **Time Lab
+research** that survives the jump, and picks one **anomaly** that governs the
+whole of the next timeline. They stack, and neither is a special case of the
+other.
+
+**Everything in these two sections is read off the game's own source** — the
+three anomaly classes, the Time Lab research classes, the building getters that
+apply them, and the cooling network. The in-game description text is not the
+authority: several of its lines have more than one consistent reading, and where
+it and the code differ, what is written here is the code.
+
+---
+
+## Time Lab Research
+
+Ten researches exist; **three** of them change a building's figures, and the
+other seven move research income, research time, Chronons, obstacle-removal
+cost and building prices — all decided before a board is laid out, so none can
+change which layout is best.
+
+| research           | scales                                        |
+| ------------------ | --------------------------------------------- |
+| **Stellar Forge**  | every heat producer's heat output              |
+| **Infinite Grid**  | every generator's and wind turbine's heat intake, energy and overheat capacity |
+| **Absolute Zero**  | every cooler's cooling                         |
+
+Each has five levels worth ×2, ×2.5, ×3.25, ×4 and ×5. The game authors them as
+a bonus fraction — 1.0 through 4.0 — and shows them as "+100%" through "+400%";
+the multiplier is `1 + bonus`.
+
+**The roles do not overlap, and the boundary is the class of building rather
+than the catalogue's grouping.** The game's catalogue files reactors and wind
+turbines together under one "heat producer" category, but a wind turbine is a
+*power source* in the code, so Stellar Forge does not touch it — Infinite Grid
+does, which is why that one goes out of its way to name wind turbines. A reactor
+is the only heat producer the shipped roster has, so in practice Stellar Forge
+is "reactors"; it would cover any other heat producer the game added.
+
+Like an anomaly's, each scale is **uniform** on the figures it names, so a
+boosted producer needs proportionally more cooling and none of it is free power.
+
+---
+
 ## Anomalies
 
-Prestiging ("Time Jump") ends a timeline and starts a new one, and on the way
-out the player picks an **anomaly**: a rule change that applies for the whole of
-the next timeline. Exactly one is active at a time, and "no anomaly" is a real
+On the way out of a Time Jump the player picks an **anomaly**: a rule change
+that applies for the whole of the next timeline. Exactly one is active at a time, and "no anomaly" is a real
 option rather than a missing value — it means the rules exactly as described
 above.
 
@@ -344,29 +435,59 @@ An anomaly never adds a building, removes one, or changes the grid. It changes
 either **what a placed building's figures are** or **how a supply gets shared
 out**, and the three that exist so far divide cleanly along that line.
 
-### The figures an anomaly scales
+### What a multiplier actually multiplies
 
-Every stat anomaly so far scales a building **uniformly**: the same multiplier
-lands on all of its authored figures at once. The game's wording lists them
-separately — "Energy, Heat, Cooling, and overheat capacity" — but those four
-names are one field each across the four roles:
+This applies to Time Lab research just as much as to an anomaly — the two enter
+at different points in the game's code, but they scale the same fields in the
+same way, and everything in this subsection covers both.
 
-| the game says      | the figure                                          |
-| ------------------ | --------------------------------------------------- |
-| Heat               | a reactor's output, a generator's intake capacity, a direct producer's own heat |
-| Energy             | what a generator or direct producer puts out at full |
-| Cooling            | what a cooler absorbs                                |
-| overheat capacity  | the waste heat a generator or direct producer makes at full, and therefore what must be cooled for it to stay online |
+Every stat multiplier so far is **uniform**: it lands on all of a building's
+authored figures at once. The game's wording lists them separately — "Energy,
+Heat, Cooling, and overheat capacity" — but those are one field each across the
+four roles:
+
+| the game says     | the figure                                                                      |
+| ----------------- | ------------------------------------------------------------------------------- |
+| Heat              | a reactor's output, a generator's intake capacity, a direct producer's own heat  |
+| Energy            | what a generator or direct producer puts out at full                             |
+| Cooling           | what a cooler absorbs                                                            |
+| overheat capacity | the size of a power source's waste-heat store — not the waste it makes           |
 
 So a building with a ×1.67 bonus is simply a building whose whole tier is worth
 1.67× as much: it absorbs more, produces more, and needs proportionally more
-cooling. A bonus is **not** free power on its own — it moves the whole balance
-of a layout, and a scaled producer that outruns its coolers goes offline like
-any other.
+cooling. A bonus is **not** free power on its own — it moves the whole balance of
+a layout, and a scaled producer that outruns its coolers stops running like any
+other.
 
-The multiplier is applied to the authored figure at solve time and is not
-snapped back to the game's authored precision, because it is a runtime
-multiply rather than a table entry.
+**Waste heat is not in that list, and that is the one thing here easy to get
+wrong.** A power source's waste is never an independent figure: it is always the
+difference between its heat and its energy, recomputed from whatever those two
+currently are. So the order of operations for a generator or direct producer is:
+
+```
+heat     = authoredHeat     × timeLab × anomaly
+energy   = authoredEnergy   × timeLab × anomaly
+capacity = authoredCapacity × timeLab × anomaly
+waste    = snapToAuthoredPrecision(heat − energy)     ← once, at the end
+```
+
+Scaling the authored waste directly instead — `authoredWaste × timeLab ×
+anomaly` — is wrong. It agrees to about fifteen digits and disagrees in the
+last, because the snap is a decimal rounding and it is applied to the *scaled*
+difference, not carried along from the table.
+
+Nothing else is snapped. Heat, energy, capacity and a cooler's cooling are left
+as raw products, because a multiplier is a runtime multiply rather than an
+authored table entry; the derived waste is the single exception, and it is
+snapped exactly once no matter how many multipliers went into it.
+
+**Anomaly and research compose multiplicatively.** A generator under Singularity
+Isolation (×2.5) with Infinite Grid maxed (×5) is rated ×12.5. That is a
+*rating*, not a promise of 12.5× the power: what it actually produces still
+depends on how much heat reaches it.
+
+And **overheat capacity scaling changes nothing for a sustainable layout**,
+since the store it sizes never fills. It is listed because the game lists it.
 
 ### Cryo Nexus — one shared cooling pool
 
@@ -382,6 +503,15 @@ one number for the island and one rule for handing it out. Heat delivery is
 untouched: reactors still only reach adjacent generators, and heat is still
 settled first.
 
+The arithmetic is exactly as plain as it sounds. Each tick the pool adds up
+every cooler's cooling; every power source asks for the waste it currently has
+stored; and if the pool falls short, everyone is served the same fraction of
+what they asked for. **Wind turbines draw from it too** — they are power sources
+like any other, even though they take no part in heat delivery.
+
+The ×0.88 applies to each cooler's own cooling rating, so it is what the game
+shows on that cooler, not a separate charge levied at the pool.
+
 Two consequences fall straight out of it, and both matter more than the rule
 itself:
 
@@ -389,14 +519,18 @@ itself:
   the island is worth exactly as much as one wedged between two generators, so
   the layout problem collapses to "how much total cooling do I buy, and where do
   I spend the tiles I have left".
-- **Cooling becomes all-or-nothing for the whole island at once.** Every power
-  source gets the same percentage of what it needs, and a building only runs if
-  it is covered in full — so either the pool covers the island's entire waste
-  and everything runs, or it falls short and *every* power source on that island
-  shuts down. There is no partial board.
+- **Sustainability becomes a single board-wide sum.** Every power source is
+  served the same fraction, so either the pool covers the board's entire waste —
+  the fraction is 1, every store stays empty, everything keeps running — or it
+  does not, and every store on the board fills together. There is no layout under
+  Cryo where one patch is sustainable and another is not.
 
-The ×0.88 is a straight tax on each cooler's contribution, applied before
-anything is shared.
+  What that shortfall looks like is the sawtooth of the cooling section above,
+  board-wide and in step, not an instant blackout. It is still the line between a
+  layout that works and one that does not.
+
+  The sum is over **actual** waste, not nameplate waste: a generator at 60% of
+  its intake makes 60% of its waste, and it is that figure the pool has to cover.
 
 **"An island" here means the whole map.** Gale Hills is an island; so is Ash
 Bay. The rule is board-wide: every cooler anywhere on the map pays into one
@@ -426,17 +560,27 @@ the pool over what it takes out. It can run a producer it cannot cool and let
 the rest of the board pay for it, or pave itself in coolers and produce nothing
 but surplus.
 
-And because cooling is all-or-nothing, and every power source gets the same
-percentage, **the whole board is all-or-nothing together**: either the pool
-covers the board's entire waste and everything runs, or it falls short and every
-power source on the map produces nothing. There is no partial board and no
-partially-lit patch.
+And because every power source is served the same fraction, **the board stands or
+falls together**: the pool either covers the board's entire waste or it does not,
+and there is no arrangement where one patch is fine and another is cycling.
 
-One smaller consequence: a patch too small to work normally becomes usable, since
-it no longer needs a cooler of its own. A lone grass tile with a direct producer
-on it runs off the pool. That is worth having but it is not much — the shipped
-maps lose between 0 and 6 tiles to patches below the minimum size, out of boards
-of 49 to 184 grass tiles.
+**The minimum patch size drops to one tile**, and this is the consequence most
+worth acting on. Normally a patch needs 3 tiles (reactor, generator, cooler) or
+2 (direct producer, cooler); both numbers exist only because cooling has to
+reach across a tile boundary, and here it does not. Under Cryo a single isolated
+grass tile is worth building on two different ways:
+
+- a **heat sink** on it pays into the pool for the whole board, which is the
+  better use of a tile that can never have a neighbour;
+- a **direct producer** on it makes power and lets the rest of the board pay for
+  its waste.
+
+A lone generator or reactor is still worthless, because heat is still
+adjacency-bound and a tile with no neighbours can neither receive nor send it.
+
+The shipped maps have 21 such tiles between them — 0 to 6 each, on boards of 49
+to 184 grass tiles. Small, but they are free: under every other rule in the game
+they are unbuildable ground.
 
 ### Tidal Ascendancy — a bonus for building on the shore
 
@@ -451,10 +595,27 @@ per island and then treat as part of the board.
 
 It is the first rule in the game where a non-buildable tile does anything at all.
 
+It covers **every** role, not only the ones "production building" sounds like: a
+cooler beside water absorbs ×1.67, a reactor beside water puts out ×1.67, and a
+generator or wind turbine beside water has all three of its figures scaled. And
+one water neighbour is worth the same as eight — the bonus does not stack.
+
 **A pond is not water.** It is an obstacle — scenery you cannot build on, like a
 rock or a tree — and it grants no shore bonus. Only the water tile proper does.
 
-The bonus is not a rare one: between 36% and 44% of the grass on every shipped
+**Off the edge of the board counts as water.** The game has one global map on
+which every island sits in open water, and the eight boards here are rectangles
+cut out of it — so the water beyond an edge is real water that our rectangle
+simply does not include. A grass tile on the border is therefore shore.
+
+It decides far more on a custom island than on a shipped one. On six of the eight
+shipped maps the edge grass already touches water diagonally inside the
+rectangle, so the rule adds nothing; on Magma Rift it adds 4 tiles and on Entropy
+Isles 2. A blank custom island is 10×10 of nothing but grass, with no water
+inside it at all, so the rule is the whole of the anomaly there: its 36-tile
+perimeter is shore and its 64-tile interior is not.
+
+The bonus is not a rare one: between 36% and 45% of the grass on every shipped
 map is water-adjacent, so on any of them something close to half the buildable
 board is worth ×1.67. That makes the shoreline the most valuable ground on the
 map and this anomaly a genuine change of shape rather than a modifier, since the
@@ -476,3 +637,16 @@ per layout rather than once per tile.
 
 The threshold is binary — one adjacent generator costs the same as five — so the
 rule is a two-way test, not a count.
+
+Three things about the test, each of which could have gone the other way:
+
+- **It reads placement, never state.** An adjacent generator that is idle,
+  booting or overheated still costs its neighbour the penalty. The multiplier is
+  a function of the board alone, so it never has to be resolved against an
+  outcome that it is itself an input to.
+- **Only generators are affected, and only generators trigger it.** A wind
+  turbine is a power source but not a generator: it neither takes the penalty
+  itself nor imposes it on a generator beside it. Under this anomaly coolers,
+  reactors and wind turbines are all rated exactly ×1.
+- **Adjacency is the ordinary eight neighbours**, corners included, as
+  everywhere else in this document.

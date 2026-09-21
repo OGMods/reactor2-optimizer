@@ -183,12 +183,13 @@ before the board exists; `App.svelte`'s effect pushes changes. A previewed board
 sits it out, the same as `rebasePlacements`: it is the author's board at the
 author's research, and a blueprint does not record what that was.
 
-**Stellar Forge is the one uncertain call.** The game's `heat_producer` category
-holds reactors *and* direct producers, so "all Heat Producers" read literally
-would take the wind turbine — but Infinite Grid goes out of its way to name wind
-turbines, which is only worth saying if this one does not cover them. Modelled as
-reactors only; the cost of being wrong is a turbine that per `docs/game-logic.md`
-almost never earns a tile.
+**Stellar Forge does not cover wind turbines.** The game's `heat_producer`
+category holds reactors *and* direct producers, so "all Heat Producers" read
+literally would take the turbine — but a turbine's SO inherits
+`PowerSourceBuildingSO` and reads Infinite Grid, while Stellar Forge is read only
+by `HeatProducerBuildingSO`. That is why Infinite Grid goes out of its way to
+name turbines. The rule is "every heat producer", and a reactor is the only one
+the game ships, so it is modelled as reactors.
 
 ### Anomalies
 
@@ -206,7 +207,12 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   and the worker boundary.
 - Every stat anomaly is a **uniform** scale on a building's three figures
   (`scaleEffectiveBuilding`), so a bonus is never free power — the cooling it
-  needs grows with it.
+  needs grows with it. **Waste is derived rather than scaled**: the game
+  recomputes `snapToAuthoredPrecision(heat - energy)` from the fully scaled pair,
+  so research and anomaly have to meet at one multiply with a single snap after
+  it. `scaleEffectiveBuilding` multiplies `waste` directly instead — which holds
+  for one factor and breaks for two, in the last digit, where the fixtures assert
+  exactly. Fixing that is what an anomaly reaching the roster depends on.
 - `configState.anomalyId` is the live choice, persisted under its own key rather
   than in `ui_prefs` because it is a **solve input** like the roster, not a
   preference about the app — which is also why `solveSignature()` counts it and
@@ -218,6 +224,24 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   solvable alone; it is just no longer described by its best power but by a
   frontier of power against net cooling contributed, with the board combining
   those under one scalar budget. See `docs/SOLVER.md`.
+
+  It also **drops `splitGridIntoIslands`' minimum island size to one tile**. The
+  2-and-3-tile floors exist only because cooling has to cross a tile boundary; a
+  lone tile under Cryo takes a heat sink that pays into the pool, or a direct
+  producer the pool pays for. That is 21 tiles across the shipped maps which no
+  other rule in the game can use, arriving as degenerate one-tile islands that
+  must not be handed a real share of the time budget. The anomaly therefore has
+  to reach the split, not be consulted after it.
+- **Off the board counts as water**, which is a fact about our data rather than
+  about the game: the game has one global map with open water between islands,
+  and our eight boards are rectangles cut out of it, so the water past an edge is
+  real and simply not in the blueprint. It barely moves the shipped maps (+4 on
+  island3, +2 on island7, the rest unchanged) and is the whole of the anomaly on
+  a custom island, whose blank 10x10 of grass has no water in it at all.
+
+  The trap is that `IslandSubGrid`'s one-tile padding is **clamped to the board**,
+  so it cannot tell an off-board neighbour from the window's own edge. Water
+  adjacency has to be resolved once on the full grid and carried in.
 - **`ANOMALIES` is transcribed by hand from the same extractor's output**, which
   emits an anomaly record alongside the roster and drops the icons into
   `public/icons/anomaly_<id>.webp`. Unlike `BUILDING_TABLE`, **nothing splices
@@ -252,15 +276,16 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
 
 **Three Time Lab upgrades scale building stats too**, and they are not anomalies:
 they are bought with Chronons, survive a Time Jump, and stack with whatever
-anomaly is running. The extractor's record covers all ten Time Lab upgrades; the
-three a layout can see are **Stellar Forge** (every heat
-producer), **Infinite Grid** (every generator), and **Absolute Zero** (every
-cooler), each five levels of `BonusPercentage` 1.0 to 4.0. That field is a
-fraction rather than a percent -- the same field is 0.05 on Chronon Reactor,
-which the game shows as +5% -- so the levels are worth x2 to x5. Like an
-anomaly's, the scale is uniform, so the cooling a boosted producer needs grows
-with it. Their badges ship as `public/icons/prestige_<id>.webp`. Nothing models
-them yet.
+anomaly is running — **multiplicatively**, so a generator under Singularity
+Isolation with Infinite Grid maxed is rated x12.5. The extractor's record covers
+all ten Time Lab upgrades; the three a layout can see are **Stellar Forge**
+(every heat producer, so reactors), **Infinite Grid** (generators *and* wind
+turbines), and **Absolute Zero** (every cooler), each five levels of
+`BonusPercentage` 1.0 to 4.0. That field is a fraction rather than a percent --
+the same field is 0.05 on Chronon Reactor, which the game shows as +5% -- so the
+levels are worth x2 to x5. Like an anomaly's, the scale is uniform, so the
+cooling a boosted producer needs grows with it. Their badges ship as
+`public/icons/prestige_<id>.webp`.
 
 ## Architecture
 

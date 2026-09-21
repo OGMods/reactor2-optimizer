@@ -84,6 +84,12 @@ multiplier belongs to is not in the data at all: a shared cooling pool and a sho
 both "one double" to it. So the extract is what each entry's numbers and its quoted `description`
 are checked against, and the `rule` tag stays a human's reading of the text.
 
+What each rule *means*, though, is read off the game's own source — the three anomaly classes, the
+getters that apply them, `CoolingNetwork.cs` and `GeneratorBuilding.TickGeneratingEnergy` — and
+`docs/game-logic.md` is where that lands. Two of those rules are not what the description text
+reads like and are worth naming here: off-board counts as water, and nothing in the runtime
+performs a full-cooling admission test.
+
 Two things about the shapes are load-bearing:
 
 - **Every stat anomaly is a _uniform_ scale.** "Energy, Heat, Cooling, and overheat capacity" is
@@ -91,6 +97,13 @@ Two things about the shapes are load-bearing:
   is worth more — `scaleEffectiveBuilding` is the one place that applies it, and one function
   covers every such anomaly there will be. It is not free power: a scaled producer needs
   proportionally more cooling and goes offline just as readily.
+
+  **Waste is derived, not scaled, and every factor has to be in hand before it is.** The game
+  recomputes `snapToAuthoredPrecision(heat − energy)` from the *fully scaled* heat and energy, so
+  the snap must happen once, after research and anomaly have both been applied — scaling the
+  authored waste instead disagrees in the last digit, and the fixtures assert exactly. That is
+  why an anomaly cannot simply be a second `scaleEffectiveBuilding` call layered on the prestige
+  one: the two factors have to arrive at a single multiply. See `docs/game-logic.md`.
 - **`role_isolation` depends on the layout, the other shapes do not.** A terrain bonus is fixed
   per tile and can be folded into the board; a generator's isolation multiplier changes every
   time the search moves a neighbour, so a placed building's figures have to be resolved per
@@ -111,13 +124,21 @@ power against net cooling it puts into or takes out of the pool — and the boar
 combine those frontiers under one scalar budget. That keeps the per-island parallelism; it changes
 what a worker is asked for.
 
-Two smaller effects: the board is all-or-nothing **together** (every power source gets the same
-percentage, and a partial percentage runs nothing), and patches below the minimum island size come
-alive, since a lone tile's producer can be cooled from anywhere. The second is worth little — the
-shipped maps lose 0 to 6 tiles that way, on boards of 49 to 184.
+Two smaller effects. The board is sustainable **together** — every power source is served the same
+fraction, so either the pool covers the board's whole waste or no part of it holds — which is what
+makes one scalar budget the right shape for the board-level problem. And **`splitGridIntoIslands`'
+minimum drops to one tile**: `minTilesRequired` is 2 or 3 only because cooling has to cross a tile
+boundary, and under Cryo it does not. A lone tile takes a heat sink that pays into the pool, or a
+direct producer the pool pays for; a lone generator or reactor is still worthless, heat being
+adjacency-bound either way. The shipped maps have 21 such tiles between them, 0 to 6 each — small,
+but they are ground no other rule in the game can use, and they arrive as degenerate one-tile
+islands that should not be handed a real share of the time budget.
 
-`docs/game-logic.md` has the rules. Nothing about them is unconfirmed now: a pond is an obstacle
-and grants no shore bonus, and the Tidal bonus lands on 36-44% of the grass of every shipped map.
+`docs/game-logic.md` has the rules. Two are worth repeating here because they decide how much of a
+board this package has to look at: a pond is an obstacle and grants no shore bonus, while **off the
+board counts as water** — the shipped maps are rectangles cut from one global map that is open
+water between islands. The Tidal bonus lands on 36-45% of the grass of every shipped map, and on
+the whole perimeter of a custom one.
 
 ### `island.ts` — the window an island is solved in
 
@@ -132,6 +153,17 @@ and `tileCount` is the count that goes with it.
 
 The padding changes tile coordinates uniformly, so it changes no result: the fixtures reproduce
 byte for byte across it.
+
+**The padding cannot answer the shore question on its own, and this is the trap.** It is clamped
+to the board, so for a tile on the board's own edge the off-board neighbour is not in the window —
+and an absent cell there is indistinguishable from the window's own boundary. Since off-board
+counts as water, a shore flag resolved from inside an `IslandSubGrid` would rate every border tile
+inland, which on a custom island is the entire perimeter and the whole of the anomaly's effect.
+So water adjacency has to be resolved **once on the full grid**, before decomposition, and carried
+into the sub-grid alongside `originalTileIndices` — not recomputed from the window.
+
+The same goes for `minTilesRequired`: it is a property of the rules in force, not of the grid, so
+the anomaly has to reach `splitGridIntoIslands` rather than being consulted after it.
 
 ### `distribution.ts` — a port of Unity's `FlowNetwork.cs`
 
