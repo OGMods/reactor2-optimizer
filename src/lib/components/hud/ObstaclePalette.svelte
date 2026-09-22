@@ -34,7 +34,7 @@
 </script>
 
 <script lang="ts">
-  import { editorState, layoutState } from "../../state";
+  import { configState, editorState, layoutState } from "../../state";
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
 
@@ -64,6 +64,7 @@
 
 <div
   class="obstacle-panel ribbon"
+  class:anomalous={configState.hasAnomaly}
   role="toolbar"
   aria-label="Obstacle tools"
   transition:fly={{ y: 8, duration: 180, easing: cubicOut }}
@@ -95,11 +96,22 @@
     background: var(--surface-sunken);
     backdrop-filter: blur(16px);
     border: 1px solid var(--border-neon);
-    border-radius: var(--radius-pill);
+    /* `--radius-lg`, not the pill the buttons inside it are not shaped like —
+       see the note in `BuildingPalette`. */
+    border-radius: var(--radius-lg);
     padding: 0.35rem 0.5rem;
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
     box-shadow:
       0 0 30px var(--neon-faint),
       0 8px 32px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Same reminder every other HUD panel carries — see `BuildingPalette`. */
+  .obstacle-panel.anomalous {
+    background: rgba(var(--anomaly-panel-rgb), 0.92);
+    border-color: var(--anomaly-border-neon);
   }
 
   .obs-btn {
@@ -158,7 +170,6 @@
   @media (max-width: 640px) {
     .obstacle-panel {
       width: 100%;
-      border-radius: var(--radius-lg);
     }
   }
 </style>

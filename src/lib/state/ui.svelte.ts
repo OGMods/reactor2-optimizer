@@ -599,7 +599,21 @@ class UIState {
       );
       return;
     }
-    if (solverState.optimizationResult) {
+    /*
+     * Nothing to ask about across an anomaly change: the layout on screen was
+     * searched under other rules, so its power is not a bar a fresh run has
+     * to clear — defending it would compare two numbers that do not mean the
+     * same thing. Run outright, as if there were no result at all.
+     *
+     * Compared against `activeAnomaly.id` rather than the raw `anomalyId`,
+     * which is whatever `localStorage` held: `resultAnomalyId` is always a
+     * resolved id, so an unknown string would otherwise never match one and
+     * the dialog would be skipped for good.
+     */
+    if (
+      solverState.optimizationResult &&
+      solverState.resultAnomalyId === configState.activeAnomaly.id
+    ) {
       this.activeModal = "solve";
       return;
     }

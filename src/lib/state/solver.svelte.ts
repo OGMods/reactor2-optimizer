@@ -1,4 +1,5 @@
 import type { OptimizationResult, PlacedBuilding } from "../types";
+import { DEFAULT_ANOMALY_ID, type AnomalyId } from "@reactor2/solver";
 import {
   SolverWorkerClient,
   type SolveTaskHandle,
@@ -229,6 +230,21 @@ class SolverState {
   isRestored = $state(false);
 
   /**
+   * The anomaly the on-screen shortlist was actually *searched* under.
+   *
+   * Not `configState.activeAnomaly.id`, and the gap between the two is the
+   * whole point of the field. `rescoreResult()` re-rates every variant's
+   * figures under a newly selected anomaly but never searches again, so the
+   * shapes on screen go on being the ones some other set of rules produced —
+   * this is what still says which. A run in flight sets it to `#runAnomalyId`
+   * for the same reason: the search reads the anomaly once, at launch, so
+   * moving the selection while one is running cannot change what it returns.
+   *
+   * Null until a result exists at all.
+   */
+  resultAnomalyId = $state<AnomalyId | null>(null);
+
+  /**
    * How the next run spends its time: one long search, or several short ones.
    *
    * Persisted, because it is a standing answer to "how much wall-clock am I
@@ -243,16 +259,20 @@ class SolverState {
   #ticker: ReturnType<typeof setInterval> | null = null;
 
   /**
-   * The island a run was started on, and the board it was started against.
+   * The island a run was started on, the board it was started against, and
+   * the rules it was started under.
    *
    * A solve belongs to the island it was launched from, not to whatever is on
-   * screen when it lands: the user may switch away mid-run. Both are captured
-   * at the start so the result is filed under the right island with the right
-   * signature, and so a late progress report cannot paint itself over a
-   * different board.
+   * screen when it lands: the user may switch away mid-run. All three are
+   * captured at the start so the result is filed under the right island with
+   * the right signature, so a late progress report cannot paint itself over a
+   * different board, and so every stage of the run — the request, the streamed
+   * layouts, the record — names the one anomaly it was actually searched
+   * under.
    */
   #runTemplateId = "";
   #runSignature = "";
+  #runAnomalyId: AnomalyId = DEFAULT_ANOMALY_ID;
 
   #client = new SolverWorkerClient({
     reportIntervalMs: 1000, // 1 second
@@ -468,6 +488,12 @@ class SolverState {
     this.finishedAt = saved.finishedAt;
     this.isRestored = true;
     this.optimizationError = null;
+    // Off the record rather than assumed from `configState`: the two are
+    // allowed to disagree, once `rescoreResult` has left them that way. A
+    // record written before this field existed carries none — but the anomaly
+    // was already folded into `signature` by then, and the signature matched
+    // to get here, so the current selection is what it was found under.
+    this.resultAnomalyId = saved.anomalyId ?? configState.activeAnomaly.id;
   }
 
   /**
@@ -527,6 +553,7 @@ class SolverState {
     this.finishedAt = null;
     this.elapsedMs = 0;
     this.isRestored = false;
+    this.resultAnomalyId = null;
   }
 
   /**
@@ -590,6 +617,12 @@ class SolverState {
       this.#scoreLayout(placements ?? this.variants[i].placements, bound),
     );
     this.optimizationResult = this.variants[this.variantIndex] ?? null;
+    // `resultAnomalyId` deliberately stays where it is. This puts every
+    // variant's *figures* under the current anomaly but searches nothing, so
+    // the shapes are still the ones the old rules produced. Moving it to the
+    // current selection erased the "solved under a different timeline" warning
+    // it exists to raise, and let Run's "keep the better one?" dialog defend a
+    // layout that had never been searched under the new rules.
 
     this.#persistCurrent();
   }
@@ -623,6 +656,7 @@ class SolverState {
     finishedAt: number,
     templateId: string,
     signature: string,
+    anomalyId: AnomalyId,
   ) {
     const applied = variants[selectedVariant];
     if (!applied) return;
@@ -637,6 +671,7 @@ class SolverState {
         toStoredPlacements($state.snapshot(v).placements),
       ),
       selectedVariant,
+      anomalyId,
       durationMs,
       finishedAt,
     });
@@ -654,6 +689,10 @@ class SolverState {
     if (this.variants.length === 0) return;
     if (this.lastRunDurationMs === null || this.finishedAt === null) return;
 
+    // `resultAnomalyId`, not the current selection: `rescoreResult` calls this
+    // after re-rating the figures under a newly chosen anomaly without
+    // re-searching, and the record has to keep saying which one the *shape*
+    // was found under.
     this.#persistResult(
       this.variants,
       this.appliedVariant,
@@ -661,6 +700,7 @@ class SolverState {
       this.finishedAt,
       layoutState.activeTemplateId,
       this.solveSignature(),
+      this.resultAnomalyId ?? configState.activeAnomaly.id,
     );
   }
 
@@ -705,11 +745,17 @@ class SolverState {
         : null;
     const previousDurationMs = this.lastRunDurationMs;
     const previousFinishedAt = this.finishedAt;
+    const previousAnomalyId = this.resultAnomalyId;
 
-    // Captured before anything can await: this is the island being solved, and
-    // the board it is being solved against.
+    // Captured before anything can await: this is the island being solved, the
+    // board it is being solved against, and the rules it is solved under.
     this.#runTemplateId = layoutState.activeTemplateId;
     this.#runSignature = this.solveSignature();
+    this.#runAnomalyId = configState.activeAnomaly.id;
+    // The streamed and then finished layouts are both searched under the
+    // anomaly launched with, which the player may move off before either
+    // lands — see `resultAnomalyId`.
+    this.resultAnomalyId = this.#runAnomalyId;
 
     this.isOptimizing = true;
     this.isStopping = false;
@@ -788,7 +834,7 @@ class SolverState {
           // only through `anomalyId`, because every rule that reads it is
           // resolved on the far side of the worker boundary — per tile, per
           // layout, or in how the board is split.
-          anomalyId: configState.activeAnomaly.id,
+          anomalyId: this.#runAnomalyId,
           prestige: configState.prestige,
         },
       );
@@ -835,6 +881,11 @@ class SolverState {
         const finishedAt = defended
           ? (previousFinishedAt ?? Date.now())
           : Date.now();
+        // A defended shortlist is the *held* layouts, rated under whatever
+        // anomaly was selected when they were made — not this run's.
+        const winningAnomalyId = defended
+          ? (previousAnomalyId ?? this.#runAnomalyId)
+          : this.#runAnomalyId;
 
         // Filed under the island it was started on, whether or not that is
         // still the one being looked at.
@@ -845,6 +896,7 @@ class SolverState {
           finishedAt,
           this.#runTemplateId,
           this.#runSignature,
+          winningAnomalyId,
         );
         if (onScreen()) {
           this.variants = variants;
@@ -854,6 +906,7 @@ class SolverState {
           this.elapsedMs = winningDurationMs;
           this.lastRunDurationMs = winningDurationMs;
           this.finishedAt = finishedAt;
+          this.resultAnomalyId = winningAnomalyId;
         }
         donePower = variants[selected]?.totalPower ?? 0;
       } else if (onScreen()) {
@@ -873,6 +926,7 @@ class SolverState {
         this.lastRunDurationMs = previousDurationMs;
         this.finishedAt = previousFinishedAt;
         this.elapsedMs = previousDurationMs ?? 0;
+        this.resultAnomalyId = previousAnomalyId;
       }
 
       // Every `solve_run` gets one of these, so a status other than `ok` is

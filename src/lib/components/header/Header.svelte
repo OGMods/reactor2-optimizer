@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { layoutState, uiState, viewportState } from "../../state";
+  import {
+    configState,
+    layoutState,
+    uiState,
+    viewportState,
+  } from "../../state";
   import { LocateFixed, Share2 } from "lucide-svelte";
   import { asset } from "../../utils";
   import GridControls from "./GridControls.svelte";
@@ -57,6 +62,7 @@
 <header
   class="hud-header"
   class:compact
+  class:anomalous={configState.hasAnomaly}
   bind:this={headerEl}
   bind:clientHeight={headerHeight}
 >
@@ -133,6 +139,21 @@
     border: 1px solid var(--border-neon);
     border-radius: var(--radius);
     padding: 0.5rem 0.85rem;
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
+  }
+
+  /*
+   * Purple whenever an anomaly is selected, the same signal Setup, the
+   * readout and Run already carry — see `--anomaly-panel-rgb` in `app.css`.
+   * This bar sits above all three, so it is the one place a player looking at
+   * neither the board nor Setup can still tell the rules are not the ordinary
+   * ones.
+   */
+  .hud-header.anomalous {
+    background: rgba(var(--anomaly-panel-rgb), 0.94);
+    border-color: var(--anomaly-border-neon);
   }
 
   .logo {

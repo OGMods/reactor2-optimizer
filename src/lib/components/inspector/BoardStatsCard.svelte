@@ -13,6 +13,7 @@
     BUILDINGS,
     findBuilding,
     formatNumber,
+    getAnomaly,
     levelIndexForValue,
   } from "@reactor2/solver";
   import { placementStatus } from "../../data/placements";
@@ -207,6 +208,38 @@
 
   /** Folded, the card has room for one number about what is wrong, not two. */
   let troubled = $derived(board.idle + board.overheating);
+
+  /*
+   * The anomaly currently selected in Setup, against the one the solve on
+   * screen was actually searched under (`solverState.resultAnomalyId`).
+   *
+   * They part company whenever the player picks another anomaly with a solve
+   * standing: `rescoreResult()` re-rates every variant's figures under the
+   * new rules but does not search again, so the shapes are still the old
+   * ones' — see `resultAnomalyId`. The figures the card prints are honest
+   * either way; what the row adds is that the *layout* was chosen for a
+   * timeline this is no longer. Null while there is no solve at all.
+   */
+  let selectedAnomaly = $derived(configState.activeAnomaly);
+  let resultAnomaly = $derived(
+    solverState.resultAnomalyId !== null
+      ? getAnomaly(solverState.resultAnomalyId)
+      : null,
+  );
+  let anomalyStale = $derived(
+    resultAnomaly !== null && resultAnomaly.id !== selectedAnomaly.id,
+  );
+  /*
+   * Worth a line whenever an anomaly is in play on either side — including
+   * the stale case where the player has switched back to "no anomaly" while
+   * a solve made under one is still on screen, which `configState.hasAnomaly`
+   * alone would miss.
+   */
+  let showAnomalyRow = $derived(
+    panel === "solver" &&
+      resultAnomaly !== null &&
+      (configState.hasAnomaly || resultAnomaly.rule !== "baseline"),
+  );
 
   const plural = (n: number) => (n === 1 ? "building" : "buildings");
 
@@ -624,6 +657,29 @@
                   {/if}
                 </span>
               </div>
+
+              {#if showAnomalyRow}
+                <!--
+                  The row names the rules the figures beside it were computed
+                  under — the current selection. The note is the other half:
+                  which rules the *layout* was searched under, on the one
+                  reading where that is a different answer.
+                -->
+                <div class="row" class:rule-warn={anomalyStale}>
+                  <span class="row-label">
+                    {#if anomalyStale}<AlertTriangle size={11} />{/if}
+                    Anomaly
+                  </span>
+                  <span class="row-value">
+                    {selectedAnomaly.name}
+                    {#if anomalyStale}
+                      <span class="stale"
+                        >(solved under {resultAnomaly?.name})</span
+                      >
+                    {/if}
+                  </span>
+                </div>
+              {/if}
 
               {#if cycling}
                 <!--
@@ -1086,6 +1142,23 @@
   .row.danger .row-label,
   .row.danger .row-value {
     color: var(--danger-soft);
+  }
+
+  /*
+   * A stale-rules notice, not a board status — `--warn` rather than
+   * `--status-idle`/`--danger`, which the colour law reserves to what a
+   * building on the board is doing.
+   */
+  .row.rule-warn .row-label,
+  .row.rule-warn .row-value {
+    color: var(--warn);
+  }
+
+  .stale {
+    display: block;
+    font-size: var(--fs-2xs);
+    font-weight: 500;
+    color: var(--warn);
   }
 
   /*

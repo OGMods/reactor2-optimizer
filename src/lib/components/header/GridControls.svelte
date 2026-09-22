@@ -1,6 +1,6 @@
 <script lang="ts">
   import { MIN_GRID_DIM } from "@reactor2/solver";
-  import { layoutState } from "../../state";
+  import { configState, layoutState } from "../../state";
   import { Minus, Plus } from "lucide-svelte";
 
   interface Props {
@@ -89,7 +89,11 @@
   </div>
 {/snippet}
 
-<div class="grid-controls" class:stacked={variant === "stacked"}>
+<div
+  class="grid-controls"
+  class:stacked={variant === "stacked"}
+  class:anomalous={configState.hasAnomaly}
+>
   {@render stepper("Width", layoutState.width, setWidth)}
   {@render stepper("Height", layoutState.height, setHeight)}
 </div>
@@ -103,6 +107,26 @@
     display: flex;
     align-items: center;
     gap: 0.6rem;
+  }
+
+  /*
+   * Same reminder every other panel carries — see `--anomaly-panel-rgb` in
+   * `app.css`. Nothing above this re-points the `--neon` family the way
+   * Setup's sheet and sidebar do for everything inside them, so the steppers
+   * would otherwise sit cyan on a bar that has gone purple: the three tokens
+   * they actually read are swapped here instead.
+   *
+   * `--text-dim` comes with them because it has to. It is tuned to clear
+   * 4.5:1 on the *navy* panel and measures 3.7:1 on this ground, and the
+   * labels it colours are not disabled controls, so the exemption in
+   * `app.css` does not cover them. `--anomaly-text-dim` is the same token
+   * lifted for exactly this backdrop.
+   */
+  .grid-controls.anomalous {
+    --neon: var(--anomaly-neon);
+    --neon-dim: var(--anomaly-neon-dim);
+    --neon-bg: var(--anomaly-neon-bg);
+    --text-dim: var(--anomaly-text-dim);
   }
 
   .dim {

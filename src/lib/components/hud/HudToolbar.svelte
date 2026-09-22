@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { editorState, uiState, viewportState } from "../../state";
+  import {
+    configState,
+    editorState,
+    uiState,
+    viewportState,
+  } from "../../state";
   import type { BuildingCategory } from "@reactor2/solver";
   import {
     ArrowLeft,
@@ -186,6 +191,7 @@
       -->
       <button
         class="setup-btn"
+        class:anomalous={configState.hasAnomaly}
         onclick={() => uiState.setSheetDetent("full")}
         onpointerdown={(e) => e.stopPropagation()}
       >
@@ -215,7 +221,12 @@
       <BuildingPalette category={activeBuildingCategory} />
     {/if}
 
-    <div class="hud-modes ribbon" role="toolbar" aria-label="Editing tools">
+    <div
+      class="hud-modes ribbon"
+      class:anomalous={configState.hasAnomaly}
+      role="toolbar"
+      aria-label="Editing tools"
+    >
       {#if hudMode === "tiles"}
         <TerrainPalette onEnterBuildings={enterBuildingsMode} />
       {:else}
@@ -376,9 +387,25 @@
     letter-spacing: 0.5px;
     white-space: nowrap;
     cursor: pointer;
+    transition:
+      border-color var(--dur) var(--ease),
+      color var(--dur) var(--ease);
     box-shadow:
       0 0 30px var(--neon-faint),
       0 8px 32px rgba(0, 0, 0, 0.5);
+  }
+
+  /*
+   * The way into Setup takes the same reminder Setup itself turns purple
+   * under, once open — the desktop equivalent, the docked panel's collapse
+   * handle, reads the same state (`.sidebar.anomalous .toggle-handle` in
+   * `ConfigSidebar`). `--anomaly-accent` rather than the filled
+   * `--anomaly-action`: this is a stroke and a glyph on a dark ground, the
+   * brighter half of the pair.
+   */
+  .setup-btn.anomalous {
+    border-color: var(--anomaly-accent-dim);
+    color: var(--anomaly-accent);
   }
 
   /*
@@ -405,9 +432,22 @@
     border: 1px solid var(--border-neon);
     border-radius: var(--radius-pill);
     padding: 0.35rem 0.5rem;
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
     box-shadow:
       0 0 30px rgba(0, 243, 255, 0.06),
       0 8px 32px rgba(0, 0, 0, 0.5);
+  }
+
+  /*
+   * Same reminder as the ribbons that sit above this row and the Setup pill
+   * beside it — see `BuildingPalette`. Only the ground moves; `.tool-btn.active`
+   * stays `--neon`, the same call Setup's own tabs make for the same reason.
+   */
+  .hud-modes.anomalous {
+    background: rgba(var(--anomaly-panel-rgb), 0.92);
+    border-color: var(--anomaly-border-neon);
   }
 
   /*

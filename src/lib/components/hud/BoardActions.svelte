@@ -48,7 +48,7 @@
   const keepPanel = (e: PointerEvent) => e.stopPropagation();
 </script>
 
-<div class="board-actions">
+<div class="board-actions" class:anomalous>
   <!--
     The arrows belong to the board the *user* builds, and they are absent while
     the solver's is the one on screen. Undo there would edit a layout nobody is
@@ -119,9 +119,22 @@
     border: 1px solid var(--border-neon);
     border-radius: var(--radius-pill);
     padding: 0.25rem;
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
     box-shadow:
       0 0 30px var(--neon-faint),
       0 8px 32px rgba(0, 0, 0, 0.5);
+  }
+
+  /*
+   * The pill's own border and ground take the reminder; `.run.anomaly` below
+   * is a separate, stronger signal — a filled button rather than an outline —
+   * for the one control that actually starts a solve under these rules.
+   */
+  .board-actions.anomalous {
+    background: rgba(var(--anomaly-panel-rgb), 0.92);
+    border-color: var(--anomaly-border-neon);
   }
 
   .act {

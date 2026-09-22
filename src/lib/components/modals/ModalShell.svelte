@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { X } from "lucide-svelte";
+  import { configState } from "../../state";
 
   /**
    * The chrome every dialog needs: a backdrop that closes on click, Escape to
@@ -65,6 +66,7 @@
 <div class="backdrop" onclick={onClose}></div>
 <div
   class="panel"
+  class:anomalous={configState.hasAnomaly}
   bind:this={panelEl}
   style:--accent={accent}
   role="dialog"
@@ -125,6 +127,7 @@
     border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
     border-radius: var(--radius);
     padding: 1rem 1.25rem;
+    transition: background var(--dur) var(--ease);
     /* Fits a 320px screen with room to spare, and never taller than the
        visible viewport once a mobile keyboard is up. */
     width: min(
@@ -142,6 +145,30 @@
     box-shadow:
       0 0 40px color-mix(in srgb, var(--accent) 15%, transparent),
       0 8px 32px rgba(0, 0, 0, 0.6);
+  }
+
+  /*
+   * Same reminder every other panel carries — see `--anomaly-panel-rgb` in
+   * `app.css`. Every caller leaves `accent` at its default of `var(--neon)`,
+   * so re-pointing the whole family here — the same tokens Setup's own
+   * sheet/sidebar swap in — carries through to `--accent` itself (the dialog
+   * title, the border, the glow) and to every dialog that reads `--neon`
+   * directly for a button or a subtitle, without one of them learning an
+   * anomaly exists.
+   */
+  .panel.anomalous {
+    background: var(--anomaly-panel-solid);
+    --text: var(--anomaly-text);
+    --text-muted: var(--anomaly-text-muted);
+    --text-dim: var(--anomaly-text-dim);
+    --border: var(--anomaly-border);
+    --neon: var(--anomaly-neon);
+    --neon-strong: var(--anomaly-neon-strong);
+    --neon-dim: var(--anomaly-neon-dim);
+    --neon-line: var(--anomaly-neon-line);
+    --neon-glow: var(--anomaly-neon-glow);
+    --neon-bg: var(--anomaly-neon-bg);
+    --neon-faint: var(--anomaly-neon-faint);
   }
 
   /*

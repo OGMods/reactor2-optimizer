@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { layoutState, uiState, viewportState } from "../../state";
+  import {
+    configState,
+    layoutState,
+    uiState,
+    viewportState,
+  } from "../../state";
   import GridControls from "./GridControls.svelte";
   import DonateButton from "./DonateButton.svelte";
   import {
@@ -79,7 +84,11 @@
   </button>
 
   {#if uiState.overflowOpen}
-    <div class="menu thin-scroll" role="menu">
+    <div
+      class="menu thin-scroll"
+      class:anomalous={configState.hasAnomaly}
+      role="menu"
+    >
       {#if showSize}
         <div class="menu-section">
           <span class="menu-title">Map size</span>
@@ -205,6 +214,9 @@
     border: 1px solid var(--border-neon);
     border-radius: var(--radius);
     padding: 0.75rem;
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
     display: flex;
     flex-direction: column;
@@ -232,6 +244,21 @@
     overflow-y: auto;
     /* A flick that runs out of menu must not drag the board behind it. */
     overscroll-behavior: contain;
+  }
+
+  /*
+   * Same reminder as every other panel — see `--anomaly-panel-rgb` in
+   * `app.css`. Re-points the inherited tokens rather than restyling each row,
+   * the idiom `ConfigSidebar` and `BoardStatsCard` already use, so a menu item
+   * added later follows the ground without learning anomalies exist.
+   */
+  .menu.anomalous {
+    background: var(--anomaly-panel-solid);
+    border-color: var(--anomaly-border-neon);
+    --text: var(--anomaly-text);
+    --text-muted: var(--anomaly-text-muted);
+    --text-dim: var(--anomaly-text-dim);
+    --border: var(--anomaly-border);
   }
 
   @keyframes menu-in {

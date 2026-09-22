@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { uiState } from "../../state";
+  import { configState, uiState } from "../../state";
   import { Hammer, Sparkles } from "lucide-svelte";
 
   /*
@@ -23,7 +23,12 @@
 </script>
 
 {#if uiState.hasSolverPlacements}
-  <div class="view-toggle" role="group" aria-label="Which layout to show">
+  <div
+    class="view-toggle"
+    class:anomalous={configState.hasAnomaly}
+    role="group"
+    aria-label="Which layout to show"
+  >
     <button
       class="view-btn"
       class:active={!uiState.showingSolver}
@@ -67,9 +72,22 @@
     border: 1px solid var(--border-neon);
     border-radius: var(--radius-pill);
     padding: 0.25rem;
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
     box-shadow:
       0 0 30px rgba(0, 243, 255, 0.06),
       0 8px 32px rgba(0, 0, 0, 0.5);
+  }
+
+  /*
+   * Same reminder every other HUD pill carries. `.view-btn.active` stays
+   * `--neon` — this says which board is showing, not that the rules changed,
+   * the same split Setup's own tabs keep against their purple ground.
+   */
+  .view-toggle.anomalous {
+    background: rgba(var(--anomaly-panel-rgb), 0.92);
+    border-color: var(--anomaly-border-neon);
   }
 
   .view-btn {

@@ -3,6 +3,7 @@ import type { ImageScale, PlacementView } from "../types/ui";
 import { DEFAULT_SOLVE_MODE, type SolveModeId } from "../worker/solveModes";
 import {
   DEFAULT_ANOMALY_ID,
+  type AnomalyId,
   type OptimizationResult,
 } from "@reactor2/solver";
 
@@ -126,6 +127,19 @@ export interface SavedSolveData {
   variants?: StoredPlacement[][];
   /** Which entry of `variants` the user applied. */
   selectedVariant?: number;
+  /**
+   * The anomaly `result`/`variants` were actually *searched* under.
+   *
+   * Not the same fact as the anomaly inside `signature`, which is the one the
+   * record was last filed under: re-scoring a standing solve after the player
+   * picks another anomaly re-rates its figures and re-files it under the new
+   * signature without searching again, so the shapes stay the old rules'.
+   * This is what survives the reload still saying so.
+   *
+   * Absent on a record written before the field existed, where a matching
+   * signature already settles it — see `solverState.restore`.
+   */
+  anomalyId?: AnomalyId;
   /** Wall-clock length of the run, in ms. */
   durationMs: number;
   /** When it finished, epoch ms. Shown as "solved N ago". */

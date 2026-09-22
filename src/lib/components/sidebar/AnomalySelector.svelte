@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ANOMALIES } from "@reactor2/solver";
-  import { configState } from "../../state";
+  import { configState, solverState } from "../../state";
   import { asset } from "../../utils/assetUrl";
   import { CircleOff } from "lucide-svelte";
 
@@ -29,6 +29,17 @@
    * frame rather than a broken image or a blank square.
    */
   const iconFor = (id: string) => asset(`icons/anomaly_${id}.webp`);
+
+  /*
+   * A run reads the anomaly once, at launch (`solverState`'s `#runAnomalyId`),
+   * so a press here cannot reach the search already under way: it would
+   * silently retarget the *next* one and leave the layout landing on screen
+   * searched under a rule the player has just moved off.
+   *
+   * Disabled rather than hidden, against the project's usual rule: this is
+   * Setup's own choice, not a control the current mode makes irrelevant.
+   */
+  let disabled = $derived(solverState.isOptimizing);
 </script>
 
 <div class="section-box" role="radiogroup" aria-label="Timeline anomaly">
@@ -54,6 +65,7 @@
       class:active
       role="radio"
       aria-checked={active}
+      {disabled}
       onclick={() => configState.setAnomaly(anomaly.id)}
     >
       <!-- Says the one thing this list is for: which timeline you are in. -->
@@ -140,8 +152,13 @@
       background var(--dur-fast) var(--ease);
   }
 
-  .anomaly-card:hover {
+  .anomaly-card:hover:not(:disabled) {
     border-color: var(--anomaly-selected-glow);
+  }
+
+  .anomaly-card:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   /*
