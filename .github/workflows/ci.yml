@@ -1,17 +1,23 @@
 name: CI
 
+# Pushes to any branch listed here build, and the `publish` job below puts the
+# result on the Pages site: `main` at the root, every other branch in a
+# directory named after itself (`anomalies` serves at `/anomalies/`). That makes
+# this list the single place a branch opts into a preview -- there is no second
+# allow-list in the job to keep in step with it, and no branch but `main` can
+# reach the root.
 on:
   push:
-    branches: [main]
+    branches: [main, anomalies]
   pull_request:
   workflow_dispatch:
 
-# A superseded run tells you nothing, so cancel it -- except on main, where a
-# cancelled run could abandon a half-finished Pages deployment. `github.ref` is
-# in the key, and the deploy job carries its own non-cancelling group below.
+# A superseded run tells you nothing, so cancel it -- except on a push, which
+# may publish, and a cancelled publish could abandon a half-finished site. Only
+# pull-request runs are safe to cancel, since they publish nothing.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -46,10 +52,14 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v5
+      # Handed to `publish` below rather than to actions/deploy-pages: the site
+      # is a branch now, so the build travels as an ordinary artifact.
+      - name: Upload the build
+        uses: actions/upload-artifact@v7
         with:
+          name: web-dist
           path: dist
+          retention-days: 7
 
   solver:
     name: Solver package
@@ -86,27 +96,142 @@ jobs:
       - name: CLI runs
         run: npm run solve -- --map 0 --attempts 2 --workers 2 --time 2
 
-  deploy:
-    name: Deploy to GitHub Pages
+  publish:
+    name: Publish to Pages
     needs: [web, solver]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Pushes only. A pull request must not move the published site, and a manual
+    # run is for re-checking a build, not for shipping one.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
+    # Pushing to gh-pages is an ordinary commit, so this needs write access to
+    # the repository rather than the `pages:`/`id-token:` pair deploy-pages took.
     permissions:
-      pages: write
-      id-token: write
+      contents: write
 
-    # Never cancel a deployment in flight: a half-applied one leaves the site
-    # in an undefined state. Queue instead.
+    # Every branch publishes into the *same* branch, so these runs must not
+    # overlap however many branches are pushed at once -- and never cancel one
+    # in flight, since a half-applied site is undefined. Queue instead.
     concurrency:
-      group: pages
+      group: pages-publish
       cancel-in-progress: false
 
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
     steps:
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v5
+      - name: Download the build
+        uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: dist
+
+      - name: Publish into the site branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          # main owns the root; every other branch owns one directory named
+          # after itself. `base: "./"` in vite.config.ts is what lets the
+          # identical build serve from either depth -- a configured base would
+          # be wrong at one of them.
+          if [ "$BRANCH" = "main" ]; then
+            dest="."
+          else
+            dest="$BRANCH"
+          fi
+
+          # A preview sits beside the root's own files rather than under a
+          # `preview/` prefix, so two names could collide with it. Both are
+          # refused rather than merged, because either one silently overwrites
+          # part of the published site: a branch whose name matches something
+          # the build itself puts at the top level, and a branch whose name has
+          # a slash in it, which would bury its marker below the depth the root
+          # publish looks at.
+          if [ "$dest" != "." ]; then
+            case "$BRANCH" in
+              */*)
+                echo "A preview branch name cannot contain a slash: $BRANCH" >&2
+                exit 1
+                ;;
+            esac
+            if [ -e "dist/$BRANCH" ]; then
+              echo "Branch '$BRANCH' collides with dist/$BRANCH in the build" >&2
+              exit 1
+            fi
+          fi
+          echo "Publishing $BRANCH to ${dest#./}"
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          mkdir site && cd site
+          git init --quiet --initial-branch=gh-pages
+          git remote add origin "$remote"
+
+          # The branch does not exist on the first run, and an orphan checkout is
+          # how it starts: no history from main, since the built site shares
+          # nothing with the source tree.
+          if git fetch --quiet --depth 1 origin gh-pages 2>/dev/null; then
+            git checkout --quiet -B gh-pages FETCH_HEAD
+          else
+            echo "gh-pages does not exist yet -- starting it"
+          fi
+
+          # Replace this build's own directory and nothing else, so the root and
+          # every other branch's preview survive a publish that is not theirs.
+          # A preview says what it is with a `.preview` marker, and the root
+          # publish holds back anything carrying one -- which is what keeps the
+          # set of previews recorded by the site itself rather than by a list of
+          # branch names here that would drift from the trigger above.
+          if [ "$dest" = "." ]; then
+            for entry in * .[!.]*; do
+              [ -e "$entry" ] || continue
+              [ "$entry" = ".git" ] && continue
+              if [ -d "$entry" ] && [ -f "$entry/.preview" ]; then
+                echo "Keeping the $entry preview"
+                continue
+              fi
+              rm -rf "$entry"
+            done
+          else
+            rm -rf "$dest"
+          fi
+          mkdir -p "$dest"
+          cp -R ../dist/. "$dest"/
+          [ "$dest" = "." ] || touch "$dest/.preview"
+
+          # Pages runs Jekyll over a branch source unless told not to, and Jekyll
+          # silently drops files whose names begin with an underscore.
+          touch .nojekyll
+
+          git add -A
+          if git diff --quiet --cached; then
+            echo "Site is already identical -- nothing to publish"
+            exit 0
+          fi
+          git commit --quiet -m "Publish $BRANCH ($GITHUB_SHA) to ${dest#./}"
+
+          # The cleanup workflow pushes to this branch too, so lose a race
+          # rather than fail one.
+          for attempt in 1 2 3; do
+            if git push --quiet origin gh-pages; then
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt) -- rebasing onto the branch"
+            git fetch --quiet --depth 1 origin gh-pages
+            git rebase --quiet FETCH_HEAD || git rebase --abort
+          done
+          echo "Could not publish after three attempts" >&2
+          exit 1
+
+      - name: Where it landed
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          base="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
+          if [ "$BRANCH" = "main" ]; then
+            echo "### Published to $base/" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Published to $base/$BRANCH/" >> "$GITHUB_STEP_SUMMARY"
+          fi
