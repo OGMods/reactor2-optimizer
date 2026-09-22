@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { configState, uiState } from "../../state";
+  import { uiState } from "../../state";
   import { Hammer, Sparkles } from "lucide-svelte";
 
   /*
@@ -25,7 +25,6 @@
 {#if uiState.hasSolverPlacements}
   <div
     class="view-toggle"
-    class:anomalous={configState.hasAnomaly}
     role="group"
     aria-label="Which layout to show"
   >
@@ -67,9 +66,9 @@
     display: flex;
     align-items: stretch;
     gap: 0.2rem;
-    background: rgba(10, 14, 23, 0.92);
+    background: rgba(var(--surface-panel-rgb), 0.92);
     backdrop-filter: blur(14px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius-pill);
     padding: 0.25rem;
     transition:
@@ -82,14 +81,9 @@
 
   /*
    * Same reminder every other HUD pill carries. `.view-btn.active` stays
-   * `--neon` — this says which board is showing, not that the rules changed,
+   * `--accent` — this says which board is showing, not that the rules changed,
    * the same split Setup's own tabs keep against their purple ground.
    */
-  .view-toggle.anomalous {
-    background: rgba(var(--anomaly-panel-rgb), 0.92);
-    border-color: var(--anomaly-border-neon);
-  }
-
   .view-btn {
     display: flex;
     align-items: center;
@@ -122,17 +116,17 @@
   }
 
   /*
-   * One accent, not two. Amber and neon halves would make the colour say
-   * which is picked as well — but the labels already say "Yours" and "Solver",
-   * and amber is the board's word for an idle building, sitting two
-   * centimetres from the board saying it. Selected is neon here as it is
-   * everywhere; see the colour law in `app.css`.
+   * One accent, not two. An amber half against an accented one would make the
+   * colour say which is picked as well — but the labels already say "Edit" and
+   * "Solver", and amber is the board's word for an idle building, sitting two
+   * centimetres from the board saying it. Selected takes `--accent` here as it
+   * does everywhere; see the colour law in `app.css`.
    */
   .view-btn.active {
-    background: var(--neon-bg);
-    border-color: var(--neon-line);
-    color: var(--neon);
-    box-shadow: 0 0 14px var(--neon-glow);
+    background: var(--accent-bg);
+    border-color: var(--accent-line);
+    color: var(--accent);
+    box-shadow: 0 0 14px var(--accent-glow);
   }
 
   @media (max-width: 640px) {

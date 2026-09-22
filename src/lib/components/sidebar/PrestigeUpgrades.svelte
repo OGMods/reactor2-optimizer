@@ -135,7 +135,7 @@
     gap: 0.5rem;
     font-size: var(--fs-md);
     font-weight: 600;
-    color: var(--neon);
+    color: var(--accent);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 0.6rem;
@@ -158,7 +158,7 @@
   }
 
   .upgrade-card:hover {
-    border-color: var(--neon-dim);
+    border-color: var(--accent-dim);
   }
 
   /*
@@ -177,7 +177,7 @@
   }
 
   .unlock-stripe.on {
-    background: var(--neon);
+    background: var(--accent);
   }
 
   .card-body {
@@ -254,7 +254,7 @@
   }
 
   .factor.on {
-    color: var(--neon);
+    color: var(--accent);
   }
 
   .effect {
@@ -305,12 +305,12 @@
 
   .tier-btn:not(:disabled):hover {
     color: var(--text);
-    border-color: var(--neon-dim);
+    border-color: var(--accent-dim);
   }
 
   .tier-btn.active {
-    background: var(--neon-bg);
-    border-color: var(--neon);
-    color: var(--neon);
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
   }
 </style>

@@ -171,9 +171,9 @@
   }
 
   .adopt {
-    background: var(--neon-bg);
-    border: 1px solid var(--neon-dim);
-    color: var(--neon);
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-dim);
+    color: var(--accent);
   }
 
   .adopt:hover:not(:disabled) {

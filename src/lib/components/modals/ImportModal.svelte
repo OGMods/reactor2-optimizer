@@ -112,7 +112,7 @@
 
   .code-input:focus {
     outline: none;
-    border-color: var(--neon-dim);
+    border-color: var(--accent-dim);
   }
 
   .code-input:disabled {
@@ -150,10 +150,10 @@
     gap: 0.5rem;
     min-height: var(--tap);
     width: 100%;
-    background: var(--neon-bg);
-    border: 1px solid var(--neon-dim);
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-dim);
     border-radius: var(--radius-sm);
-    color: var(--neon);
+    color: var(--accent);
     font-size: var(--fs-md);
     font-weight: 600;
     cursor: pointer;

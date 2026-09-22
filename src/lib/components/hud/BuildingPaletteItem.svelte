@@ -57,10 +57,10 @@
   }
 
   .bld-item-btn.active {
-    background: var(--neon-bg);
-    border-color: var(--neon-line);
-    color: var(--neon);
-    box-shadow: 0 0 12px var(--neon-glow);
+    background: var(--accent-bg);
+    border-color: var(--accent-line);
+    color: var(--accent);
+    box-shadow: 0 0 12px var(--accent-glow);
   }
 
   .icon-wrapper {

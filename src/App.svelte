@@ -229,9 +229,19 @@
   palette ribbon opens. `--preview-clearance` is the shared-link banner, which
   grows a line whenever an import is refused and is 0px on every board but a
   shared one. All three are published rather than assumed.
+
+  `data-theme` is the other thing this element carries, and it is the whole of
+  how an anomaly is signalled. The token rebindings live in one block in
+  `app.css`, and every surface inside the shell — the header, the HUD's pills,
+  the readout, Setup, the dialogs, the toast — follows without a single
+  component learning that anomalies exist. It hangs here rather than on each
+  panel because this is the one place allowed to see `configState` beside
+  everything else, and because a theme applied in eleven places is eleven
+  places to forget.
 -->
 <main
   class="app-shell"
+  data-theme={configState.hasAnomaly ? "anomaly" : null}
   style:--header-clearance="{uiState.headerBottom}px"
   style:--sidebar-clearance="{uiState.sidebarWidth}px"
   style:--hud-clearance="{uiState.hudHeight}px"
@@ -462,7 +472,7 @@
     height: var(--tap);
     background: var(--surface-panel);
     backdrop-filter: blur(12px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius-pill);
     color: var(--text-muted);
     cursor: pointer;

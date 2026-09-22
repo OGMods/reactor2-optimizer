@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { X } from "lucide-svelte";
-  import { configState } from "../../state";
 
   /**
    * The chrome every dialog needs: a backdrop that closes on click, Escape to
@@ -13,13 +12,17 @@
    */
   interface Props {
     title: string;
-    /** Tints the header and border — amber for share, cyan for import. */
+    /**
+     * Tints this dialog's header, border and glow. A dialog that wants to
+     * stand apart from the app's own selection colour passes its own; every
+     * one of them currently takes the default, which follows the theme.
+     */
     accent?: string;
     onClose: () => void;
     children: Snippet;
   }
 
-  let { title, accent = "var(--neon)", onClose, children }: Props = $props();
+  let { title, accent = "var(--accent)", onClose, children }: Props = $props();
 
   let panelEl = $state<HTMLDivElement | null>(null);
   let closeEl = $state<HTMLButtonElement | null>(null);
@@ -66,9 +69,8 @@
 <div class="backdrop" onclick={onClose}></div>
 <div
   class="panel"
-  class:anomalous={configState.hasAnomaly}
   bind:this={panelEl}
-  style:--accent={accent}
+  style:--modal-accent={accent}
   role="dialog"
   aria-modal="true"
   aria-label={title}
@@ -124,7 +126,7 @@
      */
     overflow: clip;
     background: var(--surface-panel-solid);
-    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+    border: 1px solid color-mix(in srgb, var(--modal-accent) 40%, transparent);
     border-radius: var(--radius);
     padding: 1rem 1.25rem;
     transition: background var(--dur) var(--ease);
@@ -143,32 +145,8 @@
       100dvh - 2 * max(var(--safe-top), var(--safe-bottom)) - 3rem
     );
     box-shadow:
-      0 0 40px color-mix(in srgb, var(--accent) 15%, transparent),
+      0 0 40px color-mix(in srgb, var(--modal-accent) 15%, transparent),
       0 8px 32px rgba(0, 0, 0, 0.6);
-  }
-
-  /*
-   * Same reminder every other panel carries — see `--anomaly-panel-rgb` in
-   * `app.css`. Every caller leaves `accent` at its default of `var(--neon)`,
-   * so re-pointing the whole family here — the same tokens Setup's own
-   * sheet/sidebar swap in — carries through to `--accent` itself (the dialog
-   * title, the border, the glow) and to every dialog that reads `--neon`
-   * directly for a button or a subtitle, without one of them learning an
-   * anomaly exists.
-   */
-  .panel.anomalous {
-    background: var(--anomaly-panel-solid);
-    --text: var(--anomaly-text);
-    --text-muted: var(--anomaly-text-muted);
-    --text-dim: var(--anomaly-text-dim);
-    --border: var(--anomaly-border);
-    --neon: var(--anomaly-neon);
-    --neon-strong: var(--anomaly-neon-strong);
-    --neon-dim: var(--anomaly-neon-dim);
-    --neon-line: var(--anomaly-neon-line);
-    --neon-glow: var(--anomaly-neon-glow);
-    --neon-bg: var(--anomaly-neon-bg);
-    --neon-faint: var(--anomaly-neon-faint);
   }
 
   /*
@@ -199,7 +177,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    color: var(--accent);
+    color: var(--modal-accent);
     font-size: var(--fs-md);
     font-weight: 600;
     letter-spacing: 0.5px;

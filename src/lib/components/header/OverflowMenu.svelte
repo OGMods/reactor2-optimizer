@@ -1,6 +1,5 @@
 <script lang="ts">
   import {
-    configState,
     layoutState,
     uiState,
     viewportState,
@@ -86,7 +85,6 @@
   {#if uiState.overflowOpen}
     <div
       class="menu thin-scroll"
-      class:anomalous={configState.hasAnomaly}
       role="menu"
     >
       {#if showSize}
@@ -188,8 +186,8 @@
     /*
      * The same hairline its neighbours in the bar carry; transparent, it would
      * leave the header reading as two bordered buttons and one floating glyph.
-     * `.icon-btn.open` below still takes the neon, because an open menu is a
-     * selection and that is what neon means.
+     * `.icon-btn.open` below still takes `--accent`, because an open menu is a
+     * selection and that is what the accent means.
      */
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -200,9 +198,9 @@
 
   .icon-btn:hover,
   .icon-btn.open {
-    background: var(--neon-bg);
-    border-color: var(--neon-dim);
-    color: var(--neon);
+    background: var(--accent-bg);
+    border-color: var(--accent-dim);
+    color: var(--accent);
   }
 
   .menu {
@@ -211,7 +209,7 @@
     right: 0;
     min-width: 250px;
     background: var(--surface-panel-solid);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius);
     padding: 0.75rem;
     transition:
@@ -244,21 +242,6 @@
     overflow-y: auto;
     /* A flick that runs out of menu must not drag the board behind it. */
     overscroll-behavior: contain;
-  }
-
-  /*
-   * Same reminder as every other panel — see `--anomaly-panel-rgb` in
-   * `app.css`. Re-points the inherited tokens rather than restyling each row,
-   * the idiom `ConfigSidebar` and `BoardStatsCard` already use, so a menu item
-   * added later follows the ground without learning anomalies exist.
-   */
-  .menu.anomalous {
-    background: var(--anomaly-panel-solid);
-    border-color: var(--anomaly-border-neon);
-    --text: var(--anomaly-text);
-    --text-muted: var(--anomaly-text-muted);
-    --text-dim: var(--anomaly-text-dim);
-    --border: var(--anomaly-border);
   }
 
   @keyframes menu-in {
@@ -310,8 +293,9 @@
   }
 
   /*
-   * Menu rows are neutral. Neon would say "selected" of rows none of which
-   * are, and singling one out in amber would borrow the board's idle colour.
+   * Menu rows are neutral. The accent would say "selected" of rows none of
+   * which are, and singling one out in amber would borrow the board's idle
+   * colour.
    * Nothing here is a selection — they are all just actions. See the colour
    * law in `app.css`.
    */

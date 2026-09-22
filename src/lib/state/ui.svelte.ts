@@ -279,7 +279,7 @@ class UIState {
    * and an explicit choice then wins in both directions.
    *
    * Settings inverts it for display: every switch in that column means "this
-   * is happening", and one inverted row would give `--neon` two readings.
+   * is happening", and one inverted row would give `--accent` two readings.
    */
   #analyticsDisabled = $state<boolean | null>(
     uiStorage.loadPrefs().analyticsDisabled ?? null,

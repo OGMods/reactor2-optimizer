@@ -112,14 +112,14 @@
 
   .mode:hover:not(:disabled),
   .info-btn:hover {
-    border-color: var(--neon-dim);
+    border-color: var(--accent-dim);
     color: var(--text);
   }
 
   .mode.active {
     flex-grow: 1.4;
-    border-color: var(--neon);
-    background: var(--neon-bg);
+    border-color: var(--accent);
+    background: var(--accent-bg);
     color: var(--text);
   }
 

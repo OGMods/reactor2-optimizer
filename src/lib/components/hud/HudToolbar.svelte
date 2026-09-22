@@ -1,6 +1,5 @@
 <script lang="ts">
   import {
-    configState,
     editorState,
     uiState,
     viewportState,
@@ -191,7 +190,6 @@
       -->
       <button
         class="setup-btn"
-        class:anomalous={configState.hasAnomaly}
         onclick={() => uiState.setSheetDetent("full")}
         onpointerdown={(e) => e.stopPropagation()}
       >
@@ -223,7 +221,6 @@
 
     <div
       class="hud-modes ribbon"
-      class:anomalous={configState.hasAnomaly}
       role="toolbar"
       aria-label="Editing tools"
     >
@@ -365,10 +362,10 @@
   }
 
   /*
-   * The same pill the rest of the HUD stack wears. Neutral, not neon: it is
-   * not a selection, and neon means selection everywhere in this app — see the
-   * colour law in `app.css`. Neon here would say "chosen" of a panel that is
-   * closed.
+   * The same pill the rest of the HUD stack wears. Neutral, not accented: it
+   * is not a selection, and `--accent` means selection everywhere in this app
+   * — see the colour law in `app.css`. Accenting it would say "chosen" of a
+   * panel that is closed.
    */
   .setup-btn {
     display: flex;
@@ -378,9 +375,9 @@
     min-height: var(--tap);
     padding: 0 0.85rem;
     border-radius: var(--radius-pill);
-    background: rgba(10, 14, 23, 0.92);
+    background: rgba(var(--surface-panel-rgb), 0.92);
     backdrop-filter: blur(14px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     color: var(--text);
     font-size: var(--fs-sm);
     font-weight: 700;
@@ -391,21 +388,8 @@
       border-color var(--dur) var(--ease),
       color var(--dur) var(--ease);
     box-shadow:
-      0 0 30px var(--neon-faint),
+      0 0 30px var(--accent-faint),
       0 8px 32px rgba(0, 0, 0, 0.5);
-  }
-
-  /*
-   * The way into Setup takes the same reminder Setup itself turns purple
-   * under, once open — the desktop equivalent, the docked panel's collapse
-   * handle, reads the same state (`.sidebar.anomalous .toggle-handle` in
-   * `ConfigSidebar`). `--anomaly-accent` rather than the filled
-   * `--anomaly-action`: this is a stroke and a glyph on a dark ground, the
-   * brighter half of the pair.
-   */
-  .setup-btn.anomalous {
-    border-color: var(--anomaly-accent-dim);
-    color: var(--anomaly-accent);
   }
 
   /*
@@ -427,9 +411,9 @@
   /* ── Mode row ──────────────────────────────────────────────────── */
   .hud-modes {
     gap: 0.25rem;
-    background: rgba(10, 14, 23, 0.92);
+    background: rgba(var(--surface-panel-rgb), 0.92);
     backdrop-filter: blur(14px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius-pill);
     padding: 0.35rem 0.5rem;
     transition:
@@ -443,13 +427,8 @@
   /*
    * Same reminder as the ribbons that sit above this row and the Setup pill
    * beside it — see `BuildingPalette`. Only the ground moves; `.tool-btn.active`
-   * stays `--neon`, the same call Setup's own tabs make for the same reason.
+   * stays `--accent`, the same call Setup's own tabs make for the same reason.
    */
-  .hud-modes.anomalous {
-    background: rgba(var(--anomaly-panel-rgb), 0.92);
-    border-color: var(--anomaly-border-neon);
-  }
-
   /*
    * Shared toolbar-button primitives. These are `:global` because the buttons
    * they style are rendered by `TerrainPalette` as well as by this component,
@@ -498,17 +477,17 @@
 
   /*
    * One active rule for every tool in the HUD, including the ones
-   * `TerrainPalette` renders into this row. Neon means selected; the icons say
-   * which tool that is. See the colour law in `app.css`.
+   * `TerrainPalette` renders into this row. `--accent` means selected; the
+   * icons say which tool that is. See the colour law in `app.css`.
    *
    * Two classes, so a per-tool modifier in a child component still outranks
    * it — which is exactly how `.erase-btn.active` stays red.
    */
   :global(.tool-btn.active) {
-    background: var(--neon-bg);
-    border-color: var(--neon-line);
-    color: var(--neon);
-    box-shadow: 0 0 14px var(--neon-glow);
+    background: var(--accent-bg);
+    border-color: var(--accent-line);
+    color: var(--accent);
+    box-shadow: 0 0 14px var(--accent-glow);
   }
 
   :global(.mode-icon) {

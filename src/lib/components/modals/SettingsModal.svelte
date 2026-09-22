@@ -192,7 +192,7 @@
   .icon {
     display: flex;
     flex: 0 0 auto;
-    color: var(--neon);
+    color: var(--accent);
   }
 
   .text {
@@ -265,13 +265,13 @@
   }
 
   .segment.active {
-    background: var(--neon-bg);
-    border-color: var(--neon-line);
-    color: var(--neon);
+    background: var(--accent-bg);
+    border-color: var(--accent-line);
+    color: var(--accent);
   }
 
   .segment:focus-visible {
-    outline: 2px solid var(--neon);
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
 
@@ -313,8 +313,8 @@
   }
 
   .switch[aria-checked="true"] .track {
-    background: var(--neon-bg);
-    border-color: var(--neon-dim);
+    background: var(--accent-bg);
+    border-color: var(--accent-dim);
   }
 
   .knob {
@@ -347,11 +347,11 @@
     /* 40px of track interior, less the 18px knob and its 3px rest at each
        end, leaves exactly 16px to travel. */
     transform: translateX(16px);
-    background: var(--neon);
+    background: var(--accent);
   }
 
   .switch:focus-visible .track {
-    outline: 2px solid var(--neon);
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
 

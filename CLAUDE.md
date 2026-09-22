@@ -1858,7 +1858,7 @@ in their chrome and their gesture, never in this. Four things about it:
   because the island list is scrolled there.
 - **It is an underline, where the category tabs inside the roster are filled
   pills.** Two rows of identical tabs stacked on each other read as one confusing
-  row of five. Both take `--neon` for the active one, because the colour law has a
+  row of five. Both take `--accent` for the active one, because the colour law has a
   single meaning for "this is selected"; the hierarchy is carried by shape.
 
 Two things follow. The roster's category tab bar is **sticky** at the top of the
@@ -2000,6 +2000,22 @@ panel — under WCAG AA. Measure against the _lightest_ backdrop a panel makes
 (roughly `#112226`), not `--surface-void`, because light text loses contrast on
 the lighter one.
 
+### Tokens are named for the role, never the colour
+
+`--accent` was called `--neon` until a theme made it purple, at which point the
+name was simply wrong in half the app — and a wrong name is worse than a vague
+one, because it reads as true. The same trap is waiting for anything spelled
+`--purple`, `--amber` or `--cyan`: a themed token names **what the colour is
+for**, and a theme decides what it holds.
+
+Two corollaries. `--action` is a separate token from `--accent` even though the
+base theme answers both with the same cyan — they are different roles (a fill
+carrying ink, against a stroke on a dark ground) and a theme separates them, so
+collapsing the two would only have to be undone. And `ACCENT` in
+`pixi/gridPainter.ts` keeps the value as a numeric literal because Pixi cannot
+read a custom property: it is pinned to the **base** theme and says so, since a
+name promising it follows the shell would be the same lie again.
+
 ### The colour law
 
 The law lives at the top of `app.css`, one line each. Without it the palette
@@ -2008,12 +2024,19 @@ drifts to twelve-odd hues — a Share button wearing the colour the board uses f
 
 |                 | means                                                       |
 | --------------- | ----------------------------------------------------------- |
-| `--neon`        | this control is selected / active. Nothing else.            |
+| `--accent`      | this control is selected / active. Nothing else.            |
+| `--action`      | the one *filled* primary control. RUN, and nothing else.    |
 | `--status-ok`   | the board only: this building is working.                   |
 | `--status-idle` | the board only: this building is doing nothing.             |
 | `--danger`      | the board: overheating. In the UI: this destroys something. |
 | `--warn`        | a limit is reached, or this board is not yours to edit.     |
-| `--anomaly-*`   | Setup's Anomaly tab only, and nowhere else.                 |
+| `--anomaly-*`   | `AnomalySelector`'s cards only, and nowhere else.           |
+
+The first two are themed, the four below them never are — see the theme block
+in `app.css`. `--anomaly-*` is neither: it is the game's own chooser palette,
+not a theme, which is why it kept its name while the purple that used to share
+that prefix became the anomaly theme's binding of `--accent`, `--text` and the
+rest.
 
 **The two board readings are reserved, and that is the whole point.** The pad under
 every building, the pulse that breathes it and the readout in the corner all speak
@@ -2044,67 +2067,78 @@ have looked right: the board speaks as a saturated accent on a dark ground, thes
 are muted fills carrying near-white text. A player meets them as panels, not as
 status lights, which is what keeps the reservation honest.
 
-**`--anomaly-selected` is the sharper half of that exception**, because `--neon`
+**`--anomaly-selected` is the sharper half of that exception**, because `--accent`
 means selected everywhere else and on this list it does not: the chosen card is
 ringed in the game's own green. Two selection colours is a real cost, and it is
 taken for the same reason and stretches no further — showing a player their own
 choice in a colour they will not recognise from the screen they made it on is the
 larger one. Nothing outside `AnomalySelector` may take it.
 
-**Three surfaces go purple while an anomaly is selected** — Setup on *every*
-tab, the readout, and Run in the HUD — all reading `configState.hasAnomaly`, so
-it is one signal rather than three effects. Keyed on the selection and not on
-the Anomaly tab, because that is what it says: this timeline is not running the
-ordinary rules, and the island list, the roster and the board's figures are all
-read under them. Nothing selected puts every one of them back to navy, which is
-the common case. Each surface keeps **its own alpha** — sheet 0.97, docked panel
-0.88, readout 0.94 — which is why `--anomaly-panel-rgb` is a bare triplet rather
-than a colour: one decision, not three tokens.
+**An anomaly is a theme, not a hundred conditionals.** `App.svelte` — the one
+place allowed to see `configState` beside everything else — puts
+`data-theme="anomaly"` on `.app-shell` while one is selected, and a single
+block in `app.css` rebinds the tokens under it. Every surface inside the shell
+follows: the header, the HUD's pills and ribbons, the readout, Setup, the
+overflow menu, the dialogs, the toast. No component reads `hasAnomaly` and none
+of them carries a rule about anomalies at all.
 
-The type and chrome follow by **re-pointing the inherited tokens** on each container — `ConfigSidebar`
-and `BoardStatsCard` re-point `--text`, `--text-muted`, `--text-dim` and
-`--border` at the `--anomaly-*` values, plus `--border-neon`, `--neon-faint` and
-`--surface-panel-solid` on Setup, so every hairline and the roster's sticky bar
-go along too — and no component learns that anomalies exist.
+It replaced eleven copies of the signal — ten components each with
+`class:anomalous={configState.hasAnomaly}` and a `.anomalous` rule re-pointing
+*a different subset* of the same tokens, which is exactly how the HUD's ground
+went purple while the selected tool on it stayed cyan, and how
+`BuildingPalette` came to remember `--text-dim` where `ObstaclePalette` beside
+it did not. Every new panel was another place to remember, and forgetting was
+silent.
 
-Setup re-points the **whole `--neon` family** on top of that, so every mark
-inside it that means "selected" goes purple with the ground: the SETUP heading,
-the active tab's label and underline, the chosen island's row, the roster's
-category pills. The `--anomaly-neon-*` tokens mirror the `--neon-*` ones name for
-name so the mapping reads straight down. They are a **lighter** purple than
-`--anomaly-accent`, and that is forced: cyan earns its prominence by contrast,
-and the badge purple reads 3.3:1 against this panel — right as a stroke on the
-dark collapse handle, unreadable as a heading. `#c9a5f0` puts back the 6.5:1 the
-cyan had.
+Keyed on the selection and not on Setup's Time Lab tab, because that is what it
+says: this timeline is not running the ordinary rules, and the island list, the
+roster and the board's figures are all read under them. Nothing selected leaves
+the attribute off and every token falls back to the navy in `:root`, which is
+the common case.
 
-That leaves two purples meaning "selected" inside the panel, which is deliberate:
+Four things about what a theme may and may not move:
+
+- **Alpha is the component's, hue is the theme's.** Each surface picks its own
+  strength over the board — the sheet 0.97, the readout 0.94, the HUD's pills
+  0.92, the docked panel 0.88 — by composing `rgba(var(--surface-panel-rgb),
+  …)`. That is why the ground is a bare triplet rather than a colour: one
+  decision, not one token per surface. Selecting an anomaly changes the hue and
+  nothing about how much board shows through.
+- **The whole `--accent` family goes**, so every mark meaning "selected" follows
+  the ground under it: Setup's heading, its active tab, the chosen island's
+  row, the roster's category pills, the HUD's active tool, the selected
+  building in the palette, the readout's accents. The purple is **lighter**
+  than the game's badge purple, and that is forced — cyan earns its prominence
+  by contrast, and the badge purple reads 3.3:1 on this panel, unreadable as a
+  heading. `#c9a5f0` puts back the 6.5:1 the cyan had.
+- **`--action` is a separate role from `--accent`, and this is what it is for.**
+  RUN is the one *filled* control in the app: a fill carrying ink, where
+  brighter is *less* legible, against `--accent`'s stroke-on-dark, where brighter
+  is more. The base theme answers both with the same cyan, which is why they
+  looked like one token until a theme needed them apart — the selection
+  lavender carries neither ink at AA, so `--action` is the badge purple pulled
+  two steps down its own ramp (5.4:1 resting, 4.8:1 hover; RUN is 12.8px bold,
+  so 4.5 is the bar). Stop is untouched either way: a stop is destructive of
+  the run in progress whatever rules it began under.
+- **The board's own language is never rebound.** `--status-ok`,
+  `--status-idle`, `--danger` and `--warn` stay out of every theme. The pad
+  under a building, the pulse that breathes it and the readout's red Cooling
+  row mean the same thing under every timeline, and an anomaly is precisely
+  when a player most needs them to.
+
+**The game's chooser palette is not a theme either**, and that is the other
+half of the split: `--anomaly-card`, `--anomaly-selected` and the
+benefit/drawback pair are `AnomalySelector`'s own colours, sampled from a
+screen in the game, and they do not move with the ground. They stay in `:root`
+for that reason — only the ground under them is themed. Two of the three text
+values are **lifted** off what the game uses, since its secondary lavender
+measures 3.8:1 on this panel, under AA — the same trap `--text-dim` was lifted
+out of once already.
+
+That leaves two purples meaning "selected" inside Setup, which is deliberate:
 the lavender is the **app** saying which tab or row you are on, while the green
 ring on an anomaly card is the **game's**, and the card is a second view of the
 game's own chooser.
-
-One thing is deliberately **not** re-pointed: the **board's own reds and ambers**
-in the readout. They mean the same thing under every anomaly, and an anomaly is
-precisely when a player most needs them to.
-
-Two of the three text values are **lifted** off what the game uses — its
-secondary lavender measures 3.8:1 on this panel, under AA, the same trap
-`--text-dim` was lifted out of once already. The cards on it are the game's, so the ground
-under them goes along rather than leaving them floating on a navy belonging to
-the rest of the panel. Each shell keeps its **own** alpha — the sheet 0.97, the
-docked panel 0.88 — so the hue changes and how much board shows through does
-not; and the docked foot darkens rather than keeping its navy tint, which would
-fight the purple. It is a view, not a mode: nothing else in the app reads it.
-
-**Run in the HUD takes the colour too**, and Stop is untouched: a stop is
-destructive of the run in progress whatever rules it began under. The docked panel's collapse handle takes it on the
-same condition, which is what keeps it from ever sitting purple against a navy
-panel.
-
-Run and the handle take **different purples**, and that is a contrast rule rather than a
-taste one: `--anomaly-accent` is the game's badge purple for strokes and glyphs
-on a dark ground, where brighter is more legible, while `--anomaly-action` is a
-fill behind white text, where brighter is less — the badge purple carries white
-at 4.0:1, so the filled pair sits two steps down the same ramp.
 
 That list also **stays compact until a card is chosen** — the unselected size is
 the default and `.active` is what loosens it (a larger icon, roomier panels, and

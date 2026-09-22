@@ -188,7 +188,7 @@
   }
 
   .unlock-stripe.on {
-    background-color: var(--neon);
+    background-color: var(--accent);
   }
 
   .card-content {

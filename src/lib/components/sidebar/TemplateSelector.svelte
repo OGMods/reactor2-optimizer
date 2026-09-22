@@ -186,7 +186,7 @@
     gap: 0.5rem;
     font-size: var(--fs-md);
     font-weight: 600;
-    color: var(--neon);
+    color: var(--accent);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 0.75rem;
@@ -219,7 +219,7 @@
   .template-item {
     flex: 1;
     background: rgba(20, 28, 46, 0.45);
-    border: 1px solid var(--neon-faint);
+    border: 1px solid var(--accent-faint);
     border-radius: var(--radius-sm);
     padding: 0.6rem 0.85rem;
     text-align: left;
@@ -232,13 +232,13 @@
   }
   .template-item:hover {
     background: rgba(20, 28, 46, 0.65);
-    border-color: var(--neon-dim);
+    border-color: var(--accent-dim);
     transform: translateX(2px);
   }
   .template-row.active .template-item {
-    background: var(--neon-bg);
-    border-color: var(--neon);
-    box-shadow: 0 0 10px var(--neon-glow);
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    box-shadow: 0 0 10px var(--accent-glow);
   }
   .name {
     font-size: var(--fs-base);
@@ -247,7 +247,7 @@
     transition: color var(--dur-fast);
   }
   .template-row.active .name {
-    color: var(--neon);
+    color: var(--accent);
     text-shadow: 0 0 5px rgba(0, 243, 255, 0.4);
   }
   /*
@@ -297,15 +297,15 @@
   }
   .custom-item {
     border-style: dashed;
-    border-color: var(--neon-dim);
+    border-color: var(--accent-dim);
   }
   .custom-item:hover {
     border-style: solid;
-    border-color: var(--neon-line);
+    border-color: var(--accent-line);
   }
   .template-row.active .custom-item {
     border-style: solid;
-    border-color: var(--neon);
+    border-color: var(--accent);
   }
   .empty-hint {
     margin: 0;
@@ -320,9 +320,9 @@
     justify-content: center;
     gap: 0.4rem;
     background: rgba(0, 243, 255, 0.08);
-    border: 1px dashed var(--neon-dim);
+    border: 1px dashed var(--accent-dim);
     border-radius: var(--radius-sm);
-    color: var(--neon);
+    color: var(--accent);
     padding: 0.55rem 0.85rem;
     font-size: var(--fs-base);
     font-weight: 600;
@@ -332,7 +332,7 @@
   .add-btn:hover:not(:disabled) {
     background: rgba(0, 243, 255, 0.18);
     border-style: solid;
-    border-color: var(--neon-line);
+    border-color: var(--accent-line);
   }
   .add-btn:disabled {
     opacity: 0.4;

@@ -471,7 +471,7 @@
     The figures in this card are what those rules produced, so it belongs to
     the signal rather than standing apart from it in the app's own navy.
   -->
-  <div class="board-card" class:anomalous={configState.hasAnomaly}>
+  <div class="board-card">
     {#if panel}
       <div class="card-head">
         {#if panel === "solver"}
@@ -856,12 +856,12 @@
     width: 250px;
     max-width: 100%;
     min-height: 0;
-    background: rgba(10, 14, 23, 0.94);
+    background: rgba(var(--surface-panel-rgb), 0.94);
     transition:
       background var(--dur) var(--ease),
       border-color var(--dur) var(--ease);
     backdrop-filter: blur(12px);
-    border: 1px solid var(--neon-dim);
+    border: 1px solid var(--accent-dim);
     border-radius: var(--radius);
     padding: 0.5rem 0.7rem;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
@@ -883,24 +883,16 @@
   }
 
   /*
-   * Keeps its own 0.94 — see `--anomaly-panel-rgb`. The re-pointed tokens are
-   * the same four Setup re-points, so type and hairlines follow the ground.
+   * Keeps its own 0.94 over the board while the theme decides the hue — see
+   * the theme block in `app.css`. Type and hairlines follow it, and so do the
+   * card's accents.
    *
-   * What is deliberately NOT re-pointed is the board's own language: the reds
-   * and ambers this card prints for overheating and idle buildings are read off
-   * explicit tokens and stay exactly as they are. They mean the same thing
-   * under every anomaly, and an anomaly is precisely the condition under which
-   * a player most needs them to.
+   * What a theme deliberately never touches is the board's own language: the
+   * reds and ambers this card prints for overheating and idle buildings read
+   * off `--danger` and `--status-idle`, which no theme rebinds. They mean the
+   * same thing under every anomaly, and an anomaly is precisely the condition
+   * under which a player most needs them to.
    */
-  .board-card.anomalous {
-    background: rgba(var(--anomaly-panel-rgb), 0.94);
-    border-color: var(--anomaly-accent-dim);
-    --text: var(--anomaly-text);
-    --text-muted: var(--anomaly-text-muted);
-    --text-dim: var(--anomaly-text-dim);
-    --border: var(--anomaly-border);
-  }
-
   /*
    * The single scroller: the figures and the inspected tile, together.
    *
@@ -970,7 +962,7 @@
     gap: 0.2rem;
     font-size: var(--fs-base);
     font-weight: 700;
-    color: var(--neon);
+    color: var(--accent);
     font-variant-numeric: tabular-nums;
   }
 
@@ -1000,8 +992,8 @@
    * every time it is shown.
    */
   .copy:hover {
-    color: var(--neon);
-    background: var(--neon-bg);
+    color: var(--accent);
+    background: var(--accent-bg);
   }
 
   .copy.armed {
@@ -1035,9 +1027,9 @@
     gap: 0.3rem;
     font-size: var(--fs-2xs);
     font-weight: 700;
-    color: var(--neon);
-    background: var(--neon-bg);
-    border: 1px solid var(--neon-dim);
+    color: var(--accent);
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-dim);
     border-radius: var(--radius-xs);
     padding: 0.1rem 0.35rem;
   }
@@ -1068,8 +1060,8 @@
     justify-content: space-between;
     align-items: center;
     gap: 0.5rem;
-    background: var(--neon-bg);
-    border: 1px solid var(--border-neon);
+    background: var(--accent-bg);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius-sm);
     padding: 0.35rem 0.5rem;
   }
@@ -1095,7 +1087,7 @@
     gap: 0.2rem;
     font-size: var(--fs-lg);
     font-weight: 700;
-    color: var(--neon);
+    color: var(--accent);
     font-variant-numeric: tabular-nums;
   }
   /* The bound the power figure is measured against: the same reading, held
@@ -1212,9 +1204,9 @@
     margin-left: 0.15rem;
     padding: 0.1rem 0.4rem;
     border-radius: var(--radius-xs);
-    border: 1px solid var(--neon-dim);
-    background: var(--neon-bg);
-    color: var(--neon);
+    border: 1px solid var(--accent-dim);
+    background: var(--accent-bg);
+    color: var(--accent);
     font-size: var(--fs-2xs);
     font-weight: 700;
     letter-spacing: 0.4px;
@@ -1222,7 +1214,7 @@
     cursor: pointer;
   }
   .apply:hover {
-    border-color: var(--neon);
+    border-color: var(--accent);
     background: rgba(0, 243, 255, 0.2);
   }
 
@@ -1264,7 +1256,7 @@
     color: var(--danger-soft);
   }
   .notice.waiting {
-    color: var(--neon);
+    color: var(--accent);
   }
 
   :global(.spinner) {
@@ -1347,7 +1339,7 @@
   /*
    * Deliberately quieter than `.tile-coords` beside it. Both are identity
    * rather than measurement, but the level is the one a player scans past most
-   * of the time — it earns a chip, not the neon.
+   * of the time — it earns a chip, not the accent.
    */
   .tile-level {
     flex: 0 0 auto;
@@ -1366,7 +1358,7 @@
   .tile-coords {
     flex: 0 0 auto;
     font-family: var(--mono);
-    color: var(--neon);
+    color: var(--accent);
     font-weight: 600;
   }
 

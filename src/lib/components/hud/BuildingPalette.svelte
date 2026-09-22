@@ -46,7 +46,6 @@
 
 <div
   class="building-panel"
-  class:anomalous={configState.hasAnomaly}
   role="toolbar"
   aria-label="Building selection"
   transition:fly={{ y: 8, duration: 180, easing: cubicOut }}
@@ -74,7 +73,7 @@
     max-width: min(100%, 620px);
     background: var(--surface-sunken);
     backdrop-filter: blur(16px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     /*
      * `--radius-lg`, not the stack's usual pill: a pill's corner radius tracks
      * half the container's height, and at this height (~70px) that curve is
@@ -89,23 +88,8 @@
       background var(--dur) var(--ease),
       border-color var(--dur) var(--ease);
     box-shadow:
-      0 0 30px var(--neon-faint),
+      0 0 30px var(--accent-faint),
       0 8px 32px rgba(0, 0, 0, 0.5);
-  }
-
-  /*
-   * The same reminder Header, Setup and Run carry — a building placed while
-   * this ribbon is purple is rated under rules that are not the ordinary ones
-   * the moment it lands.
-   *
-   * `--text-dim` goes with the ground: tuned against the navy panel, it reads
-   * 3.5:1 on this one, and the empty-roster line it colours is not a disabled
-   * control, so `app.css`'s exemption does not cover it.
-   */
-  .building-panel.anomalous {
-    background: rgba(var(--anomaly-panel-rgb), 0.92);
-    border-color: var(--anomaly-border-neon);
-    --text-dim: var(--anomaly-text-dim);
   }
 
   /*

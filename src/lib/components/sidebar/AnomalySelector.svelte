@@ -118,7 +118,7 @@
     gap: 0.5rem;
     font-size: var(--fs-md);
     font-weight: 600;
-    color: var(--neon);
+    color: var(--accent);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 0.6rem;
@@ -162,7 +162,7 @@
   }
 
   /*
-   * Green, not `--neon`, and only here — see the `--anomaly-selected` note in
+   * Green, not `--accent`, and only here — see the `--anomaly-selected` note in
    * `app.css`. The ring is the game's own, so the card the player chose a
    * moment ago in the game is the card that looks chosen here.
    */

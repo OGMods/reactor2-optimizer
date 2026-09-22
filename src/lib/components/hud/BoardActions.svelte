@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { configState, layoutState, solverState, uiState } from "../../state";
+  import { layoutState, solverState, uiState } from "../../state";
   import { Play, Redo2, Square, Undo2 } from "lucide-svelte";
 
   /**
@@ -23,18 +23,6 @@
   let running = $derived(solverState.isOptimizing);
 
   /*
-   * Run goes purple while a rule change is in force — the game's colour for
-   * anomalies, on the one control that starts a solve under them.
-   *
-   * It follows the *selection*, not Setup's Anomaly tab: the tab is where the
-   * choice is made and is closed most of the time, while this is the standing
-   * reminder that the run about to start is not an ordinary one. Stopping is
-   * unaffected — a stop is destructive of the run in progress whatever rules it
-   * was started under, so `--danger` still wins.
-   */
-  let anomalous = $derived(configState.hasAnomaly);
-
-  /*
    * A press here must not also collapse the config panel.
    *
    * `HudToolbar` dismisses it on any `pointerdown` that bubbles out of the
@@ -48,7 +36,7 @@
   const keepPanel = (e: PointerEvent) => e.stopPropagation();
 </script>
 
-<div class="board-actions" class:anomalous>
+<div class="board-actions">
   <!--
     The arrows belong to the board the *user* builds, and they are absent while
     the solver's is the one on screen. Undo there would edit a layout nobody is
@@ -89,7 +77,6 @@
 
   <button
     class="run"
-    class:anomaly={anomalous}
     class:stopping={running}
     onpointerdown={keepPanel}
     onclick={() => uiState.requestSolve()}
@@ -114,27 +101,17 @@
     display: flex;
     align-items: center;
     gap: 0.2rem;
-    background: rgba(10, 14, 23, 0.92);
+    background: rgba(var(--surface-panel-rgb), 0.92);
     backdrop-filter: blur(14px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius-pill);
     padding: 0.25rem;
     transition:
       background var(--dur) var(--ease),
       border-color var(--dur) var(--ease);
     box-shadow:
-      0 0 30px var(--neon-faint),
+      0 0 30px var(--accent-faint),
       0 8px 32px rgba(0, 0, 0, 0.5);
-  }
-
-  /*
-   * The pill's own border and ground take the reminder; `.run.anomaly` below
-   * is a separate, stronger signal — a filled button rather than an outline —
-   * for the one control that actually starts a solve under these rules.
-   */
-  .board-actions.anomalous {
-    background: rgba(var(--anomaly-panel-rgb), 0.92);
-    border-color: var(--anomaly-border-neon);
   }
 
   .act {
@@ -193,8 +170,15 @@
     padding: 0 0.75rem;
     border-radius: var(--radius-pill);
     border: none;
-    background: var(--neon);
-    color: var(--surface-void);
+    /*
+     * `--action`, not `--accent`: a fill carrying ink is a different role from a
+     * stroke on a dark ground, and a theme answers the two differently. Under
+     * the anomaly theme this is the game's purple with white on it, while the
+     * selection lavender that `--accent` becomes could not carry either ink at
+     * AA. See the `--action` note in `app.css`.
+     */
+    background: var(--action);
+    color: var(--action-ink);
     font-size: var(--fs-base);
     font-weight: 700;
     letter-spacing: 0.5px;
@@ -211,17 +195,7 @@
   }
 
   .run:hover {
-    background: var(--neon-strong);
-  }
-
-  /* White rather than `--surface-void`: the fill is dark, not bright. */
-  .run.anomaly {
-    background: var(--anomaly-action);
-    color: #ffffff;
-  }
-
-  .run.anomaly:hover {
-    background: var(--anomaly-action-hover);
+    background: var(--action-hover);
   }
 
   /* Stopping is destructive of the run in progress, so it takes `--danger`. */

@@ -1,6 +1,5 @@
 <script lang="ts">
   import {
-    configState,
     layoutState,
     uiState,
     viewportState,
@@ -62,7 +61,6 @@
 <header
   class="hud-header"
   class:compact
-  class:anomalous={configState.hasAnomaly}
   bind:this={headerEl}
   bind:clientHeight={headerHeight}
 >
@@ -136,24 +134,12 @@
     gap: 0.75rem;
     background: var(--surface-panel);
     backdrop-filter: blur(12px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius);
     padding: 0.5rem 0.85rem;
     transition:
       background var(--dur) var(--ease),
       border-color var(--dur) var(--ease);
-  }
-
-  /*
-   * Purple whenever an anomaly is selected, the same signal Setup, the
-   * readout and Run already carry — see `--anomaly-panel-rgb` in `app.css`.
-   * This bar sits above all three, so it is the one place a player looking at
-   * neither the board nor Setup can still tell the rules are not the ordinary
-   * ones.
-   */
-  .hud-header.anomalous {
-    background: rgba(var(--anomaly-panel-rgb), 0.94);
-    border-color: var(--anomaly-border-neon);
   }
 
   .logo {
@@ -222,7 +208,7 @@
   /*
    * Both header actions are neutral, and that is the point.
    *
-   * Center View was neon and Share was `--amber` — two accents in a bar whose
+   * Center View took the accent and Share `--amber` — two of them in a bar whose
    * job is to sit out of the way, and the amber one was the exact colour the
    * board uses to report an idle building. Under the colour law in `app.css`
    * neither of these is a selection and neither destroys anything, so neither
@@ -238,7 +224,7 @@
 
   .action-btn:hover {
     background: var(--surface-raised);
-    border-color: var(--neon-dim);
+    border-color: var(--accent-dim);
     color: var(--text);
   }
 

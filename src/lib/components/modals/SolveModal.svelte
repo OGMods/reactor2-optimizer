@@ -77,7 +77,7 @@
   }
 
   .lead strong {
-    color: var(--neon);
+    color: var(--accent);
     font-weight: 700;
   }
 
@@ -139,11 +139,11 @@
   /* The safe option reads as the default; the destructive one is not red until
      hovered, so the dialog does not open looking like a warning. */
   .choice.keep {
-    border-color: var(--neon-dim);
+    border-color: var(--accent-dim);
   }
   .choice.keep:hover {
-    border-color: var(--neon);
-    background: var(--neon-bg);
+    border-color: var(--accent);
+    background: var(--accent-bg);
   }
 
   .choice.discard:hover {

@@ -7,9 +7,15 @@
  * full-bleed canvas — `App.svelte` carried a block of `!important` overrides
  * purely to undo it. Both are gone.
  *
- * The palette below is the neon identity the components already use, lifted
- * out of the twenty-odd places that hard-coded `#00f3ff` / `rgba(0,243,255,…)`
- * so the mobile work has one place to tune contrast.
+ * The palette below was lifted out of the twenty-odd places that hard-coded
+ * `#00f3ff` / `rgba(0,243,255,…)`, so the mobile work has one place to tune
+ * contrast.
+ *
+ * Every token here is named for the **role it plays**, never for the colour it
+ * happens to hold, because a theme changes the latter and not the former —
+ * `--accent` spent a while called `--neon`, which stopped being true the first
+ * time a theme made it purple. A name that describes one theme's answer is a
+ * name that will be a lie under the next one. See the theme block below.
  */
 
 :root {
@@ -34,10 +40,26 @@
 
   /* ── Surfaces ─────────────────────────────────────────────────── */
   --surface-void: #0a0e17;
-  --surface-panel: rgba(10, 14, 23, 0.88);
+  /*
+   * The panel ground, as a bare triplet *and* as the composite most panels
+   * want. Both exist because a theme has to move them together: the HUD's
+   * pills, the readout and the sheet each pick their own alpha over the board
+   * (0.92, 0.94, 0.97), so they compose from the triplet, while anything
+   * happy with the default reads `--surface-panel`. A theme therefore rebinds
+   * the triplet once and every surface follows — see the theme block below.
+   */
+  --surface-panel-rgb: 10, 14, 23;
+  --surface-panel: rgba(var(--surface-panel-rgb), 0.88);
   --surface-panel-solid: #0d1424;
   --surface-raised: rgba(255, 255, 255, 0.06);
   --surface-sunken: rgba(8, 12, 20, 0.93);
+  /*
+   * A region set apart *inside* a panel — Setup's foot, which holds the run
+   * control. A navy tint that separates it from the ground above without
+   * naming a colour; a theme swaps it for whatever plays that part on its own
+   * ground (the anomaly theme darkens instead, since navy on purple fights).
+   */
+  --surface-inset: rgba(15, 23, 42, 0.6);
   /*
    * What the board sits on. `PixiCanvas` paints its wrapper this colour *and*
    * hands the same value to Pixi as the renderer's clear colour — a wrapper
@@ -59,12 +81,15 @@
    *
    * The law, one line each:
    *
-   *   neon    — this control is selected / active. Nothing else.
+   *   accent  — this control is selected / active. Nothing else.
+   *   action  — the one *filled* primary control. RUN, and nothing else.
    *   ok      — the board only: this building is working.
    *   idle    — the board only: this building is doing nothing.
    *   danger  — the board: overheating. In the UI: this destroys something.
    *   warn    — a limit is reached, or this board is not yours to edit.
    *   benefit / drawback — the anomaly cards only, and nowhere else.
+   *
+   * The first two are themed; the four below them never are.
    *
    * The two board readings are **reserved**, and that is the whole point. The
    * pad under every building, the pulse that breathes it and the readout in
@@ -78,15 +103,33 @@
    * neither. "Neither" is neutral, and most of the header is neither.
    */
 
-  /* Selection — and the identity, so the wordmark keeps it too. */
-  --neon: #00f3ff;
-  --neon-dim: rgba(0, 243, 255, 0.3);
-  --neon-faint: rgba(0, 243, 255, 0.15);
-  --neon-bg: rgba(0, 243, 255, 0.14);
+  /*
+   * Selection, and the base theme's identity. Cyan is what it holds here and
+   * not what it *means* — `AnomalySelector`'s green ring and the anomaly
+   * theme's lavender are both "selected" too, which is why the name says the
+   * role. The wordmark is a raster and keeps its own cyan either way.
+   */
+  --accent: #00f3ff;
+  --accent-dim: rgba(0, 243, 255, 0.3);
+  --accent-faint: rgba(0, 243, 255, 0.15);
+  --accent-bg: rgba(0, 243, 255, 0.14);
   /* Border and glow of a *selected* control; `strong` is a solid one's hover. */
-  --neon-line: rgba(0, 243, 255, 0.5);
-  --neon-glow: rgba(0, 243, 255, 0.2);
-  --neon-strong: #33f6ff;
+  --accent-line: rgba(0, 243, 255, 0.5);
+  --accent-glow: rgba(0, 243, 255, 0.2);
+  --accent-strong: #33f6ff;
+
+  /*
+   * The one *filled* primary action — RUN, and nothing else. It is a separate
+   * role from `--accent` rather than a second spelling of it: `--accent` is a
+   * stroke or a glyph on a dark ground, where brighter is more legible, while
+   * this is a fill carrying ink, where brighter is less. The base theme
+   * happens to answer both with the same cyan; a theme that does not is
+   * exactly why the two are named apart (see `--action` under the anomaly
+   * theme, which sits two steps down its own ramp so white clears AA on it).
+   */
+  --action: var(--accent);
+  --action-hover: var(--accent-strong);
+  --action-ink: var(--surface-void);
 
   /*
    * Board status. `--status-idle` is matched to the `indicator_idle` pad in the
@@ -137,7 +180,7 @@
 
   /*
    * And the same screen's *selection* colour, which is the sharper exception:
-   * `--neon` means selected everywhere else in this app, and here it does not.
+   * `--accent` means selected everywhere else in this app, and here it does not.
    *
    * The reason is the same one and it only stretches this far. The anomaly
    * list is a second view of a chooser the player has just used in the game,
@@ -163,82 +206,6 @@
    * type needs no adjusting to sit on it.
    */
   --anomaly-card: #23143b;
-
-  /*
-   * The ground the cards sit on, sampled from the dialog behind them, and a
-   * bare triplet rather than a colour because **three surfaces wear it at three
-   * different strengths** — the sheet at 0.97 over the board, the docked panel
-   * at 0.88, the readout at 0.94. Each keeps the alpha it already had, so
-   * selecting an anomaly changes the hue and nothing about how much board shows
-   * through; a token per surface would be three names for one decision.
-   */
-  --anomaly-panel-rgb: 56, 38, 80;
-  /* The opaque form, for anything that must not be seen through — the roster's
-     sticky category bar is the one such thing inside these panels. */
-  --anomaly-panel-solid: #382650;
-
-  /*
-   * The whole `--neon` family again in purple, for the inside of a panel that
-   * has gone purple: Setup re-points every one of these, so its heading, its
-   * active tab, its selected island row and its category pills stop being cyan
-   * along with the ground under them.
-   *
-   * It is a **lighter** purple than `--anomaly-accent`, and that is forced
-   * rather than chosen. Cyan earns its prominence by contrast, and the badge
-   * purple reads 3.3:1 against this panel — fine as a stroke on the dark
-   * collapse handle, unreadable as a heading. `#c9a5f0` restores the 6.5:1 the
-   * cyan had, in the same family.
-   *
-   * Names mirror the tokens they stand in for, one for one, so the mapping in
-   * `ConfigSidebar` can be read straight down.
-   */
-  --anomaly-neon: #c9a5f0;
-  --anomaly-neon-strong: #d8bdf7;
-  --anomaly-neon-dim: rgba(201, 165, 240, 0.4);
-  --anomaly-neon-line: rgba(201, 165, 240, 0.5);
-  --anomaly-neon-glow: rgba(201, 165, 240, 0.2);
-  --anomaly-neon-bg: rgba(201, 165, 240, 0.16);
-  --anomaly-neon-faint: rgba(201, 165, 240, 0.18);
-  --anomaly-border-neon: rgba(201, 165, 240, 0.3);
-
-  /*
-   * Type for that ground, sampled from the same screens. The app's own text
-   * tokens are cyan-leaning (`--text` is `#e0f0ff`, `--text-dim` a blue-grey)
-   * and read as the wrong family on purple — the panel would look like our
-   * chrome with someone else's background behind it.
-   *
-   * `--anomaly-text` is the game's `#e6d8fc` untouched, at 10:1 on the panel.
-   * The other two are **lifted** off their sampled values, and for the reason
-   * `--text-dim` was lifted once already: the game's secondary lavender
-   * (`#9281ad`) measures 3.82:1 on this panel, under AA. Measure against the
-   * panel rather than the cards — the panel is the lighter of the two grounds,
-   * and light type loses contrast on the lighter one.
-   *
-   * These are not applied by any rule here. `ConfigSidebar` re-points `--text`,
-   * `--text-muted`, `--text-dim` and `--border` at them on the tab's container,
-   * so the whole subtree follows without a component knowing about it.
-   */
-  --anomaly-text: #e6d8fc;
-  /* `#94a3b8` -> the same lavender family. 7.0:1 on the panel. */
-  --anomaly-text-muted: #c3b4dd;
-  /* The game's `#9281ad`, lifted to clear AA on the panel. 4.7:1. */
-  --anomaly-text-dim: #a091bd;
-  --anomaly-border: rgba(230, 216, 252, 0.14);
-
-  /*
-   * Two purples for controls, and the split is a contrast one rather than a
-   * taste one. `--anomaly-accent` is the game's own badge purple, used for
-   * *strokes and glyphs on a dark ground*, where brighter is more legible.
-   * `--anomaly-action` is a *fill behind white text*, where brighter is less:
-   * the badge purple carries white at only 4.0:1, so the filled pair is pulled
-   * two steps down the same ramp until both the resting and the hover state
-   * clear AA (5.4:1 and 4.8:1). RUN is 12.8px bold, which is not "large text",
-   * so 4.5 is the bar it has to meet.
-   */
-  --anomaly-accent: #9b65d4;
-  --anomaly-accent-dim: rgba(155, 101, 212, 0.45);
-  --anomaly-action: #8450bd;
-  --anomaly-action-hover: #8d5ac6;
 
   /* A limit reached, or a board that is not yours. Never a plain action. */
   --warn: #f59e0b;
@@ -282,7 +249,7 @@
   --text-dim: #7d8da4;
 
   --border: rgba(255, 255, 255, 0.08);
-  --border-neon: rgba(0, 243, 255, 0.25);
+  --border-accent: rgba(0, 243, 255, 0.25);
 
   /* ── Safe areas ───────────────────────────────────────────────────
    * `env()` resolves to 0px on anything without a notch, so these are
@@ -364,6 +331,123 @@
   -webkit-text-size-adjust: 100%;
 }
 
+/*
+ * ── Themes ────────────────────────────────────────────────────────
+ *
+ * A theme is a *rebinding of the tokens above*, applied once, on the shell.
+ * Nothing below this line is referenced by a component: they go on reading
+ * `--surface-panel-rgb`, `--text`, `--accent`, `--action` and the rest, and a
+ * theme changes what those answer.
+ *
+ * That is the whole reason this block exists. The anomaly purple used to be
+ * spelled out eleven times — ten components each carrying
+ * `class:anomalous={configState.hasAnomaly}` and a `.anomalous` rule that
+ * re-pointed *a different subset* of the same tokens, so the HUD's ground went
+ * purple while the selected tool on it stayed cyan, and `BuildingPalette` had
+ * to remember `--text-dim` where `ObstaclePalette` beside it did not. Every
+ * new panel was another place to remember, and forgetting was silent.
+ *
+ * Two things stay out of a theme deliberately:
+ *
+ * - **The board's own language.** `--status-ok`, `--status-idle`, `--danger`
+ *   and `--warn` are never rebound. The pad under a building, the pulse that
+ *   breathes it and the readout's red Cooling row mean the same thing under
+ *   every timeline, and an anomaly is precisely when a player most needs them
+ *   to.
+ * - **The game's chooser palette** — `--anomaly-card`, `--anomaly-selected`
+ *   and the benefit/drawback pair. Those are `AnomalySelector`'s own colours,
+ *   sampled from a screen in the game, and they do not move with the ground.
+ *   They live in `:root` above for that reason; only the ground under them is
+ *   a theme.
+ */
+
+/*
+ * ── The anomaly theme ──────────────────────────────────────────────
+ *
+ * `App.svelte` sets `data-theme="anomaly"` on `.app-shell` whenever
+ * `configState.hasAnomaly` is true — on every tab and every board, because
+ * that is what it says: this timeline is not running the ordinary rules, and
+ * the island list, the roster and the board's figures are all read under them.
+ * Nothing selected leaves the attribute off and every token below falls back
+ * to the navy above, which is the common case.
+ *
+ * The values are sampled from the game's own "Choose an anomaly" screen, so
+ * the cards on that tab sit on the ground they came from rather than floating
+ * on a navy belonging to the rest of the app.
+ */
+[data-theme="anomaly"] {
+  /*
+   * The ground, as a triplet, because the surfaces wearing it each keep their
+   * own alpha — the sheet 0.97, the docked panel 0.88, the readout 0.94, the
+   * HUD's pills 0.92. Selecting an anomaly changes the hue and nothing about
+   * how much board shows through.
+   */
+  --surface-panel-rgb: 56, 38, 80;
+  /* The header's own 0.94, and the one surface still happy with the default. */
+  --surface-panel: rgba(var(--surface-panel-rgb), 0.94);
+  /* For anything that must not be seen through: the roster's sticky category
+     bar, the overflow menu, a dialog, the toast. */
+  --surface-panel-solid: #382650;
+  /* The HUD's two ribbons, which sit a shade deeper than a panel. */
+  --surface-sunken: rgba(var(--surface-panel-rgb), 0.92);
+  /* Setup's foot darkens rather than tinting: a navy tint fights this ground,
+     and a neutral separates the run control from either one. */
+  --surface-inset: rgba(0, 0, 0, 0.22);
+
+  /*
+   * Type for that ground, sampled from the same screens. The app's own text
+   * tokens are cyan-leaning (`--text` is `#e0f0ff`, `--text-dim` a blue-grey)
+   * and read as the wrong family on purple — the panel would look like our
+   * chrome with someone else's background behind it.
+   *
+   * `--text` is the game's `#e6d8fc` untouched, at 10:1 on the panel. The
+   * other two are **lifted** off their sampled values, for the reason
+   * `--text-dim` was lifted once already: the game's secondary lavender
+   * (`#9281ad`) measures 3.82:1 here, under AA. Measure against the panel
+   * rather than the cards — the panel is the lighter of the two grounds, and
+   * light type loses contrast on the lighter one.
+   */
+  --text: #e6d8fc;
+  /* `#94a3b8` -> the same lavender family. 7.0:1 on the panel. */
+  --text-muted: #c3b4dd;
+  /* The game's `#9281ad`, lifted to clear AA on the panel. 4.7:1. */
+  --text-dim: #a091bd;
+  --border: rgba(230, 216, 252, 0.14);
+
+  /*
+   * The whole selection family in purple, so every mark that means "selected"
+   * goes with the ground under it: Setup's heading, its active tab, the chosen
+   * island's row, the roster's category pills, the HUD's active tool, the
+   * selected building in the palette, the readout's accents.
+   *
+   * It is a **lighter** purple than the fill below, and that is forced rather
+   * than chosen. Cyan earns its prominence by contrast, and the game's badge
+   * purple (`#9b65d4`) reads 3.3:1 against this panel — fine as a stroke,
+   * unreadable as a heading. `#c9a5f0` restores the 6.5:1 the cyan had, in the
+   * same family.
+   */
+  --accent: #c9a5f0;
+  --accent-strong: #d8bdf7;
+  --accent-dim: rgba(201, 165, 240, 0.4);
+  --accent-line: rgba(201, 165, 240, 0.5);
+  --accent-glow: rgba(201, 165, 240, 0.2);
+  --accent-bg: rgba(201, 165, 240, 0.16);
+  --accent-faint: rgba(201, 165, 240, 0.18);
+  --border-accent: rgba(201, 165, 240, 0.3);
+
+  /*
+   * And the filled action, which is where the split from `--accent` earns its
+   * keep. RUN is a fill behind white text, where brighter is *less* legible:
+   * the selection lavender above carries white at nothing like AA, so this is
+   * the game's badge purple pulled two steps down the same ramp until both the
+   * resting and the hover state clear it (5.4:1 and 4.8:1). RUN is 12.8px
+   * bold, which is not "large text", so 4.5 is the bar it has to meet.
+   */
+  --action: #8450bd;
+  --action-hover: #8d5ac6;
+  --action-ink: #ffffff;
+}
+
 *,
 *::before,
 *::after {
@@ -406,7 +490,7 @@ button {
  * keeps it off pointer taps, where a persistent ring reads as stuck.
  */
 :where(button, [href], input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--neon);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: var(--radius-xs);
 }
@@ -433,7 +517,7 @@ button {
 /* Thin dark scrollbars for the panels that scroll internally. */
 .thin-scroll {
   scrollbar-width: thin;
-  scrollbar-color: var(--neon-dim) transparent;
+  scrollbar-color: var(--accent-dim) transparent;
 }
 .thin-scroll::-webkit-scrollbar {
   width: 6px;
@@ -444,7 +528,7 @@ button {
   border-radius: var(--radius-xs);
 }
 .thin-scroll::-webkit-scrollbar-thumb {
-  background: var(--neon-dim);
+  background: var(--accent-dim);
   border-radius: var(--radius-xs);
 }
 
