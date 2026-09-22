@@ -6,6 +6,7 @@ import {
   wasteIsCovered,
 } from "./physics";
 import { buildIslandContext, type IslandContext } from "./context";
+import { generatorCapacities, isolationRoom } from "./island";
 import { Pacer, type IslandProgress } from "./pacer";
 import { AlternateCollector, isDistinctLayout, powerTies } from "./alternates";
 import { Rng, randomSeed } from "./rng";
@@ -783,7 +784,8 @@ function constructSeed(
           ? 1 + best.hub!.r
           : best.kind === "dp"
             ? 1
-            : best.shared!.reactorTiles.length + best.shared!.genPositions.length;
+            : best.shared!.reactorTiles.length +
+              best.shared!.genPositions.length;
       const waste =
         best.kind === "hub"
           ? best.hub!.waste
@@ -1330,6 +1332,7 @@ function targetCompositions(
   reactors: EffectiveBuilding[],
   generators: EffectiveBuilding[],
   coolers: EffectiveBuilding[],
+  generatorCapacity: Float64Array | null,
   topK = COMPOSITION_TARGETS,
 ): ScoredComposition[] {
   if (
@@ -1354,7 +1357,9 @@ function targetCompositions(
       const wasteRatio = generatorWasteRatio(generator);
       if (wasteRatio <= 0) continue;
       const budget = Math.min(
-        nGen * generator.effectiveValue,
+        generatorCapacity === null
+          ? nGen * generator.effectiveValue
+          : generatorCapacity[nGen],
         (nCool * cooler.effectiveValue) / wasteRatio,
       );
 
@@ -1411,6 +1416,52 @@ function targetCompositions(
 }
 
 /**
+ * How much heat `nGen` generator tiles on THIS island can take in, or null
+ * under every rule that leaves the count alone.
+ *
+ * `targetCompositions` decides what to build by counting, and the count it
+ * wants is a function of what a generator is worth. Under a role isolation
+ * that is two numbers rather than one — a generator with no generator beside
+ * it takes 2.5x, one with 0.8x — and which a tile gets is decided by the
+ * layout, so neither belongs in the pool the stage draws on. The roster cannot
+ * express it; the island can, and `isolationRoom` is how much of the bonus its
+ * shape has room for.
+ *
+ * Both halves are load-bearing and were measured apart. Sizing at the bonus
+ * alone asked Gale Hills at generator7 tier 2 for 18 generators on an island
+ * that can keep 15 apart, `arrangeComposition` spread them as far as they go
+ * and still had most of them touching, and the stage was rejected for the
+ * layout already in hand. With the room folded in it asks for 15, the
+ * arrangement comes back with 14 of them isolated, and the walk finishes the
+ * job: 58.8AC to 60.7AC, which is what an unconstrained annealer reaches given
+ * 30x the budget.
+ *
+ * The same table the bound runs on (`island.ts`), and deliberately so — one
+ * reading of what a board has room for, rather than a second one here to drift
+ * against it. It is built from the island's own ratings rather than the
+ * capped figures the bound uses: a bound may relax adjacency away, a target
+ * has to be something the board can hold.
+ */
+function generatorCapacityTable(
+  island: IslandSubGrid,
+  ctx: IslandContext,
+  generator: EffectiveBuilding | undefined,
+): Float64Array | null {
+  if (generator === undefined) return null;
+
+  const isolated = ctx.rateIsolated(generator, false).effectiveValue;
+  const crowded = ctx.rateIsolated(generator, true).effectiveValue;
+  // Equal under every other rule, and under one that rates a crowded building
+  // no lower there is no ceiling to respect: the count is linear again.
+  if (crowded >= isolated) return null;
+
+  return generatorCapacities(ctx.n, isolated, {
+    gTake: crowded,
+    room: isolationRoom(island),
+  });
+}
+
+/**
  * The largest factor anything on this island can be rated at — 1 under the rules
  * that leave the roster alone.
  *
@@ -1442,8 +1493,10 @@ function targetCompositions(
 function islandRatingCeiling(
   ctx: IslandContext,
   probes: readonly EffectiveBuilding[],
+  sizedByIsolation: boolean,
 ): number {
-  if (ctx.uniformRating && ctx.isolation === null) return 1;
+  if (ctx.uniformRating && (ctx.isolation === null || sizedByIsolation))
+    return 1;
 
   let ceiling = 1;
   const consider = (factor: number): void => {
@@ -1457,7 +1510,7 @@ function islandRatingCeiling(
         consider(ctx.rate(tile, probe).effectiveValue / probe.effectiveValue);
       }
     }
-    if (ctx.isolation !== null) {
+    if (ctx.isolation !== null && !sizedByIsolation) {
       // Both variants, because which one a tile gets is a function of the
       // layout: a search free to keep generators apart rates every one of them
       // at the bonus. The same reasoning `islandMaxScale` carries.
@@ -2318,15 +2371,18 @@ export async function solveIsland(
   // power, so the skip test needs the two in the same units or it throws the
   // whole stage away — see `islandRatingCeiling`. One number for the island,
   // resolved once: the loop below runs three times.
+  const generatorCapacity = generatorCapacityTable(island, ctx, generators[0]);
   const ratingCeiling = islandRatingCeiling(
     ctx,
     [reactors[0], generators[0], coolers[0]].filter((b) => b !== undefined),
+    generatorCapacity !== null,
   );
   for (const target of targetCompositions(
     ctx.n,
     reactors,
     generators,
     coolers,
+    generatorCapacity,
   )) {
     if (
       performance.now() >= compositionDeadlineMs ||
@@ -2473,6 +2529,7 @@ export const internals = {
   downgradeTiers,
   greedyPolish,
   hillClimb,
+  generatorCapacityTable,
   islandRatingCeiling,
   isUnderFed,
   targetCanBeat,

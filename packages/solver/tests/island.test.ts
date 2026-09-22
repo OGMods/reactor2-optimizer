@@ -37,6 +37,7 @@ import type {
   EffectiveBuilding,
   IslandSubGrid,
   Placement,
+  RoleIsolationAnomaly,
   TerrainAffinityAnomaly,
 } from "../src/solver/types";
 import {
@@ -251,12 +252,7 @@ describe("water adjacency", () => {
   it("flags a tile beside water, and not one beside a pond or a rock", () => {
     // A pond looks wet and is filed with the rocks and the trees: an obstacle,
     // and no shore bonus. Only the water tile proper counts.
-    const at = flagsOf([
-      "RRRRRRR",
-      "RG.GORG",
-      "RGGGGRG",
-      "RRRRRRR",
-    ]);
+    const at = flagsOf(["RRRRRRR", "RG.GORG", "RGGGGRG", "RRRRRRR"]);
 
     expect(at(1, 2), "diagonally below the water at (2, 1)").toBe(1);
     expect(at(3, 2), "diagonally below the water at (2, 1)").toBe(1);
@@ -271,7 +267,9 @@ describe("water adjacency", () => {
      * everywhere else. Resolved from the window, every one of them would read
      * as inland.
      */
-    const islands = splitGridIntoIslands(makeGrid(["GGGRRRR", "GGGRRRR", "GGGRRRR"]));
+    const islands = splitGridIntoIslands(
+      makeGrid(["GGGRRRR", "GGGRRRR", "GGGRRRR"]),
+    );
 
     expect(islands.length).toBe(1);
     const island = islands[0];
@@ -287,7 +285,9 @@ describe("water adjacency", () => {
   });
 
   it("indexes like `buildable`, over the same window", () => {
-    const [island] = splitGridIntoIslands(makeGrid(["RRRRR", "RGGGR", "RRRRR"]));
+    const [island] = splitGridIntoIslands(
+      makeGrid(["RRRRR", "RGGGR", "RRRRR"]),
+    );
 
     expect(island.waterAdjacent.length).toBe(island.buildable.length);
     expect(island.waterAdjacent.length).toBe(island.width * island.height);
@@ -600,11 +600,11 @@ describe("the theoretical max-power bound", () => {
       singularity,
       island.waterAdjacent,
     );
-    const placement = placeOn(
-      ctx,
-      ["GRG", "RCR", "GRG"],
-      { G: roster[1], R: roster[0], C: roster[2] },
-    );
+    const placement = placeOn(ctx, ["GRG", "RCR", "GRG"], {
+      G: roster[1],
+      R: roster[0],
+      C: roster[2],
+    });
 
     const { totalPower } = simulateIsland(placement, ctx);
 
@@ -622,6 +622,278 @@ describe("the theoretical max-power bound", () => {
     expect(totalPower).toBeLessThanOrEqual(
       estimateTotalMaxPower([island], roster, singularity) + EPS,
     );
+  });
+
+  describe("the neighbourhood cap on a generator's intake", () => {
+    /*
+     * The other half of allowing the isolated rating, and the half that costs
+     * something. Heat crosses a tile boundary and nothing else, so a
+     * generator's intake is the output of the reactors *beside* it, and the
+     * all-or-nothing cooling rule wants coolers beside it too — out of the same
+     * eight tiles. That ceiling is the one piece of adjacency the bound does
+     * not relax away, because it is the one that binds.
+     *
+     * It is homogeneous in the roster, so no rule that scales everything at
+     * once can make it bite. A rule that scales a single role is exactly what
+     * it takes, and `role_isolation` is that rule: rating a lone generator x2.5
+     * while leaving the reactors that fill it alone let the LP spend fewer
+     * tiles on generators than eight neighbours apiece can serve, and the
+     * shipped maps' bound sat ~5% above anything the board allows.
+     *
+     * Ten tiles by four so the split settles: on a small island the integer
+     * `nReact` lands short of eight reactors per generator by itself, and the
+     * cap has nothing to say.
+     */
+    const singularity = getAnomaly(
+      "singularity_isolation",
+    ) as RoleIsolationAnomaly;
+    const board = ["GGGGGGGGGG", "GGGGGGGGGG", "GGGGGGGGGG", "GGGGGGGGGG"];
+
+    /** Eight neighbours of 100-heat reactors, less what the coolers among them cost. */
+    const cap = 8 / (1 / 100 + 0.25 / 100);
+
+    it("stops the bound rising with a generator eight reactors cannot fill", () => {
+      /*
+       * Two rosters four tiers apart in generator, both rated past the cap:
+       * the bound has to answer the same number for each, because what a
+       * generator tile is worth is settled by its neighbours and not by its
+       * tier once the tier outruns them.
+       */
+      const small = basicRoster({ generatorValue: 400 });
+      const large = basicRoster({ generatorValue: 4000 });
+      const island = islandFor(board, small);
+
+      expect(400 * singularity.isolated).toBeGreaterThan(cap);
+      expectClose(
+        estimateTotalMaxPower([island], small, singularity),
+        estimateTotalMaxPower([island], large, singularity),
+      );
+    });
+
+    it("is the same ceiling whatever rated a generator past it", () => {
+      /*
+       * A generator authored at 4000 and one rated there by the anomaly are
+       * the same building to the cap, so the plain bound on the first is the
+       * anomaly's bound on the second. Which is also why the anomaly buys so
+       * much less than its x2.5 suggests: past eight reactors it buys nothing.
+       */
+      const island = islandFor(board, basicRoster());
+
+      expectClose(
+        estimateTotalMaxPower(
+          [island],
+          basicRoster({ generatorValue: 400 }),
+          singularity,
+        ),
+        boundFor(island, basicRoster({ generatorValue: 4000 })),
+      );
+    });
+
+    it("leaves a generator its neighbours can fill alone", () => {
+      // Under the cap the tier still decides, so the bound still rises with it
+      // — the ceiling is a ceiling, not a clamp on everything.
+      const island = islandFor(board, basicRoster());
+
+      expect(
+        boundFor(island, basicRoster({ generatorValue: 100 })),
+      ).toBeLessThan(boundFor(island, basicRoster({ generatorValue: 400 })));
+    });
+
+    it("is not beaten by a layout built to the cap's own shape", () => {
+      /*
+       * The arrangement the cap describes, built by hand: a generator alone in
+       * the middle of its own 3x3 — so it rates `isolated` — with its eight
+       * neighbours split between the reactors that fill it and the coolers
+       * that keep it online. Six reactors is the most this roster can cool
+       * (6 x 25 of waste against 2 x 100 of cooling), and 600 of intake is
+       * what the cap allows for.
+       */
+      const roster = basicRoster({ generatorValue: 400 });
+      const island = islandFor(["GGG", "GGG", "GGG"], roster);
+      const ctx = buildIslandContext(
+        island.grid,
+        island.buildable,
+        singularity,
+        island.waterAdjacent,
+      );
+      const placement = placeOn(ctx, ["RRR", "RGR", "CCR"], {
+        R: roster[0],
+        G: roster[1],
+        C: roster[2],
+      });
+
+      const { totalPower } = simulateIsland(placement, ctx);
+
+      // 600 of intake at 0.75, against a 640 ceiling the tier alone would have
+      // put at 1000.
+      expectClose(totalPower, 450);
+      expect(600).toBeLessThan(cap);
+      expect(totalPower).toBeLessThanOrEqual(
+        estimateTotalMaxPower([island], roster, singularity) + EPS,
+      );
+    });
+
+    it.each([
+      ["under role isolation", 400, singularity],
+      // The cap applies under the base rules too, and a partial roster is
+      // where it bites there: a strong generator behind a weak reactor is an
+      // ordinary way to be part-way through the catalogue. Nothing rates this
+      // one — 4000 of intake simply outruns what eight 100-heat reactors can
+      // deliver, which is the same ceiling by a different route.
+      ["on a plain roster the cap reaches", 4000, undefined],
+    ])(
+      "is never beaten by a random layout %s",
+      (_name, generatorValue, rules) => {
+        const roster = basicRoster({ generatorValue, dpValue: 120 });
+        const island = islandFor(["GGGG", "GGGG", "GGGG", "GGGG"], roster);
+        const bound = estimateTotalMaxPower([island], roster, rules);
+        const ctx = buildIslandContext(
+          island.grid,
+          island.buildable,
+          rules,
+          island.waterAdjacent,
+        );
+
+        const rng = new Rng(20260922);
+        const options: (EffectiveBuilding | null)[] = [...roster, null];
+        for (let attempt = 0; attempt < 400; attempt++) {
+          const placement: Placement = Array.from({ length: ctx.n }, () =>
+            rng.choice(options),
+          );
+
+          const { totalPower } = simulateIsland(placement, ctx);
+
+          expect(
+            totalPower,
+            `a layout beat the 'upper' bound on attempt ${attempt}`,
+          ).toBeLessThanOrEqual(bound + EPS);
+        }
+      },
+    );
+  });
+
+  describe("the room an island has to keep generators apart", () => {
+    /*
+     * The other half of the same argument, and the half a *generator-bound*
+     * roster runs into. `roleRatedRoster` rates every generator at the bonus,
+     * which a search free to spread them out can reach — until the roster is
+     * one where the generators are the short side. Then the split wants a
+     * third of the island to be generators, every one of them isolated, and
+     * isolated generators are pairwise non-adjacent by definition: an
+     * independent set in the 8-neighbour graph, which no board can make a
+     * third of itself.
+     *
+     * `isolationRoom` reads the ceiling off a 2x2 block partition — four
+     * mutually adjacent tiles, so one isolated generator between them, and no
+     * other generator at all in that block. Gale Hills at generator7 tier 2
+     * asked for 17.4 isolated generators where the island admits 15, and read
+     * 83% layout efficiency for layouts within 3% of the best anything finds.
+     */
+    const singularity = getAnomaly(
+      "singularity_isolation",
+    ) as RoleIsolationAnomaly;
+
+    /** The roster the bound used to run on: every generator at the bonus. */
+    function allIsolated(roster: EffectiveBuilding[]): EffectiveBuilding[] {
+      return roster.map((b) =>
+        b.type === "generator"
+          ? scaleEffectiveBuilding(b, singularity.isolated)
+          : b,
+      );
+    }
+
+    it("comes in under rating every generator at the bonus", () => {
+      /*
+       * Generators are the short side here — one isolated generator takes
+       * half a reactor's heat — so the split wants more of them than a 4x4
+       * has room to keep apart, and the bound has to say so.
+       */
+      const roster = basicRoster({ generatorValue: 40 });
+      const island = islandFor(["GGGG", "GGGG", "GGGG", "GGGG"], roster);
+
+      expect(estimateTotalMaxPower([island], roster, singularity)).toBeLessThan(
+        boundFor(island, allIsolated(roster)),
+      );
+    });
+
+    it("leaves a roster with room to spare exactly where it was", () => {
+      // A generator worth four reactors needs few tiles, and few is well
+      // inside what a board can keep apart — so the ceiling is not reached
+      // and the figure is the one it always was, bit for bit.
+      const roster = basicRoster({ generatorValue: 400 });
+      const island = islandFor(["GGGG", "GGGG", "GGGG", "GGGG"], roster);
+
+      expect(estimateTotalMaxPower([island], roster, singularity)).toBe(
+        boundFor(island, allIsolated(roster)),
+      );
+    });
+
+    it("counts the room a shape has, not the tiles it has", () => {
+      /*
+       * Two islands of eight tiles, and the bound reads them 50% apart. A 2x4
+       * block is four 2x2 blocks of two tiles each, and every tile in it is
+       * next to six others; a row of eight is four blocks too, but a
+       * generator on it only ever has two neighbours, so the row can keep
+       * three apart and still have tiles left for what feeds them. Tile count
+       * is what the rest of the LP runs on and it cannot tell these apart.
+       */
+      const roster = basicRoster({ generatorValue: 40 });
+      const block = islandFor(["GGGG", "GGGG"], roster);
+      const row = islandFor(["GGGGGGGG"], roster);
+
+      expect(block.tileCount).toBe(row.tileCount);
+      expect(estimateTotalMaxPower([row], roster, singularity)).toBeGreaterThan(
+        estimateTotalMaxPower([block], roster, singularity),
+      );
+    });
+
+    it("is not beaten by any layout a small board can hold", () => {
+      /*
+       * Exhaustive rather than sampled, which is what this rule needs: a
+       * random layout almost never isolates several generators at once, and
+       * an isolated one is worth 3.1x a crowded one. Every arrangement of
+       * four options over nine tiles is 262144 boards, and the bound has to
+       * stand over all of them.
+       */
+      const roster = basicRoster({ generatorValue: 40 });
+      const island = islandFor(["GGG", "GGG", "GGG"], roster);
+      const bound = estimateTotalMaxPower([island], roster, singularity);
+      const ctx = buildIslandContext(
+        island.grid,
+        island.buildable,
+        singularity,
+        island.waterAdjacent,
+      );
+
+      const options: (EffectiveBuilding | null)[] = [...roster, null];
+      const total = options.length ** ctx.n;
+      // The best layout is tracked and asserted once rather than per board:
+      // 262144 assertions cost seconds where the simulations cost
+      // milliseconds, and one is all the property needs.
+      let reached = 0;
+      let reachedBy = -1;
+      for (let code = 0; code < total; code++) {
+        let rest = code;
+        const placement: Placement = new Array(ctx.n);
+        for (let t = 0; t < ctx.n; t++) {
+          placement[t] = options[rest % options.length];
+          rest = (rest - (rest % options.length)) / options.length;
+        }
+
+        const { totalPower } = simulateIsland(placement, ctx);
+        if (totalPower > reached) {
+          reached = totalPower;
+          reachedBy = code;
+        }
+      }
+
+      expect(
+        reached,
+        `layout ${reachedBy} beat the 'upper' bound`,
+      ).toBeLessThanOrEqual(bound + EPS);
+      // And it is a bound worth having: something on this board reaches it.
+      expect(reached / bound).toBeGreaterThan(0.9);
+    });
   });
 
   it("is never beaten by a random layout under a shared cooling pool", () => {
@@ -846,9 +1118,9 @@ describe("the theoretical max-power bound", () => {
       // inland, one shore.
       const island = islandFor(["RRRRR", "RGGG.", "RRRRR"], roster);
 
-      expect(estimateTotalMaxPower([island], roster, tidal)).toBeLessThanOrEqual(
-        wholeIslandFigure(island, roster) + EPS,
-      );
+      expect(
+        estimateTotalMaxPower([island], roster, tidal),
+      ).toBeLessThanOrEqual(wholeIslandFigure(island, roster) + EPS);
     });
 
     it("tightens the shipped maps by about a quarter", async () => {

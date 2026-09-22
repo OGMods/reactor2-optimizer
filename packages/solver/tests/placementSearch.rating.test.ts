@@ -22,6 +22,10 @@ import { getAnomaly } from "../src/data/anomalies";
 import { buildIslandContext, type IslandContext } from "../src/solver/context";
 import { EPS } from "../src/solver/constants";
 import { makeGrid } from "../src/grid";
+import {
+  canCoolDirectProducer,
+  splitGridIntoIslands,
+} from "../src/solver/island";
 import { Pacer } from "../src/solver/pacer";
 import { downgradeOversized, internals } from "../src/solver/placementSearch";
 import { simulateIsland } from "../src/solver/simulate";
@@ -123,6 +127,88 @@ describe("a report row's two capacity figures", () => {
   });
 });
 
+describe("what to build, counted in the layout's units", () => {
+  /*
+   * The same mistake as the rest of this file, made by the one stage that
+   * decides *what* to build rather than where to put it. `targetCompositions`
+   * counts, and counting needs to know what a generator is worth — which under
+   * `role_isolation` is two numbers, x2.5 with no generator beside it and x0.8
+   * with. Which a tile gets is the layout's business, so neither is in the pool
+   * the stage draws on, and the count it produced was the one for a roster
+   * nobody is playing.
+   *
+   * Sizing at the bonus alone is not the fix either, and that half was measured
+   * apart: it asked Gale Hills at generator7 tier 2 for 18 generators on an
+   * island that can keep 15 apart, the arrangement came back with most of them
+   * touching, and the stage was rejected for the layout already in hand. The
+   * count has a ceiling the roster cannot see and the island can —
+   * `isolationRoom` — so the table is the one `estimateTotalMaxPower` runs on,
+   * imported rather than restated. With it the search reaches 60.7AC on that
+   * island where it plateaued at 58.8AC from 5s to 150s.
+   */
+  const { generatorCapacityTable, targetCompositions } = internals;
+  const roster = [reactor(100), generator(40), cooler(100)];
+  const [R, G, C] = roster;
+  /** Four 2x2 blocks, so four generators may hold the bonus at once. */
+  const board = ["GGGG", "GGGG", "GGGG", "GGGG"];
+
+  function islandAndContext(anomaly: ReturnType<typeof getAnomaly>) {
+    const island = splitGridIntoIslands(
+      makeGrid(board),
+      canCoolDirectProducer(roster),
+      anomaly,
+    )[0];
+    return {
+      island,
+      ctx: buildIslandContext(
+        island.grid,
+        island.buildable,
+        anomaly,
+        island.waterAdjacent,
+      ),
+    };
+  }
+
+  it("counts linearly under every rule that does not rate by isolation", () => {
+    // No table at all, so the stage runs the multiply it always ran: a rule
+    // that rates a tile or a whole role leaves the *count* alone.
+    for (const id of ["none", "cryo_nexus", "tidal_ascendancy"]) {
+      const { island, ctx } = islandAndContext(getAnomaly(id));
+      expect(generatorCapacityTable(island, ctx, G), id).toBeNull();
+    }
+  });
+
+  it("bends where the island runs out of room for the bonus", () => {
+    const { island, ctx } = islandAndContext(singularity);
+    const table = generatorCapacityTable(island, ctx, G)!;
+
+    // Four generators on a 4x4 can all stand clear of each other...
+    expect(table[4]).toBe(4 * 40 * 2.5);
+    // ...and a fifth cannot be put anywhere that is not beside one of them, so
+    // it costs one of the four its bonus rather than adding to them.
+    expect(table[5]).toBeLessThan(table[4]);
+  });
+
+  it("asks for fewer generators, and for more than they used to be worth", () => {
+    /*
+     * The stage's answer on this board: 7 generators where the plain count
+     * says 10, and a target worth 321 against 300 — three isolated and four
+     * crowded, which is a layout this island can hold, where ten at the bonus
+     * is not.
+     */
+    const { island, ctx } = islandAndContext(singularity);
+    const table = generatorCapacityTable(island, ctx, G);
+
+    const [rated] = targetCompositions(ctx.n, [R], [G], [C], table);
+    const [plain] = targetCompositions(ctx.n, [R], [G], [C], null);
+    const generators = (target: typeof rated) =>
+      target.composition.filter((b) => b.type === "generator").length;
+
+    expect(generators(rated)).toBeLessThan(generators(plain));
+    expect(rated.power).toBeGreaterThan(plain.power);
+  });
+});
+
 describe("the island's rating ceiling", () => {
   /*
    * What makes a plain-roster ceiling comparable to a rated layout's power. It is
@@ -136,7 +222,7 @@ describe("the island's rating ceiling", () => {
     for (const anomaly of [getAnomaly("none"), getAnomaly("cryo_nexus")]) {
       const ctx = buildIslandContext(makeGrid(["GGG"]), undefined, anomaly);
       // Cryo's 0.88 only ever costs cooling, so it cannot lift a ceiling.
-      expect(islandRatingCeiling(ctx, probes), anomaly.id).toBe(1);
+      expect(islandRatingCeiling(ctx, probes, false), anomaly.id).toBe(1);
     }
   });
 
@@ -145,6 +231,7 @@ describe("the island's rating ceiling", () => {
       islandRatingCeiling(
         buildIslandContext(makeGrid(MIXED_SHORE), undefined, tidal),
         probes,
+        false,
       ),
     ).toBeCloseTo(1.67, 9);
     // ...and one where none of it does: walled in, well away from the board.
@@ -156,6 +243,7 @@ describe("the island's rating ceiling", () => {
           tidal,
         ),
         probes,
+        false,
       ),
     ).toBe(1);
   });
@@ -164,7 +252,20 @@ describe("the island's rating ceiling", () => {
     // Which one a tile gets is a function of the layout rather than the island,
     // and a search free to keep generators apart rates every one at the bonus.
     const ctx = buildIslandContext(makeGrid(["GGG"]), undefined, singularity);
-    expect(islandRatingCeiling(ctx, probes)).toBeCloseTo(2.5, 9);
+    expect(islandRatingCeiling(ctx, probes, false)).toBeCloseTo(2.5, 9);
+  });
+
+  it("drops the isolation half once the target carries it", () => {
+    /*
+     * The ceiling exists to put a target scored from the plain roster into the
+     * units of a rated layout. A target sized through `generatorCapacities`
+     * already carries the isolated rating — and the room the island has for it
+     * — so counting it again here would scale a rated figure by the rating a
+     * second time, and the gate would wave through targets that cannot come
+     * close.
+     */
+    const ctx = buildIslandContext(makeGrid(["GGG"]), undefined, singularity);
+    expect(islandRatingCeiling(ctx, probes, true)).toBe(1);
   });
 
   it("is what lets the composition retarget run on a rated layout at all", () => {
@@ -196,8 +297,8 @@ describe("the island's rating ceiling", () => {
       ]),
       ctx,
     ).totalPower;
-    const top = targetCompositions(ctx.n, [R], [G], [C])[0];
-    const ceiling = islandRatingCeiling(ctx, roster);
+    const top = targetCompositions(ctx.n, [R], [G], [C], null)[0];
+    const ceiling = islandRatingCeiling(ctx, roster, false);
 
     expect(power).toBeCloseTo(200.25, 9);
     expect(top.power).toBeCloseTo(150, 9);

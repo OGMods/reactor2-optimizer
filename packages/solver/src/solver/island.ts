@@ -375,11 +375,13 @@ function rosterFigures(roster: EffectiveBuilding[]): RosterFigures {
  * (the earlier per-hub density estimate ignored cross-hub sharing of reactors
  * and coolers, which real layouts exploit, and was routinely beaten by 3-50%).
  *
- * The bound relaxes adjacency away entirely and asks only what the tile COUNTS
- * allow. For every split of the island into `nEngine` tiles (reactors +
- * generators), `nDp` direct producers and `nCool` coolers, any layout obeys
+ * The bound relaxes adjacency away almost entirely and asks what the tile
+ * COUNTS allow — the exception is `neighbourHeatCap`, which is the one place
+ * adjacency binds hard enough to matter. For every split of the island into
+ * `nEngine` tiles (reactors + generators), `nDp` direct producers and `nCool`
+ * coolers, any layout obeys
  *
- *     heat absorbed  H <= min(nReact * R_top, nGen * G_top)
+ *     heat absorbed  H <= min(nReact * R_top, nGen * min(G_top, neighbour cap))
  *     online DPs     D <= nDp
  *     total cooling  0.25 * H + wMin * D <= nCool * C_top
  *
@@ -396,6 +398,8 @@ function rosterFigures(roster: EffectiveBuilding[]): RosterFigures {
 function estimateIslandMaxPower(
   island: IslandSubGrid,
   roster: EffectiveBuilding[],
+  pooledCooling: boolean,
+  crowdedRoster: EffectiveBuilding[] | null = null,
 ): number {
   const buildableTiles = island.tileCount;
   if (buildableTiles <= 0) return 0.0;
@@ -404,11 +408,50 @@ function estimateIslandMaxPower(
   const { cVal, rVal, gVal, dpNet, hasCooler, hasDp } = figures;
   let { dpWaste, energyRatio, wasteRatio } = figures;
 
+  // The same roster at the *other* rating a role isolation offers, or null
+  // under every other rule. Both are real ratings a layout can carry, so the
+  // ratios a generator is bounded through are taken across the pair — the
+  // argument `estimateMixedIslandMaxPower` makes for its two classes, and for
+  // the same reason: a re-derived waste ratio is snapped, so the two are not
+  // bit-identical and a bound has to allow the greedier.
+  const crowdedFigures =
+    crowdedRoster === null ? null : rosterFigures(crowdedRoster);
+  if (crowdedFigures !== null) {
+    if (crowdedFigures.energyRatio > energyRatio)
+      energyRatio = crowdedFigures.energyRatio;
+    if (crowdedFigures.wasteRatio < wasteRatio)
+      wasteRatio = crowdedFigures.wasteRatio;
+  }
+
   if (!hasCooler || cVal <= 0) return 0.0;
   if (!hasDp) dpWaste = 0.0;
   if (energyRatio === -Infinity) energyRatio = GENERATOR_ENERGY_RATIO;
   if (wasteRatio === Infinity || wasteRatio <= 0)
     wasteRatio = GENERATOR_WASTE_RATIO;
+
+  // What a generator tile is worth to the bound: its tier, or the most its
+  // eight neighbours can push through it, whichever is less. Both ratings a
+  // role isolation offers are capped, and for the same reason — the bonus one
+  // most of all, since it is the one that outruns a neighbourhood.
+  const neighbourCap = neighbourHeatCap(
+    maxNeighbourTiles(buildableTiles),
+    rVal,
+    cVal,
+    wasteRatio,
+    pooledCooling,
+  );
+  const gTake = Math.min(gVal, neighbourCap);
+  const gCrowdedTake =
+    crowdedFigures === null
+      ? gTake
+      : Math.min(crowdedFigures.gVal, neighbourCap);
+  const capacities = generatorCapacities(
+    buildableTiles,
+    gTake,
+    gCrowdedTake < gTake
+      ? { gTake: gCrowdedTake, room: isolationRoom(island) }
+      : null,
+  );
 
   // The same 3-and-2 reasoning `minIslandTiles` owns — a reactor + generator +
   // cooler chain is 3 tiles, a direct producer + cooler pair is 2 — restated
@@ -419,7 +462,7 @@ function estimateIslandMaxPower(
   // bound goes on allowing a layout the decomposition no longer admits (which is
   // still a bound, so nothing would fail) — or worse, lower it there and the
   // bound becomes one a real layout beats.
-  const canHub = rVal > 0 && gVal > 0 && buildableTiles >= 3;
+  const canHub = rVal > 0 && gTake > 0 && buildableTiles >= 3;
   const canDp = hasDp && buildableTiles >= 2;
   if (!canHub && !canDp) return 0.0;
 
@@ -427,7 +470,7 @@ function estimateIslandMaxPower(
   const maxEngine = canHub ? buildableTiles : 0;
 
   for (let nEngine = 0; nEngine <= maxEngine; nEngine++) {
-    const heatCap = bestHeatForEngineTiles(nEngine, rVal, gVal);
+    const heatCap = bestHeatForEngineTiles(nEngine, rVal, capacities);
     // Engine tiles that can't form a reactor+generator pair.
     if (nEngine > 0 && heatCap <= 0.0) continue;
 
@@ -464,25 +507,189 @@ function estimateIslandMaxPower(
 }
 
 /**
+ * The most heat one generator tile can take in and still run, given how many
+ * neighbours it has to take it from.
+ *
+ * The rest of the bound relaxes adjacency away, and on the base rules that
+ * costs almost nothing. This is the one place it cannot: **heat crosses a tile
+ * boundary and nothing else**, so a generator's intake is the output of the
+ * reactors beside it, and the all-or-nothing cooling rule then says it only
+ * counts if the coolers beside it cover the waste that intake makes. Both
+ * claims are on the same eight tiles, so one generator absorbing `H` needs
+ * `H / rVal` of them as reactors and `wasteRatio * H / cVal` as coolers, and
+ * the two together cannot outrun the neighbourhood:
+ *
+ *     H <= maxNeighbours / (1 / rVal + wasteRatio / cVal)
+ *
+ * Every term is a *most* — an adjacent reactor may be feeding another
+ * generator, an adjacent cooler another producer — so the inequality only ever
+ * errs high, which is what a bound needs.
+ *
+ * It is homogeneous of degree 1 in the roster, exactly as the LP below is, so a
+ * rule that scales everything uniformly (a terrain bonus, a research) can never
+ * make it bite: the cap rises with the generator it caps. A rule that scales
+ * **one role** breaks that, and `role_isolation` is the one that does —
+ * Singularity Isolation rates a lone generator's intake x2.5 while leaving the
+ * reactors that fill it and the coolers that clear it alone, so the LP bought
+ * its extra heat by spending fewer tiles on generators than any arrangement of
+ * eight neighbours can serve. That left the shipped maps' bound 5% above
+ * anything the board allows, and the efficiency figure reading ~87% for layouts
+ * that were not 87% of anything.
+ *
+ * Under a shared cooling pool the cooler term is gone, because adjacency is:
+ * the pool reaches the whole island, so every neighbour may be a reactor.
+ */
+function neighbourHeatCap(
+  maxNeighbours: number,
+  rVal: number,
+  cVal: number,
+  wasteRatio: number,
+  pooledCooling: boolean,
+): number {
+  if (maxNeighbours <= 0 || rVal <= 0) return 0.0;
+  const perUnitHeat =
+    1 / rVal + (pooledCooling || cVal <= 0 ? 0 : wasteRatio / cVal);
+  return maxNeighbours / perUnitHeat;
+}
+
+/** How many tiles can touch one building here: eight, or the island if smaller. */
+function maxNeighbourTiles(buildableTiles: number): number {
+  return Math.min(CHEBYSHEV_DIRECTIONS.length, buildableTiles - 1);
+}
+
+/**
+ * How much of the `isolated` rating an island can actually carry.
+ *
+ * `role_isolation` rates a generator with no generator beside it far above one
+ * with, and the LP's optimum under Singularity asks for more of them than any
+ * board can hold: isolated generators are pairwise non-adjacent by definition,
+ * so they are an independent set in the 8-neighbour graph — and on a roster
+ * whose generators are the short side, the split wants a third of the island to
+ * be generators, every one of them isolated. Gale Hills at generator7 tier 2
+ * was asked for 17.4 where the island admits 15, and read 83% layout efficiency
+ * for layouts within 3% of the best anything finds.
+ *
+ * A maximum independent set is NP-hard in general, so this reads the geometry
+ * off a **2x2 block partition**, where two facts are free:
+ *
+ * - All four tiles of a 2x2 block are mutually adjacent, so a block holds at
+ *   most one isolated generator — `blocks` is therefore a ceiling on how many
+ *   there can be. On the shipped islands it lands within one or two of the
+ *   exact figure (16 against 15 on Gale Hills, 21 against 20 on Ash Bay).
+ * - A block that holds one holds **no other generator at all**, for the same
+ *   reason. So `freeTiles[k]` — the tiles left for crowded generators once `k`
+ *   are isolated — is the island less the `k` blocks they sit in, and putting
+ *   them in the *smallest* blocks is what leaves the most room.
+ *
+ * Both are read for each of the four alignments of the block grid and taken at
+ * their tightest, pointwise: every alignment states a true constraint, so the
+ * strongest of them is true as well. What the partition cannot see is
+ * adjacency *across* a block boundary, which is why a crowded generator in a
+ * free block is allowed here and often is not on the board — the bound errs
+ * high, as it must.
+ */
+export interface IsolationRoom {
+  /** Most generators on this island that can be rated `isolated` at once. */
+  readonly maxIsolated: number;
+  /** Tiles that may still hold a crowded generator, by isolated count. */
+  readonly freeTiles: Int32Array;
+}
+
+export function isolationRoom(island: IslandSubGrid): IsolationRoom {
+  const tiles = island.tileCount;
+  let maxIsolated = tiles;
+  const freeTiles = new Int32Array(tiles + 1).fill(tiles);
+
+  for (let ox = 0; ox <= 1; ox++) {
+    for (let oy = 0; oy <= 1; oy++) {
+      const sizes = new Map<number, number>();
+      for (let y = 0; y < island.height; y++) {
+        for (let x = 0; x < island.width; x++) {
+          if (island.buildable[y * island.width + x] !== 1) continue;
+          const block = (((y + oy) >> 1) << 16) + (((x + ox) >> 1) & 0xffff);
+          sizes.set(block, (sizes.get(block) ?? 0) + 1);
+        }
+      }
+
+      const ascending = [...sizes.values()].sort((a, b) => a - b);
+      if (ascending.length < maxIsolated) maxIsolated = ascending.length;
+
+      // Tiles the isolated generators' own blocks take with them, smallest
+      // blocks first — the arrangement that leaves the most room behind.
+      let consumed = 0;
+      for (let k = 0; k <= tiles; k++) {
+        if (k > 0 && k <= ascending.length) consumed += ascending[k - 1];
+        const free = k <= ascending.length ? tiles - consumed : 0;
+        if (free < freeTiles[k]) freeTiles[k] = free;
+      }
+    }
+  }
+
+  return { maxIsolated, freeTiles };
+}
+
+/**
+ * The most heat `nGen` generator tiles can absorb, by count.
+ *
+ * A table rather than a multiply, because under a rule that rates by isolation
+ * capacity is not linear in the tile count. `gTake` is what a generator is
+ * worth at the better of the two ratings and `crowded` what it is worth at the
+ * other; each generator taking the better rating spends a whole 2x2 block, so
+ * past a point one more of them costs more capacity than it brings, and which
+ * side of that point an island is on is what the scan settles.
+ *
+ * `crowded` is null under every other rule, and then this is the multiply it
+ * always was.
+ */
+export function generatorCapacities(
+  buildableTiles: number,
+  gTake: number,
+  crowded: { gTake: number; room: IsolationRoom } | null,
+): Float64Array {
+  const capacities = new Float64Array(buildableTiles + 1);
+  if (crowded === null) {
+    for (let nGen = 0; nGen <= buildableTiles; nGen++)
+      capacities[nGen] = nGen * gTake;
+    return capacities;
+  }
+
+  const { room } = crowded;
+  for (let nGen = 0; nGen <= buildableTiles; nGen++) {
+    let best = 0.0;
+    const mostIsolated = Math.min(nGen, room.maxIsolated);
+    for (let nIso = 0; nIso <= mostIsolated; nIso++) {
+      const rest = nGen - nIso;
+      if (rest > room.freeTiles[nIso]) continue;
+      const capacity = nIso * gTake + rest * crowded.gTake;
+      if (capacity > best) best = capacity;
+    }
+    capacities[nGen] = best;
+  }
+  return capacities;
+}
+
+/**
  * Most heat `nEngine` tiles of reactors + generators can hand over, cooling
- * ignored: max over nReact of `min(nReact * rVal, (nEngine - nReact) * gVal)`.
- * The min of two crossing lines peaks where they intersect, so only the two
- * integer counts around the crossing need checking.
+ * ignored: max over nReact of `min(nReact * rVal, capacities[nEngine - nReact])`.
+ *
+ * Every split is checked rather than the two either side of where the two lines
+ * cross. The crossing is only where the peak is while generator capacity is
+ * linear in the tile count, and under a rule that rates by isolation it is not
+ * — `generatorCapacities` bends once the island runs out of room to keep them
+ * apart. The scan is O(tiles) inside a loop that is already O(tiles), on a
+ * function called once per solve rather than inside the search.
  */
 function bestHeatForEngineTiles(
   nEngine: number,
   rVal: number,
-  gVal: number,
+  capacities: Float64Array,
 ): number {
-  if (nEngine < 2 || rVal <= 0 || gVal <= 0) return 0.0;
+  if (nEngine < 2 || rVal <= 0) return 0.0;
 
-  const crossing = (nEngine * gVal) / (rVal + gVal);
   let best = 0.0;
-  for (const nReact of [Math.floor(crossing), Math.floor(crossing) + 1]) {
-    if (nReact >= 1 && nReact <= nEngine - 1) {
-      const heat = Math.min(nReact * rVal, (nEngine - nReact) * gVal);
-      if (heat > best) best = heat;
-    }
+  for (let nReact = 1; nReact <= nEngine - 1; nReact++) {
+    const heat = Math.min(nReact * rVal, capacities[nEngine - nReact]);
+    if (heat > best) best = heat;
   }
   return best;
 }
@@ -570,6 +777,7 @@ function estimateMixedIslandMaxPower(
   shoreTiles: number,
   roster: EffectiveBuilding[],
   multiplier: number,
+  pooledCooling: boolean,
 ): number {
   if (buildableTiles <= 0) return 0.0;
   const inlandTiles = buildableTiles - shoreTiles;
@@ -587,6 +795,23 @@ function estimateMixedIslandMaxPower(
     wasteRatio = GENERATOR_WASTE_RATIO;
   const inlandDpWaste = inland.hasDp ? inland.dpWaste : 0.0;
   const shoreDpWaste = shore.hasDp ? shore.dpWaste : 0.0;
+
+  // One cap for both classes, on the strongest neighbour either class can
+  // offer: which class a tile falls in is a property of *that* tile, and an
+  // inland generator is perfectly free to have shore reactors and shore
+  // coolers around it. Taking the best of each is the only reading that stays
+  // a bound, and it costs nothing — the cap is homogeneous, so a terrain
+  // multiplier moves it and the generator it caps by the same factor and it
+  // goes on not binding. See `neighbourHeatCap`.
+  const gTake = neighbourHeatCap(
+    maxNeighbourTiles(buildableTiles),
+    Math.max(inland.rVal, shore.rVal),
+    Math.max(inland.cVal, shore.cVal),
+    wasteRatio,
+    pooledCooling,
+  );
+  inland.gVal = Math.min(inland.gVal, gTake);
+  shore.gVal = Math.min(shore.gVal, gTake);
 
   // The same 3-and-2 floors `estimateIslandMaxPower` states, for the same
   // reason, and they must not be allowed to disagree with it.
@@ -714,6 +939,37 @@ function roleRatedRoster(
 }
 
 /**
+ * The same roster at the **lesser** of a role isolation's two ratings, or null
+ * when there is no second rating to hold.
+ *
+ * `roleRatedRoster` above takes the better of the two, which is sound — a
+ * search free to keep generators apart rates every one of them at the bonus —
+ * and on a generator-bound roster it is also a layout no board can hold:
+ * `isolationRoom` is the ceiling on how many may be apart at once, and past it
+ * the rest are rated at this. The pair is what lets `estimateIslandMaxPower`
+ * bend its generator capacity at that ceiling instead of running the better
+ * rating out to the whole island.
+ *
+ * Only the generator role, deliberately. Generator capacity is the one figure
+ * the LP counts per tile, so it is the one a count limit can bend; a reactor,
+ * a cooler or a direct producer would each need their own, and none of them
+ * ships. Every role stays sound either way — the better rating alone is still
+ * an upper bound, which is exactly what the other three keep.
+ */
+function crowdedRatedRoster(
+  roster: EffectiveBuilding[],
+  anomaly?: AnomalyDefinition,
+): EffectiveBuilding[] | null {
+  if (anomaly?.rule !== "role_isolation" || anomaly.role !== "generator")
+    return null;
+
+  const factor = Math.min(anomaly.isolated, anomaly.crowded);
+  return roster.map((b) =>
+    b.type === anomaly.role ? scaleEffectiveBuilding(b, factor) : b,
+  );
+}
+
+/**
  * How many of the island's tiles a terrain bonus rates, or `null` when the
  * shore mask cannot say.
  *
@@ -802,9 +1058,20 @@ function islandMaxScale(
 function estimateIslandBound(
   island: IslandSubGrid,
   roster: EffectiveBuilding[],
+  crowdedRoster: EffectiveBuilding[] | null,
   anomaly?: AnomalyDefinition,
 ): number {
-  const plain = estimateIslandMaxPower(island, roster);
+  // The one rule `neighbourHeatCap` has to be told about: pooled cooling
+  // reaches the whole island, so a generator under it needs no cooler beside
+  // it and the cap is the reactor term alone.
+  const pooledCooling = anomaly?.rule === "shared_cooling";
+
+  const plain = estimateIslandMaxPower(
+    island,
+    roster,
+    pooledCooling,
+    crowdedRoster,
+  );
   const scale = islandMaxScale(island, anomaly);
   if (scale === 1) return plain;
 
@@ -814,11 +1081,20 @@ function estimateIslandBound(
     anomaly?.rule === "terrain_affinity"
       ? ratedTileCount(island, anomaly)
       : null;
+  // `plain` carries the cap on the unrated roster, and the cap is homogeneous,
+  // so scaling the whole figure scales the cap with it — the same reason the
+  // rest of the LP survives being scaled after the fact.
   if (rated === null || rated >= island.tileCount) return plain * scale;
 
   return Math.min(
     plain * scale,
-    estimateMixedIslandMaxPower(island.tileCount, rated, roster, scale),
+    estimateMixedIslandMaxPower(
+      island.tileCount,
+      rated,
+      roster,
+      scale,
+      pooledCooling,
+    ),
   );
 }
 
@@ -842,8 +1118,9 @@ export function estimateTotalMaxPower(
   anomaly?: AnomalyDefinition,
 ): number {
   const rated = roleRatedRoster(roster, anomaly);
+  const crowded = crowdedRatedRoster(roster, anomaly);
   let total = 0;
   for (const island of islands)
-    total += estimateIslandBound(island, rated, anomaly);
+    total += estimateIslandBound(island, rated, crowded, anomaly);
   return total;
 }

@@ -340,22 +340,30 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   neighbour is and no rating changes that — so there is no order to get right.
 
   **The bonus is on a capacity, which is why the rule is close to power-neutral
-  here.** x2.5 scales a generator's *intake*, and a generator fed by the
-  reactors it already had simply fills to 40% and produces exactly what it did
-  before; the bonus is worth something only alongside more adjacent reactor
+  at full unlocks.** x2.5 scales a generator's *intake*, and a generator fed by
+  the reactors it already had simply fills to 40% and produces exactly what it
+  did before; the bonus is worth something only alongside more adjacent reactor
   heat. The penalty is real and avoidable, so the search's job under this
   anomaly is mostly to keep generators apart. Map 3 at 15s: 1.4202e23 baseline,
   1.4075e23 under Singularity, against 1.2849e23 for the *baseline layout*
   re-rated — so the search recovers most of the penalty and finds no gain.
   Map 1 comes back identical to three significant figures either way.
 
-  Sizing the composition retarget from the isolated rating — the one stage that
-  can propose a different mix, and the mix is what the bonus would need — was
-  measured and changed nothing on three seeds. It is not in the tree: targets
-  are still scored from the plain roster, which is right, since which buildings
-  to use is a counting problem over the roster. Putting that stage's *gate* into
-  the layout's units is a different thing entirely and is below — it decides
-  whether the stage runs at all, not what it aims at.
+  **On a generator-bound roster it is not neutral, and the count is what the
+  search gets wrong.** `targetCompositions` is the one stage that decides *what*
+  to build, and how many generators are worth their tile depends on what a
+  generator is worth — two numbers under this rule, neither of them in the pool
+  the stage draws on (`rateRole` is the identity here, since which one a tile
+  gets is the layout's business). With everything unlocked but generator7 at
+  tier 2, Gale Hills plateaued at 58.8AC from 5s to **150s**. Sizing at the
+  bonus alone does not fix it — it asks for 18 generators where the island can
+  keep 15 apart, and the arrangement is rejected. `generatorCapacityTable`
+  builds `island.ts`'s own `generatorCapacities` over `isolationRoom` — the same
+  table the bound runs on, imported rather than restated — and the search
+  reaches **60.7AC**, what an unconstrained annealer finds given 30x the budget.
+  `islandRatingCeiling` takes `sizedByIsolation` so a target sized through the
+  table is not scaled by the rating a second time. Null under every other rule,
+  so the fixtures reproduce byte for byte.
 
   **A terrain bonus is resolved per tile, once, when the context is built.**
   Nothing about a layout can change which tiles qualify, so `terrainScales`
@@ -443,6 +451,31 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   estimate is positively homogeneous of degree 1 in the roster's figures, and
   that is still what the ceiling rests on where the mask cannot say which
   tiles it reaches.
+
+  **The one adjacency the bound does not relax away is `neighbourHeatCap`.**
+  Heat crosses a tile boundary and nothing else, so a generator's intake is
+  whatever the reactors beside it make, and the all-or-nothing cooling rule
+  wants coolers beside it too — out of the same eight tiles. So
+  `estimateIslandMaxPower` runs on `min(gVal, 8 / (1 / rVal + wasteRatio /
+  cVal))`, and the cooler term goes under a pool, where cooling reaches the
+  whole island. The cap is homogeneous like the LP, so a rule that scales
+  everything at once can never make it bite; a rule that scales **one role**
+  is what it takes, and Singularity's ×2.5 put the top generator at 181% of
+  it — the bound sat 5% above anything the board allows, reading 86.5-90.0%
+  efficiency for layouts that were not 86.5-90.0% of anything. It now reads
+  89.4-95.0%, and the base, Cryo and Tidal figures did not move a digit.
+
+  **The second half of that is `isolationRoom`: how many generators an island
+  can keep apart.** Isolated generators are pairwise non-adjacent, so they are
+  an independent set in the 8-neighbour graph — and on a roster where the
+  generators are the short side, the split wants a third of the island to be
+  one. Maximum independent set is NP-hard, so the ceiling is read off a 2x2
+  block partition: four mutually adjacent tiles, so one isolated generator
+  between them and no other generator in that block at all. `crowdedRatedRoster`
+  is the pair to `roleRatedRoster` that lets `generatorCapacities` bend there
+  rather than running the bonus out to the whole island. Only the generator
+  role — it is the one figure the LP counts per tile — and every other role
+  keeps the better rating alone, which stays sound and loose.
 
   **Both switches are exhaustive with no `default`**, so a fifth rule shape
   fails to typecheck rather than silently returning 1 or the plain roster —

@@ -79,12 +79,12 @@ genuinely new rule is a variant the solver fails to compile without handling.
 
 Unlike `BUILDING_TABLE` beside it, the table is **hand-owned**. The game does ship an
 `*AnomalySO` per anomaly and the external extractor dumps them alongside the roster — but all one
-of those records carries is an id, four localized terms and the multipliers. Which *rule* a
+of those records carries is an id, four localized terms and the multipliers. Which _rule_ a
 multiplier belongs to is not in the data at all: a shared cooling pool and a shoreline bonus are
 both "one double" to it. So the extract is what each entry's numbers and its quoted `description`
 are checked against, and the `rule` tag stays a human's reading of the text.
 
-What each rule *means*, though, is read off the game's own source — the three anomaly classes, the
+What each rule _means_, though, is read off the game's own source — the three anomaly classes, the
 getters that apply them, `CoolingNetwork.cs` and `GeneratorBuilding.TickGeneratingEnergy` — and
 `docs/game-logic.md` is where that lands. Two of those rules are not what the description text
 reads like and are worth naming here: off-board counts as water, and nothing in the runtime
@@ -101,8 +101,8 @@ Two things about the shapes are load-bearing:
   **Waste is derived, not scaled, and it is re-derived at every step.** A scaled building's
   waste is `snapToAuthoredPrecision(heat − energy)` recomputed from the pair that was just
   scaled, never the authored waste carried through the same multiply — the snap is a decimal
-  rounding applied to the *difference*, so the two disagree in the last digit and the fixtures
-  assert exactly. Only the two roles that *have* waste derive one; `heat − energy` over a cooler
+  rounding applied to the _difference_, so the two disagree in the last digit and the fixtures
+  assert exactly. Only the two roles that _have_ waste derive one; `heat − energy` over a cooler
   or a reactor would turn its whole output into waste.
 
   **Research and anomaly are two successive calls, research first, and that is not the same
@@ -111,12 +111,13 @@ Two things about the shapes are load-bearing:
   `(authored × research) × anomaly` — `scaleEffectiveBuilding` called once by
   `getEffectiveBuildings` as it resolves the roster, and again by whatever applies the anomaly.
   Generator7's first tier under ×5 then ×2.5 is 1.3875000000000001e22 against 1.3875e22 for
-  ×12.5, and the *order* is observable too: its fourth tier under ×5 then a ×1.67 shore is
+  ×12.5, and the _order_ is observable too: its fourth tier under ×5 then a ×1.67 shore is
   7.38975e22 where the reverse is 7.389749999999999e22. Each call re-derives the waste, so the
   last one wins. `tests/scaling.test.ts` pins both readings against the shipped catalogue rather
   than round numbers — every divergence here is in the last bit, where a test on tidy figures
   passes under either. Nothing above the roster would notice a reversal: the fixtures pass no
   anomaly, so they cannot see it either. See `docs/game-logic.md`.
+
 - **`role_isolation` depends on the layout, the other shapes do not.** A terrain bonus is fixed
   per tile and can be folded into the board; a generator's isolation multiplier changes every
   time the search moves a neighbour, so a placed building's figures have to be resolved per
@@ -139,7 +140,7 @@ per-tile one (see `shared_cooling` below), and a flag reading `tileScale === nul
 under a pool while every cooler was being scaled by 0.88. A stage taking the invitation would then
 have rated Cryo coolers at their unscaled figures and returned a layout over-cooled on paper that
 the game shuts down board-wide, with nothing failing anywhere. So it is false under a tile scale
-*and* under a role scale, and true under `baseline` and under `role_isolation` — which `rate` does
+_and_ under a role scale, and true under `baseline` and under `role_isolation` — which `rate` does
 not answer at all, since `simulateIsland` resolves it through `rateIsolated`.
 
 Two things about where it is applied:
@@ -153,7 +154,7 @@ Two things about where it is applied:
   snap is a string round-trip.
 - **`rate` is idempotent.** The search swaps buildings between tiles and restores them when a move
   is rejected, so it hands back objects it was already given; without this a restore would scale a
-  scaled building. `downgradeOversized` is the one place that also has to rate a *candidate* before
+  scaled building. `downgradeOversized` is the one place that also has to rate a _candidate_ before
   comparing it, since the ladder is the plain roster while the building it is replacing and the
   load it measured are both in the tile's units.
 
@@ -200,7 +201,7 @@ attempts that fail to beat the layout in hand.
 
 **A terrain bonus is a harder search, not just a bigger number.** A shore generator makes x1.67 the
 waste while an inland cooler still covers x1, so a cluster straddling the coast goes offline — a
-layout optimised under the base rules scores *lower* re-rated under Tidal, and the search has to
+layout optimised under the base rules scores _lower_ re-rated under Tidal, and the search has to
 keep each cluster on one side of the shoreline. On Magma Rift at 20s,
 `npm run solve -- --map 3 --anomaly tidal_ascendancy` returns 181AC against the baseline's 142AC.
 The seeding heuristics pick candidates by unscaled roster figures, and two ways of changing that
@@ -213,21 +214,46 @@ Don't re-attempt either without a wider measurement.
 `role_isolation` is resolved in `simulateIsland`, the one place a whole layout is in hand. It
 copies the placement into `ctx.ratedLayout` — held by the island, not allocated per call — re-rates
 the affected role's tiles and reads every figure through that. Two details are load-bearing: the
-neighbour scan reads the *original* placement, since the test is on what a neighbour **is** and no
+neighbour scan reads the _original_ placement, since the test is on what a neighbour **is** and no
 rating changes that, so there is no order to get right; and `ctx.rateIsolated` is a lookup over two
 variants per roster entry rather than a multiply, for the same snap-is-a-string-round-trip reason
 `rate` is.
 
-**This anomaly is close to power-neutral on the shipped maps, and that is the rule rather than the
-search.** x2.5 scales a generator's *intake*, which is a capacity: fed by the reactors it already
+**At full unlocks this anomaly is close to power-neutral, and that is the rule rather than the
+search.** x2.5 scales a generator's _intake_, which is a capacity: fed by the reactors it already
 had, a bonused generator fills to 40% and produces exactly what it did before. Only the penalty
 bites, and the penalty is avoidable by keeping generators apart. Map 3 at 15s comes back 1.4075e23
-against a 1.4202e23 baseline, where the baseline layout *re-rated* under the anomaly is 1.2849e23 —
-so the search recovers most of the penalty and there is no gain to find. Sizing the composition
-retarget from the isolated rating, which is the only stage that can propose the different mix the
-bonus would need, was measured and changed nothing. That is a different thing from putting the
-stage's *gate* into the layout's units, which is above and is not a tuning choice: targets are
-still scored from the plain roster, and nothing in the tree retargets toward the bonus.
+against a 1.4202e23 baseline, where the baseline layout _re-rated_ under the anomaly is 1.2849e23 —
+so the search recovers most of the penalty and there is no gain to find.
+
+**On a roster where the generators are the short side it is not neutral at all, and the search had
+to be told how to count.** `targetCompositions` is the one stage that decides _what_ to build, and
+it counts: how many generators are worth their tile depends on what a generator is worth, which
+under this rule is two numbers rather than one. Neither is in the pool the stage draws on —
+`rateRole` is the identity here, because which of the two a tile gets is decided by the layout —
+so the count it produced was the one for a roster nobody is playing. With everything unlocked but
+generator7 at tier 2, Gale Hills plateaued at 58.8AC from 5s to **150s**: the walk found the
+penalty-avoiding half and never the different mix, because no single tile change reaches it and the
+one stage that proposes mixes was proposing the base-rules one.
+
+**Sizing at the bonus alone does not fix it, and that half was measured apart.** It asks for 18
+generators on an island that can keep 15 apart; `arrangeComposition` spreads them as far as they go
+and most still touch, so the target is rejected for the layout already in hand and the stage again
+does nothing. The count has a ceiling the roster cannot see and the island can, and it is the one
+the bound already computes — `generatorCapacityTable` builds `island.ts`'s own `generatorCapacities`
+over `isolationRoom`, imported rather than restated, so there is one reading of what a board has
+room for. Then the target asks for 15, the arrangement comes back with 14 of them isolated, and the
+walk finishes the job at **60.7AC** — which is what an unconstrained annealer reaches given 30x the
+budget, and 4.6% above the mean of the old plateau over ten runs.
+
+The gain is where the ceiling binds. On the 107- and 117-tile islands the room is ~38 and the split
+wants ~38, so nothing bends and ten runs each way sit inside the ±0.8% that two identical code
+paths differ by at these budgets; at full unlocks the split wants 11% of the island and every board
+has room. `islandRatingCeiling` takes a `sizedByIsolation` flag for the same reason the table
+exists: a target sized through it already carries the isolated rating, and scaling it by the rating
+again would wave through targets that cannot come close. Under every rule that does not rate by
+isolation the table is null and the stage runs the multiply it always ran, so the fixtures — which
+pass no anomaly — reproduce byte for byte.
 
 **The bound takes the anomaly too, and every rule of it.** `estimateTotalMaxPower` rates each
 island under the rule in force (`estimateIslandBound`), because a bound computed on the plain
@@ -239,7 +265,7 @@ before the terrain case existed, and a generator-bound roster on a 3×3 under Si
 **A rule that scales a whole role goes into the roster; one that scales a tile scales the result.**
 `roleRatedRoster` rates the roster's coolers ×0.88 under a pool and its generators
 ×max(isolated, crowded) under a role isolation, and the LP runs on that roster — where the bound is
-exact in the rule. It used to scale the LP's *result* by the largest factor instead, which under
+exact in the rule. It used to scale the LP's _result_ by the largest factor instead, which under
 Singularity rated reactors and coolers ×2.5 as well: 2.3× the tight bound on map 1, so a
 near-optimal layout read as 40% layout efficiency, and on a generator-bound roster (where the
 bonus genuinely pays, +28% over the base rules on map 3) 51% for a layout at 97.5% of the tight
@@ -248,9 +274,73 @@ layout rather than of the island, and a search free to keep generators apart rat
 them at the bonus. The pool's ×0.88 lowers the bound only where cooling binds — a roster bound by
 its direct producers reads the same either way.
 
+**Which is sound but not tight, and the gap is adjacency.** Rating every generator ×2.5 let the LP
+buy heat by spending _fewer_ tiles on generators, and past a point no board can deliver it: heat
+crosses a tile boundary and nothing else, so a generator's intake is the output of the reactors
+beside it, and the all-or-nothing cooling rule wants coolers beside it too — out of the same eight
+tiles. One generator absorbing `H` needs `H / rVal` of them as reactors and `wasteRatio · H / cVal`
+as coolers, so `neighbourHeatCap` is `8 / (1 / rVal + wasteRatio / cVal)` and `estimateIslandMaxPower`
+runs on `min(gVal, cap)`. Every term in it is a _most_ — an adjacent reactor may be feeding another
+generator — so it only ever errs high. On an island of fewer than nine tiles the count is the island
+rather than eight.
+
+It is the one piece of adjacency the bound does not relax away, and it is here because it is the one
+that binds. It is homogeneous of degree 1 in the roster exactly as the LP is, so a rule that scales
+everything at once — a terrain bonus, a research — moves the cap and the generator it caps by the
+same factor and it goes on not binding; at full unlocks the top generator sits at 72% of it under
+the base rules. A rule that scales a _single role_ is what it takes, and Singularity is that rule:
+×2.5 puts the top generator at 181% of the cap. The shipped maps' bound was 5% above anything the
+board allows, reading 86.5–90.0% layout efficiency for layouts that were not 86.5–90.0% of
+anything; it now reads 89.4–95.0%, against 93.5–98.5% under the base rules. Nothing else moved —
+the base, Cryo and Tidal figures on all eight maps are unchanged to the last digit. Under a pool the
+cooler term goes, because adjacency does: the pool reaches the whole island, so every neighbour may
+be a reactor. The two-class bound takes one cap on the _best_ of each class, since which class a
+tile falls in is a property of that tile and an inland generator may have shore reactors around it.
+
+**The second half of the same argument is how many generators an island can keep apart, and a
+generator-bound roster is what runs into it.** Rating every generator at the bonus is what a search
+free to spread them out can reach — but isolated generators are pairwise non-adjacent by
+definition, so they are an independent set in the 8-neighbour graph, and when the generators are
+the short side the split wants a third of the island to be one. Gale Hills at generator7 tier 2 was
+asked for 17.4 where the island admits 15, and read 83% layout efficiency for layouts within 3% of
+the best anything finds.
+
+A maximum independent set is NP-hard — an exact branch and bound takes 5.4M nodes on a 49-tile
+island and does not finish on a 77-tile one — so `isolationRoom` reads the geometry off a **2×2
+block partition**, where two facts are free. All four tiles of a block are mutually adjacent, so a
+block holds at most one isolated generator (16 against the exact 15 on Gale Hills, 21 against 20 on
+Ash Bay); and a block holding one holds **no other generator at all**, which is what bounds the
+crowded ones — the island less the blocks the isolated generators sit in, and putting them in the
+_smallest_ blocks leaves the most room. Both are read at each of the four alignments and taken at
+their tightest, pointwise: every alignment states a true constraint, so the strongest of them is
+true as well. What a partition cannot see is adjacency _across_ a block boundary, so a crowded
+generator in a free block is allowed here and often is not on the board — the bound errs high, as
+it must.
+
+`crowdedRatedRoster` is the pair to `roleRatedRoster` that makes this expressible: the same roster
+at the **lesser** of the two ratings, so `generatorCapacities` can bend at the ceiling instead of
+running the bonus out to the whole island. Both are real ratings a layout can carry, so the
+generator ratios are taken across the pair — the argument the two-class terrain bound makes, for
+the same snapped-waste reason. Generator capacity is the one figure the LP counts per tile, so it
+is the one a count limit can bend; a reactor, cooler or direct-producer isolation would each need
+their own and none ships, so those keep the better rating alone, which is sound and loose.
+`bestHeatForEngineTiles` scans every reactor/generator split rather than the two either side of the
+crossing, because with the bend the peak is no longer there — O(tiles) inside a loop already
+O(tiles), on a function called once per solve.
+
+At generator7 tier 2 with everything else full this moves five of the eight maps (Gale Hills
+−4.8%, Magma Rift −3.5%) and the full-unlock figures not at all, since there the split wants 11% of
+the island as generators and every board has room for that.
+
+The residue is geometry the LP cannot see, and it is not small on a generator-bound roster: the
+bound relaxes reactor-to-generator and cooler-to-producer adjacency away, and under Singularity the
+layout is _made of_ that adjacency. Gale Hills at generator7 tier 2 reads 86% where the base rules
+read 100% on the same board. At full unlocks the ×2.5 buys a generator capacity the layouts were
+never short of, and the search comes back within about 1% of the base rules' power.
+
 `islandMaxScale` keeps the per-tile half as a **ceiling**: the multiplier under a terrain rule that
 reaches any tile of the island, and 1 for the role-shaped rules, whose factor is already in the
-roster. Where the shore mask can say *which* tiles it reaches, `estimateIslandBound` goes on to the
+roster. Where the shore mask can say _which_ tiles it reaches, `estimateIslandBound` goes on to the
 two-class bound below; anywhere else it scales the plain LP by the ceiling. The mask can decide
 only a list that is exactly `["water"]` (`ratedTileCount`), since it is the one thing that knows
 off-board counts as water, while `terrainScales` tests rock and tree against the grid — so a
@@ -271,15 +361,15 @@ feed an inland generator and an inland cooler may cover a shore generator's wast
 bound relaxes adjacency away, and any layout that respects adjacency is feasible in the relaxation
 with an objective no larger. What stays integer is chosen for cost. The engine — how many tiles of
 each class, and the reactor/generator split within each — is enumerated exactly; the tiles each
-class has left go to direct producers or coolers *fractionally*, which makes the remainder one
+class has left go to direct producers or coolers _fractionally_, which makes the remainder one
 fractional knapsack over three items (heat, inland producers, shore producers), filled by power per
 unit of cooling. Enumerating that split integer too was measured at 250ms on the largest island
 against under 10ms for this, and the two agree to the last bit on every shipped map: at full
 unlocks no direct producer competes with an engine, so the relaxed split never moves. The generator
-ratios are taken across *both* rosters — a shore generator's re-derived waste ratio is not
+ratios are taken across _both_ rosters — a shore generator's re-derived waste ratio is not
 bit-identical to the inland one, and a bound has to allow the greedier of each.
 
-Three things about how it is joined on. An island with no inland tile *is* one class, so it is
+Three things about how it is joined on. An island with no inland tile _is_ one class, so it is
 spelled as the plain LP at the multiplier — the figure it always was, bit for bit — and one with no
 shore tile is the plain LP. A mixed island takes the **smaller** of the two-class figure and the
 whole-island one: both are bounds, so the minimum is, and it is what keeps an island of two or
@@ -289,10 +379,10 @@ at least the plain one. At full unlocks it sits at 0.758-0.771 of the whole-isla
 eight maps, and `--map 3 --anomaly tidal_ascendancy --time 15` reads 93% of it against 72% before;
 `island.test.ts` pins that ratio, the bound property on a mixed board, and both ends.
 
-Scaling the estimate's *result* is sound because `estimateIslandMaxPower` is positively homogeneous
+Scaling the estimate's _result_ is sound because `estimateIslandMaxPower` is positively homogeneous
 of degree 1 in the roster's figures: multiply every one of them by `k` and each of `hFirst`,
 `dRest`, `dFirst` and `hRest` scales by `k` while every ratio in it is invariant. That is also what
-lets a rule scaling only *some* buildings be answered by scaling only those entries — any layout
+lets a rule scaling only _some_ buildings be answered by scaling only those entries — any layout
 feasible under the rule is feasible in that roster with an objective no larger. The ceiling is loose
 where only part of an island qualifies and the mask cannot say which part, which is the right way
 to be wrong: a bound that can be beaten is worthless, one that is generous only makes the
@@ -323,7 +413,7 @@ scalar budget, which is a different and much larger machine.
 **The pool needs no second code path through the rest of the simulation.** `simulateIsland`
 replaces the cooling distribution with the game's `DistributeCryoArea`: total the coolers, total
 what the sources are owed, and serve everyone the same fraction. Because the fraction is common, a
-short pool leaves *every* source under its waste at once — so the ordinary per-producer online test
+short pool leaves _every_ source under its waste at once — so the ordinary per-producer online test
 below it produces the board-wide all-or-nothing the rule describes, with no board-level flag
 anywhere. Each cooler is reported its share of what the pool actually absorbed, which is the game's
 own reporting rule.
@@ -339,7 +429,7 @@ since only one anomaly runs at a time.
 composition target and the polish candidates all count a cooler at what the board will hold. They
 counted the plain figure once, and under a pool that is exactly ×0.88 too little cooling: every
 target the retarget proposed on maps 3 and 7 came out 8–14% short of the waste it planned to make,
-which under a pool is a board that is offline *entirely* — so the stage never produced a layout that
+which under a pool is a board that is offline _entirely_ — so the stage never produced a layout that
 could beat the one in hand, silently. With the pools rated, map 7 at 15s over three seeds went
 288/281/288AC to 294/294/294AC and map 3 144/144/144AC to 145/145/144AC. `rate` is idempotent, so a
 pool entry already carrying its role's rating is handed straight back at the write; under every
@@ -391,7 +481,7 @@ the board's **real terrain** rather than a flattened "not mine" marker, plus a `
 
 All three are for terrain rules. A rule can care what a building stands next to, a rock is not a
 lake, and a building on the island's own edge has neighbours outside the component's bare box.
-Real terrain in a padded window means a *neighbouring* island's grass falls inside it, so **which
+Real terrain in a padded window means a _neighbouring_ island's grass falls inside it, so **which
 tiles are this island's is the mask, never `type === "grass"`** — `buildIslandContext` takes it
 and `tileCount` is the count that goes with it.
 
@@ -463,7 +553,7 @@ the layout away.
 
 **The two capacity figures are `baseValue` and `ratedValue`, and confusing them is silent.**
 `baseValue` is the **authored** tier value and never moves, because a placement's tier is resolved
-back out of it by matching the catalogue — report a scaled one and it matches a *higher* tier and
+back out of it by matching the catalogue — report a scaled one and it matches a _higher_ tier and
 gets scaled a second time, which is wrong in the readout's ceilings, the `Lv.` chip and the tier
 table of every share code at once. `ratedValue` is what the tile was actually rated for, which is
 the figure every other number in the row was measured against; under a terrain bonus or a role

@@ -498,7 +498,7 @@ describe("target compositions", () => {
       cooler(25),
     ]);
 
-    const targets = targetCompositions(3, reactors, generators, coolers);
+    const targets = targetCompositions(3, reactors, generators, coolers, null);
 
     expect(targets.length).toBeGreaterThan(0);
     expect(countById(targets[0].composition)).toEqual({
@@ -520,7 +520,7 @@ describe("target compositions", () => {
       cooler(5),
     ]);
 
-    const [best] = targetCompositions(10, reactors, generators, coolers);
+    const [best] = targetCompositions(10, reactors, generators, coolers, null);
     const counts = countById(best.composition);
 
     expect(best.composition.length, "every tile is allocated").toBe(10);
@@ -554,7 +554,7 @@ describe("target compositions", () => {
       cooler(2.35e21, "cooler7"),
     ]);
 
-    const [best] = targetCompositions(7, reactors, generators, coolers);
+    const [best] = targetCompositions(7, reactors, generators, coolers, null);
 
     expect(
       best.power,
@@ -576,6 +576,7 @@ describe("target compositions", () => {
         reactors,
         generators,
         coolers,
+        null,
       )) {
         expect(composition.length).toBe(tileCount);
 
@@ -613,9 +614,13 @@ describe("target compositions", () => {
       cooler(25),
     ]);
 
-    const ceilings = targetCompositions(12, reactors, generators, coolers).map(
-      (c) => c.power,
-    );
+    const ceilings = targetCompositions(
+      12,
+      reactors,
+      generators,
+      coolers,
+      null,
+    ).map((c) => c.power);
 
     expect(ceilings).toEqual([...ceilings].sort((a, b) => b - a));
   });
@@ -627,8 +632,10 @@ describe("target compositions", () => {
       cooler(25),
     ]);
 
-    expect(targetCompositions(2, reactors, generators, coolers)).toEqual([]);
-    expect(targetCompositions(3, [], generators, coolers)).toEqual([]);
+    expect(targetCompositions(2, reactors, generators, coolers, null)).toEqual(
+      [],
+    );
+    expect(targetCompositions(3, [], generators, coolers, null)).toEqual([]);
   });
 
   it("is never beaten by a real layout", async () => {
@@ -641,8 +648,13 @@ describe("target compositions", () => {
     const { reactors, generators, coolers } = sortedPools(roster);
     const tiles = buildIslandContext(island.grid).n;
 
-    const ceiling = targetCompositions(tiles, reactors, generators, coolers)[0]
-      .power;
+    const ceiling = targetCompositions(
+      tiles,
+      reactors,
+      generators,
+      coolers,
+      null,
+    )[0].power;
     const { powerOutput } = await solveIsland(island, roster, 0.5);
 
     expect(
