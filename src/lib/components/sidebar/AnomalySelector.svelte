@@ -36,8 +36,12 @@
    * silently retarget the *next* one and leave the layout landing on screen
    * searched under a rule the player has just moved off.
    *
-   * Disabled rather than hidden, against the project's usual rule: this is
-   * Setup's own choice, not a control the current mode makes irrelevant.
+   * A backstop rather than the rule, since Setup is not on screen during a
+   * run at all — see `uiState.setupHidden`. What it covers is the frame
+   * between the run starting and the panel being unmounted, and it stays
+   * disabled rather than hidden for the case the panel-level rule does not
+   * make: this is Setup's own choice, not a control the current mode makes
+   * irrelevant.
    */
   let disabled = $derived(solverState.isOptimizing);
 </script>

@@ -285,7 +285,14 @@
     ></div>
   {/if}
 
-  {#if !readOnly && !uiState.uiHidden}
+  <!--
+    Setup is absent for the length of a run as well — see
+    `uiState.setupHidden`. Unmounted rather than folded: folding is a
+    preference the user owns (`sidebarCollapsed`, persisted), so a run would
+    hand them back a panel that had shut itself while they were watching the
+    board.
+  -->
+  {#if !readOnly && !uiState.uiHidden && !uiState.setupHidden}
     <ConfigSidebar />
   {/if}
 

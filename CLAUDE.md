@@ -59,7 +59,8 @@ assume them.
 
 - **Hidden, not disabled.** A control that cannot act in the current mode is not
   rendered — the grid steppers on a shipped island, the terrain brushes over the
-  solver's board, `PlacementViewToggle` with no solve, the variants row during a
+  solver's board, the whole of Setup while a run is in flight,
+  `PlacementViewToggle` with no solve or during one, the variants row during a
   run. Screen space on a phone is scarce and a row of inert buttons explains
   nothing. The one exception is `BoardActions`' Undo/Redo, which are _disabled_:
   they must stay findable before there is anything to undo, and a control that
@@ -1762,6 +1763,78 @@ dismiss the panel. Not a matter of taste: at the sheet's `peek` detent the HUD i
 lifted above the sheet, so dismissing it drops the row by 176px between
 `pointerdown` and `pointerup` — the button slides out from under the finger and
 the click never lands.
+
+### Setup is gone while a run is in flight
+
+`uiState.setupHidden` takes the panel off screen for the length of a run, and
+both ways back into it with it — the HUD's Setup button and the docked panel's
+own handle. Everything on its three tabs is an input to *that* run (the island
+it is solving, the roster it was planned with, the timeline it is rating
+against) and a run reads every one of them once, at launch, so a press there
+either cannot reach the search at all or, on the island list, stops it outright.
+Hidden rather than disabled, which also replaces a half-measure:
+`SolveModeSelector` and `AnomalySelector` already greyed themselves out while
+the island list and the roster beside them stayed live, so the panel was part
+working and part dead with nothing saying which was which. Both keep their
+`disabled` as a backstop for the frame between the run starting and the panel
+unmounting. Stop is untouched, because it is in the HUD.
+
+Three things follow, and each is something that would otherwise be left behind:
+
+- **`ConfigSidebar` holds `uiState.sidebarWidth` for the run, and clears it
+  otherwise.** Its teardown is the same call `HudToolbar` makes for
+  `hudHeight` — a width left behind reserves canvas, and the HUD's own
+  `padding-left` tracks the same edge — and that is right for a preview or a
+  hidden interface, which are states the user is *in*. A run is not: Setup is
+  away for seconds and comes back on its own, so handing the space over means
+  taking it again a moment later, with the action pill gliding 190px out from
+  under the cursor that pressed RUN and back when it lands. Held, the whole
+  scene stays still and all the run changes is that the panel is not drawn
+  over it. The effect also skips the `0` that `bind:clientWidth` reports
+  before it has measured, which would otherwise drop the inset for one paint
+  every time Setup came back — and `padding-left` transitions, so one paint is
+  a visible glide out and straight back.
+- **The sheet is shut on the way in**, in `#beginSolve`, the one route both Run
+  and the re-run dialog take to `runOptimizer`. Same reason `setUiHidden` shuts
+  it: a detent left open describes a panel that is no longer rendered, and on a
+  compact viewport it takes the whole HUD down with it — which is where STOP is.
+  In practice it is already closed, since the HUD unmounts while the sheet is
+  open and Run is in the HUD; the case it covers is a sheet opened on a phone
+  and then run from a window that has since been widened.
+- **`dismissConfigPanel` sits the run out.** `collapseSidebar` persists, so a
+  press on the view toggle mid-run would otherwise hand the user back a panel
+  that had shut itself.
+
+**The Edit/Solver switch goes with it**, on `uiState.canSwitchBoards` — which
+is `hasSolverPlacements` and no run in flight, and is what both the toggle and
+the compact line it sits on render against. `showingSolver` keeps reading
+`hasSolverPlacements` alone, since which board is drawn is a different question
+from whether the switch is offered. Three reasons, all pointing the same way:
+the readout is pinned to the run for the duration (`statsPanel`), so switching
+to Edit leaves the card reporting the search while the canvas draws the user's
+board — the one disagreement `visiblePlacements` exists to make impossible; the
+switch to the solver's board is an edge on the run *starting* (`PixiCanvas`), so
+a layout finishing while the user is on their own board lands where nobody is
+looking; and on a first-ever run the pill would appear partway through anyway,
+the moment the first progress report gives it something to switch to, which on
+a phone is a line arriving in the HUD unasked. So mid-run on a compact viewport
+the whole stack is the action pill alone.
+
+**Hidden there does not mean unmounted, and the difference is the wide-screen
+row.** On a phone the toggle has a line of its own and the pill below is pinned
+to the band's right edge, so the line is simply not rendered. On a wide screen
+the toggle shares one centred row with the action pill, and dropping out of the
+flow re-centres RUN/STOP under the cursor that just pressed it — so it renders
+on `hasSolverPlacements`, keeps its box, and takes `visibility: hidden`, which
+is the one declaration that gives up paint, hit testing and the accessibility
+tree at once while leaving the layout alone. That is why the `.view-row` gate
+and the toggle's own are deliberately not the same condition.
+
+On a compact viewport `.hud-top` is `justify-content: flex-end`, which is what
+keeps the run pill still as Setup leaves. Setup's `margin-right: auto` takes the
+free space first while it is there, so the property does nothing; with Setup
+gone it is the whole of the rule, and STOP stays where the finger that pressed
+RUN put it instead of centring itself across the row.
 
 ### The HUD dismisses the config panel
 

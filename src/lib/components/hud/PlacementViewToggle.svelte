@@ -6,10 +6,18 @@
    * Switches the canvas between the two boards that can exist at once: the one
    * the user built by hand, and the one the last solve produced.
    *
-   * It renders only while there is a solve to switch to — with none there is
+   * It renders only while there is a solve to switch to: with none there is
    * one board, and a toggle with a dead half is worse than no toggle. That is
-   * also why the solver half is never disabled here: the component is simply
-   * absent instead.
+   * also why neither half is ever disabled here — the component is absent
+   * instead.
+   *
+   * A run in flight is the one case it goes away without going: the board on
+   * screen is the run's, which is what pressing RUN asked for, so the pill is
+   * hidden — but on a wide screen it shares a centred row with the action
+   * pill, and dropping out of the flow there re-centres RUN/STOP under the
+   * cursor that just pressed it. So it keeps its box and gives up everything
+   * else. On a compact viewport the line it sits on is not rendered at all
+   * during a run (`HudToolbar`), so this never costs a phone a row.
    *
    * Two words and no figures: the card above already carries the power of
    * whichever board is showing, and repeating both here made a switch read
@@ -25,6 +33,7 @@
 {#if uiState.hasSolverPlacements}
   <div
     class="view-toggle"
+    class:held={!uiState.canSwitchBoards}
     role="group"
     aria-label="Which layout to show"
   >
@@ -62,6 +71,17 @@
    * Deliberately does not reuse `.tool-btn`; those are 44px-tall mode
    * switches, and a full second row of them would eat the map on a phone.
    */
+  /*
+   * Invisible and out of reach while a run is in flight, but still taking up
+   * its place in the row — see the note at the top. `visibility: hidden` is
+   * the whole of it: it takes the pill out of the accessibility tree and out
+   * of hit testing while leaving the box, which is exactly the three things
+   * wanted, so there is no `inert` or `aria-hidden` beside it to keep in step.
+   */
+  .view-toggle.held {
+    visibility: hidden;
+  }
+
   .view-toggle {
     display: flex;
     align-items: stretch;

@@ -36,8 +36,35 @@
   let sidebarWidth = $state(0);
 
   $effect(() => {
-    uiState.sidebarWidth =
-      compact || uiState.sidebarCollapsed ? 0 : sidebarWidth;
+    if (compact || uiState.sidebarCollapsed) {
+      uiState.sidebarWidth = 0;
+    } else if (sidebarWidth > 0) {
+      /*
+       * A `0` out of `bind:clientWidth` means "not measured yet", not "no
+       * panel" — the binding lands a frame after mount. Publishing it would
+       * drop the inset to nothing for one paint every time Setup comes back
+       * from a run, and `.hud`'s `padding-left` transitions, so the whole tool
+       * stack would glide out and straight back again.
+       */
+      uiState.sidebarWidth = sidebarWidth;
+    }
+    /*
+     * Cleared once this component is gone, the same call `HudToolbar` makes
+     * for `hudHeight`: a width left behind reserves canvas — and the HUD's own
+     * `padding-left`, which tracks the same edge — for a column that is not on
+     * screen. That is the right answer for a preview or a hidden interface,
+     * which are states the user is *in*.
+     *
+     * A run is not one of those. Setup is away for a few seconds and comes
+     * back on its own, so handing the space to the board and the HUD means
+     * taking it again a moment later, with the action pill gliding 190px out
+     * from under the cursor that pressed RUN and back once it lands. The inset
+     * is held for the duration instead, which is what keeps the whole scene
+     * still; all the run changes is that the panel is not drawn over it.
+     */
+    return () => {
+      if (!uiState.setupHidden) uiState.sidebarWidth = 0;
+    };
   });
 
   /**
