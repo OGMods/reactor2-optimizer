@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      The game's launcher icon. SVG first for crispness; the 32px PNG is
+      the fallback for browsers that will not take an SVG favicon, and the
+      apple-touch icon is what iOS uses for Add to Home Screen.
+
+      These two are the only rasters the app still ships as PNG, and they
+      stay that way on purpose: both exist *because* something refused the
+      format ahead of them, so paying for that fallback in a newer format
+      than the one it is standing in for defeats the point. Safari has never
+      taken a WebP favicon, and iOS takes only PNG for Add to Home Screen --
+      so a WebP here is a blank tab icon and a blank home-screen tile on the
+      exact clients these are for. They are 912B and 10KB, and neither is on
+      the path to the first frame.
+    -->
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <!--
+      viewport-fit=cover lets the layout extend under the notch/home
+      indicator; the safe-area tokens in app.css then pad the chrome back
+      out. Without it env(safe-area-inset-*) is always 0.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0a0e17" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>Reactor 2 Optimizer</title>
+    <!--
+      The boot splash, inline on purpose.
+
+      Everything this app draws is downstream of the bundle: the board is
+      PixiJS, and PixiJS cannot paint until ~870KB of JS has arrived, the saved
+      blueprint has been decoded, the component has mounted, a WebGL context
+      exists and a ~1MB sprite atlas has landed. Until this existed that whole
+      stretch was a blank window with nothing in it saying the app was alive.
+
+      Markup in the document and CSS in the head is the only thing that paints
+      before any of that, which is why neither is a component and why the
+      colours are literals rather than the tokens in `app.css` they mirror
+      (`--surface-void`, `--neon`, `--text-dim`) — the stylesheet is a second
+      request, and this has to be right on the first frame.
+
+      `src/lib/utils/bootLoader.ts` owns taking it down; the fade below is the
+      duration it counts.
+    -->
+    <style>
+      #boot-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        background: #0a0e17;
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        transition: opacity 250ms ease;
+      }
+      #boot-loader.is-done {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #boot-loader .boot-ring {
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        border: 3px solid rgba(0, 243, 255, 0.15);
+        border-top-color: #00f3ff;
+      }
+      #boot-loader .boot-label {
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #7d8da4;
+      }
+      /*
+        The ring only spins where motion is welcome. Under reduced motion it
+        stays a static arc with the label beside it, which still reads as
+        "working" — where a spinner that had simply been deleted would leave
+        the same blank screen this is here to replace.
+      */
+      @media (prefers-reduced-motion: no-preference) {
+        #boot-loader .boot-ring {
+          animation: boot-spin 800ms linear infinite;
+        }
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/index-FmoFJnA7.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/Geometry-tiW5sWw_.js">
+    <link rel="modulepreload" crossorigin href="./assets/Filter-Cyc7w2gN.js">
+    <link rel="modulepreload" crossorigin href="./assets/canvasUtils-Cq_Rak3O.js">
+    <link rel="modulepreload" crossorigin href="./assets/Cache-DgZO4UNw.js">
+    <link rel="modulepreload" crossorigin href="./assets/init-Bs1AvOKk.js">
+    <link rel="modulepreload" crossorigin href="./assets/GCManagedHash-CFT8eomD.js">
+    <link rel="modulepreload" crossorigin href="./assets/RenderTargetSystem-CCFQP1nW.js">
+    <link rel="modulepreload" crossorigin href="./assets/getTextureBatchBindGroup-6IRcvcuh.js">
+    <link rel="modulepreload" crossorigin href="./assets/GraphicsContext-DaXNvbck.js">
+    <link rel="modulepreload" crossorigin href="./assets/CanvasRenderer-BjHRPhgo.js">
+    <link rel="stylesheet" crossorigin href="./assets/index-DfuprqeE.css">
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="boot-loader" role="status" aria-live="polite">
+      <div class="boot-ring"></div>
+      <div class="boot-label">Loading board</div>
+    </div>
+  </body>
+</html>
