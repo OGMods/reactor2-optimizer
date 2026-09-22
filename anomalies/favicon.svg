@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="Reactor 2 Optimizer">
+  <!--
+    The game's own launcher icon (Reactor 2, mipmap app_icon), redrawn as
+    vector so it stays crisp at every favicon size. Radii and colours are
+    measured from the shipped art; the trefoil is the ISO proportions the
+    original uses (hub R, blades 1.5R to 5R, 60 degrees wide).
+  -->
+  <defs>
+    <linearGradient id="face-bevel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e58436"/>
+      <stop offset=".5" stop-color="#feb353"/>
+      <stop offset="1" stop-color="#ffeaa4"/>
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" fill="#132a3d"/>
+  <circle cx="50" cy="50" r="44.25" fill="#fff"/>
+  <circle cx="50" cy="50" r="41.87" fill="#292f43"/>
+  <circle cx="50" cy="50" r="36.93" fill="#cf6423"/>
+  <circle cx="50" cy="50" r="34.72" fill="#ffc83d"/>
+  <circle cx="50" cy="50" r="24.51" fill="#feb353"/>
+  <circle cx="50" cy="50" r="22.80" fill="none" stroke="url(#face-bevel)" stroke-width="3.41"/>
+  <g fill="#203047">
+    <circle cx="50" cy="50" r="3.88"/>
+    <path d="M52.91 44.96L59.70 33.20A19.40 19.40 0 0 0 40.30 33.20L47.09 44.96A5.82 5.82 0 0 1 52.91 44.96Z M44.18 50.00L30.60 50.00A19.40 19.40 0 0 0 40.30 66.80L47.09 55.04A5.82 5.82 0 0 1 44.18 50.00Z M52.91 55.04L59.70 66.80A19.40 19.40 0 0 0 69.40 50.00L55.82 50.00A5.82 5.82 0 0 1 52.91 55.04Z"/>
+  </g>
+</svg>
