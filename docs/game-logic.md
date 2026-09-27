@@ -396,20 +396,21 @@ it and the code differ, what is written here is the code.
 
 ## Time Lab Research
 
-Ten researches exist; **three** of them change a building's figures, and the
-other seven move research income, research time, Chronons, obstacle-removal
-cost and building prices — all decided before a board is laid out, so none can
-change which layout is best.
+Eleven researches exist; **three** of them change a building's figures, and the
+other eight move research income, research time, Chronons, obstacle-removal
+cost, energy sale price and building prices — all decided before a board is
+laid out, so none can change which layout is best.
 
-| research           | scales                                        |
-| ------------------ | --------------------------------------------- |
-| **Stellar Forge**  | every heat producer's heat output              |
-| **Infinite Grid**  | every generator's and wind turbine's heat intake, energy and overheat capacity |
-| **Absolute Zero**  | every cooler's cooling                         |
+| research           | scales                                        | levels (×)  |
+| ------------------ | --------------------------------------------- | ----------- |
+| **Stellar Forge**  | every heat producer's heat output              | ×1.1 – ×1.5 |
+| **Infinite Grid**  | every generator's and wind turbine's heat intake, energy and overheat capacity | ×1.1 – ×2.0 |
+| **Absolute Zero**  | every cooler's cooling                         | ×1.1 – ×2.0 |
 
-Each has five levels worth ×2, ×2.5, ×3.25, ×4 and ×5. The game authors them as
-a bonus fraction — 1.0 through 4.0 — and shows them as "+100%" through "+400%";
-the multiplier is `1 + bonus`.
+Absolute Zero and Infinite Grid share one bonus curve — 0.1, 0.25, 0.45, 0.7,
+1.0 — and Stellar Forge a shallower one — 0.1, 0.2, 0.3, 0.4, 0.5. The game
+authors them as a bonus fraction and shows them as "+10%" through "+100%" (or
+"+50%" for Stellar Forge); the multiplier is `1 + bonus`.
 
 **The roles do not overlap, and the boundary is the class of building rather
 than the catalogue's grouping.** The game's catalogue files reactors and wind
@@ -494,16 +495,19 @@ authored table entry; the derived waste is the only exception, and it is
 re-derived wherever the pair it comes from is scaled again.
 
 **Anomaly and research compose multiplicatively.** A generator under Singularity
-Isolation (×2.5) with Infinite Grid maxed (×5) is rated ×12.5. That is a
-*rating*, not a promise of 12.5× the power: what it actually produces still
+Isolation (×4) with Infinite Grid maxed (×2) is rated ×8. That is a
+*rating*, not a promise of 8× the power: what it actually produces still
 depends on how much heat reaches it.
 
-It is also not the same double as one ×12.5 multiply, and the difference is
-real rather than pedantic: generator7's first tier is 1.3875000000000001e22 as
-two successive scalings and 1.3875e22 as one combined factor. The **order**
-matters for the same reason — its fourth tier under ×5 then a ×1.67 shore bonus
-is 7.38975e22 where the reverse is 7.389749999999999e22 — so research first,
-anomaly second, exactly as the two getters run.
+It is also not always the same double as one combined multiply, and the
+difference is real rather than pedantic — though not at this pair, since ×2 and
+×4 are powers of two and scale exactly. Infinite Grid at level 4 (×1.7) on a
+crowded generator (×0.8) rates generator7's fourth tier at 1.2036e22 as two
+successive scalings and 1.2036000000000001e22 as one ×1.36. The **order**
+matters for the same reason — the same tier under Infinite Grid at level 2
+(×1.25) then a ×1.67 shore bonus is 1.8474375e22 where the reverse is
+1.8474374999999997e22 — so research first, anomaly second, exactly as the two
+getters run.
 
 And **overheat capacity scaling changes nothing for a sustainable layout**,
 since the store it sizes never fills. It is listed because the game lists it.
@@ -643,7 +647,7 @@ the terrain.
 
 ### Singularity Isolation — generators want elbow room
 
-> A Generator with no other Generator next to it gets ×2.5 Energy output, Heat
+> A Generator with no other Generator next to it gets ×4 Energy output, Heat
 > output, and overheat capacity. If another Generator touches it, including at a
 > corner, those values drop to ×0.8. More neighbours do not make the penalty
 > worse.

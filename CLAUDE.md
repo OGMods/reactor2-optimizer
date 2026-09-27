@@ -127,10 +127,11 @@ named **Time Lab** after the game's own screen — holds both.
 
 ### Time Lab research
 
-`PRESTIGE_UPGRADES` (`data/prestige.ts`) carries **three** of the game's ten
+`PRESTIGE_UPGRADES` (`data/prestige.ts`) carries **three** of the game's eleven
 researches: Absolute Zero (cooler cooling), Infinite Grid (generator and wind
-turbine stats) and Stellar Forge (reactor heat). The other seven move research
-income, research time, chronons, obstacle-removal and building prices — all
+turbine stats) and Stellar Forge (reactor heat). The other eight move research
+income, research time, chronons, obstacle-removal, energy sale price and
+building prices — all
 decided *before* the solver is handed a board, so none can change which layout
 is best. The file names them so it is clear they were read and dismissed.
 
@@ -140,7 +141,7 @@ Three things bind:
   stat anomalies turned out to have, so both go through
   `scaleEffectiveBuilding`. That is what keeps it from being free power: waste
   is re-derived as `snap(heat - energy)` from the pair that was just scaled, so
-  a generator rated ×5 makes ×5 the waste and needs ×5 the cooling to stay
+  a generator rated ×2 makes ×2 the waste and needs ×2 the cooling to stay
   online. The overheat threshold Infinite Grid also names is **not** the reason
   — it sizes a waste-heat *store* rather than the waste itself, and a
   sustainable layout never fills it, so per `docs/game-logic.md` it is never the
@@ -227,10 +228,13 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   **Research and anomaly arrive as two successive calls, in that order**, which
   is how the game applies them (the Time Lab in the SO getter, the anomaly in
   the runtime getter) and is not the same double as one combined factor:
-  generator7's first tier under x5 then x2.5 is 1.3875000000000001e22, against
-  1.3875e22 for x12.5. `scaling.test.ts` pins both, against the shipped
-  catalogue rather than round numbers — every divergence here is in the last bit,
-  so a test on tidy figures passes under either reading.
+  generator7's fourth tier under Infinite Grid level 4 (x1.7) then a crowded
+  x0.8 is 1.2036e22, against 1.2036000000000001e22 for x1.36, and the order
+  shows too — under x1.25 then a x1.67 shore it is 1.8474375e22, against
+  1.8474374999999997e22 the other way round. `scaling.test.ts` pins both,
+  against the shipped catalogue rather than round numbers — every divergence
+  here is in the last bit, so a test on tidy figures passes under either
+  reading.
 - `configState.anomalyId` is the live choice, persisted under its own key rather
   than in `ui_prefs` because it is a **solve input** like the roster, not a
   preference about the app — which is also why `solveSignature()` counts it and
@@ -341,14 +345,15 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   neighbour is and no rating changes that — so there is no order to get right.
 
   **The bonus is on a capacity, which is why the rule is close to power-neutral
-  at full unlocks.** x2.5 scales a generator's *intake*, and a generator fed by
-  the reactors it already had simply fills to 40% and produces exactly what it
+  at full unlocks.** x4 scales a generator's *intake*, and a generator fed by
+  the reactors it already had simply fills to 25% and produces exactly what it
   did before; the bonus is worth something only alongside more adjacent reactor
   heat. The penalty is real and avoidable, so the search's job under this
-  anomaly is mostly to keep generators apart. Map 3 at 15s: 1.4202e23 baseline,
-  1.4075e23 under Singularity, against 1.2849e23 for the *baseline layout*
-  re-rated — so the search recovers most of the penalty and finds no gain.
-  Map 1 comes back identical to three significant figures either way.
+  anomaly is mostly to keep generators apart. Map 3 at 15s over three seeds:
+  1.420e23 at best under both, where the one baseline layout whose generators
+  touch re-rates to 1.182e23 — so the search recovers the whole penalty and
+  finds no gain. Map 1 comes back identical to three significant figures either
+  way.
 
   **On a generator-bound roster it is not neutral, and the count is what the
   search gets wrong.** `targetCompositions` is the one stage that decides *what*
@@ -356,12 +361,15 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   generator is worth — two numbers under this rule, neither of them in the pool
   the stage draws on (`rateRole` is the identity here, since which one a tile
   gets is the layout's business). With everything unlocked but generator7 at
-  tier 2, Gale Hills plateaued at 58.8AC from 5s to **150s**. Sizing at the
-  bonus alone does not fix it — it asks for 18 generators where the island can
-  keep 15 apart, and the arrangement is rejected. `generatorCapacityTable`
-  builds `island.ts`'s own `generatorCapacities` over `isolationRoom` — the same
-  table the bound runs on, imported rather than restated — and the search
-  reaches **60.7AC**, what an unconstrained annealer finds given 30x the budget.
+  tier 1, Gale Hills plateaued at 43.2-45.2AC from 5s to **150s**. Sizing at the
+  bonus alone does not fix it — it asks for 20 generators where the island can
+  keep 15 apart. `generatorCapacityTable` builds `island.ts`'s own
+  `generatorCapacities` over `isolationRoom` — the same table the bound runs on,
+  imported rather than restated — and the target asks for 16: the mean of ten
+  runs goes 44.6AC to **46.2AC**, against a best of 49.8AC (fifteen generators,
+  every one isolated) that either reaches only occasionally. It pays most on
+  the largest boards (+12-14% on maps 7 and 8) and costs 1-4% on maps 2, 5 and
+  6, over three seeds — a net gain, not a uniform one.
   `islandRatingCeiling` takes `sizedByIsolation` so a target sized through the
   table is not scaled by the rating a second time. Null under every other rule,
   so the fixtures reproduce byte for byte.
@@ -428,13 +436,13 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   that rates a tile above the roster makes a bound computed on the plain roster
   one a real layout walks past, and "no layout may ever beat it" is an invariant
   the rest of the solver is entitled to assume: Magma Rift reported 119.9%
-  layout efficiency before the terrain case existed, and a generator-bound
-  roster on a 3x3 under Singularity read 163.8% before the isolation case did.
+  layout efficiency before the terrain case existed, and the generator-bound
+  3x3 in `island.test.ts` reads 267% against a bound that ignores Singularity.
   A rule that scales a whole role goes **into the roster** the bound is run on
-  (`roleRatedRoster`: coolers ×0.88 under a pool, generators ×2.5 under
+  (`roleRatedRoster`: coolers ×0.88 under a pool, generators ×4 under
   Singularity), where the bound is exact in it; scaling the LP's result by the
-  largest factor instead rated reactors and coolers up too and left the
-  Singularity bound 2.3x the tight one, so a near-optimal layout read 40%. A
+  largest factor instead rates reactors and coolers up too and would leave the
+  Singularity bound 3.8x the tight one, so a near-optimal layout reads 25%. A
   rule that scales a *tile* splits the island's tile budget by class
   (`estimateIslandBound`, `estimateMixedIslandMaxPower`): a shore building is
   worth the shore-scaled roster, an inland one the plain roster, and both pay
@@ -461,10 +469,11 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   cVal))`, and the cooler term goes under a pool, where cooling reaches the
   whole island. The cap is homogeneous like the LP, so a rule that scales
   everything at once can never make it bite; a rule that scales **one role**
-  is what it takes, and Singularity's ×2.5 put the top generator at 181% of
-  it — the bound sat 5% above anything the board allows, reading 86.5-90.0%
-  efficiency for layouts that were not 86.5-90.0% of anything. It now reads
-  89.4-95.0%, and the base, Cryo and Tidal figures did not move a digit.
+  is what it takes, and Singularity's ×4 puts the top generator at 290% of
+  it — without the cap the bound sits 6-9% above anything the board allows,
+  reading 83-87% efficiency for layouts that are not 83-87% of anything. With
+  it the maps read 89.4-95.0%, and the base, Cryo and Tidal figures do not move
+  a digit.
 
   **The second half of that is `isolationRoom`: how many generators an island
   can keep apart.** Isolated generators are pairwise non-adjacent, so they are
@@ -496,13 +505,15 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
 **Three Time Lab upgrades scale building stats too**, and they are not anomalies:
 they are bought with Chronons, survive a Time Jump, and stack with whatever
 anomaly is running — **multiplicatively**, so a generator under Singularity
-Isolation with Infinite Grid maxed is rated x12.5. The extractor's record covers
-all ten Time Lab upgrades; the three a layout can see are **Stellar Forge**
+Isolation with Infinite Grid maxed is rated x8. The extractor's record covers
+all eleven Time Lab upgrades; the three a layout can see are **Stellar Forge**
 (every heat producer, so reactors), **Infinite Grid** (generators *and* wind
 turbines), and **Absolute Zero** (every cooler), each five levels of
-`BonusPercentage` 1.0 to 4.0. That field is a fraction rather than a percent --
-the same field is 0.05 on Chronon Reactor, which the game shows as +5% -- so the
-levels are worth x2 to x5. Like an anomaly's, the scale is uniform, so the
+`BonusPercentage`. Absolute Zero and Infinite Grid share one curve, 0.1 to 1.0;
+Stellar Forge a shallower one, 0.1 to 0.5. That field is a fraction rather than
+a percent -- the same field is 0.05 on Chronon Reactor, which the game shows as
++5% -- so the levels are worth x1.1 to x2 (Absolute Zero, Infinite Grid) and
+x1.1 to x1.5 (Stellar Forge). Like an anomaly's, the scale is uniform, so the
 cooling a boosted producer needs grows with it. Their badges ship as
 `public/icons/prestige_<id>.webp`.
 
@@ -597,7 +608,7 @@ resolves them from its own unlocks.
 byte, then a count and one `[research byte][level index]` pair per Time Lab
 upgrade. Tiers say what the buildings were, and that stopped being the whole
 story once research changed what a tier is worth: a board shared out of a
-×5-cooling timeline is not the board a reader without that research would get.
+×2-cooling timeline is not the board a reader without that research would get.
 
 Two things about it:
 

@@ -540,7 +540,7 @@ describe("a rated ceiling is what the row beside it was measured against", () =>
      * The one rule that cannot be answered by a tile: a generator's rating is a
      * function of what its neighbours *are*, so the ceiling for one tile is a
      * function of every other placement on the board. Two boards identical
-     * except for a second generator beside the first rate it x2.5 and x0.8.
+     * except for a second generator beside the first rate it x4 and x0.8.
      */
     const grid = inlandGrid(9, 3);
     const alone = scoreAndRate(grid, chain(2, 1), 3, 1, SINGULARITY);
@@ -552,7 +552,7 @@ describe("a rated ceiling is what the row beside it was measured against", () =>
       SINGULARITY,
     );
 
-    expect(alone.max.effectiveValue).toBeCloseTo(VALUES.generator * 2.5, 6);
+    expect(alone.max.effectiveValue).toBeCloseTo(VALUES.generator * 4, 6);
     expect(crowded.max.effectiveValue).toBeCloseTo(VALUES.generator * 0.8, 6);
     expect(rowAt(crowded.rows, 3, 1).heatConsumed).toBeLessThanOrEqual(
       crowded.max.effectiveValue,

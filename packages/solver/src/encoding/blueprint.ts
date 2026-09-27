@@ -72,7 +72,7 @@ import type {
  * **The rules section.** Tiers say what the buildings were, and that is no
  * longer the whole story: the timeline's anomaly and its Time Lab research
  * change what those same tiers are worth, so a board shared out of a
- * ×5-cooling timeline is not the board a reader without that research would
+ * ×2-cooling timeline is not the board a reader without that research would
  * get. One more optional section carries them:
  *
  *   byte a        anomaly id byte

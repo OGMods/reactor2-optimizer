@@ -259,9 +259,9 @@ function offlineProducers(
  * Against `ratedValue`, never `baseValue`: `heatProduced` is what the
  * distribution actually sent, capped by the tile's RATING, so measuring it
  * against the authored tier compares a scaled delivery with an unscaled ceiling
- * and only calls a reactor under-fed below 1/k fill — 60% on a Tidal shore, 20%
- * under a x5 Stellar Forge. The move then stops firing on almost everything it
- * exists for, with no number anywhere disagreeing. It is a named function so
+ * and only calls a reactor under-fed below 1/k fill — 60% on a Tidal shore,
+ * 66.7% under a maxed Stellar Forge. The move then stops firing on much of what
+ * it exists for, with no number anywhere disagreeing. It is a named function so
  * that the reading can be pinned by a test rather than only stated here.
  */
 function isUnderFed(row: SimPlacedBuilding): boolean {
@@ -1122,10 +1122,11 @@ async function hillClimb(
   //
   // It is read off the PLAIN roster, so under a rule that rates a tile above it
   // the walk runs colder than this calibration intends — a move on a x1.67 shore
-  // is worth x1.67 of one here. Scaling it by `islandRatingCeiling` was measured
-  // at 15s over three seeds: Tidal on map 3 went 176/178/179AC to 179/181/178AC,
-  // Singularity on map 3 142/142/139AC to 140/142/142AC and on map 7 271/271/271AC
-  // to 268/267/271AC — inside run-to-run noise, so the plain figure is kept.
+  // is worth x1.67 of one here. Scaling it by `islandRatingCeiling` was measured:
+  // Tidal on map 3 at 15s over three seeds went 176/178/179AC to 179/181/178AC,
+  // and Singularity (x4) at 30s over five seeds on map 3 142/140/142/142/140AC to
+  // 140/139/140/142/142AC and on map 7 274/271/271/271/274AC to
+  // 267/271/271/271/274AC — inside run-to-run noise, so the plain figure is kept.
   // Anyone re-measuring should use a longer budget and more seeds than that.
   const moveScale =
     generators.length > 0
@@ -1422,19 +1423,18 @@ function targetCompositions(
  * `targetCompositions` decides what to build by counting, and the count it
  * wants is a function of what a generator is worth. Under a role isolation
  * that is two numbers rather than one — a generator with no generator beside
- * it takes 2.5x, one with 0.8x — and which a tile gets is decided by the
+ * it takes 4x, one with 0.8x — and which a tile gets is decided by the
  * layout, so neither belongs in the pool the stage draws on. The roster cannot
  * express it; the island can, and `isolationRoom` is how much of the bonus its
  * shape has room for.
  *
- * Both halves are load-bearing and were measured apart. Sizing at the bonus
- * alone asked Gale Hills at generator7 tier 2 for 18 generators on an island
- * that can keep 15 apart, `arrangeComposition` spread them as far as they go
- * and still had most of them touching, and the stage was rejected for the
- * layout already in hand. With the room folded in it asks for 15, the
- * arrangement comes back with 14 of them isolated, and the walk finishes the
- * job: 58.8AC to 60.7AC, which is what an unconstrained annealer reaches given
- * 30x the budget.
+ * Both halves are load-bearing. Sizing at the bonus alone asks Gale Hills at
+ * generator7 tier 1 for 20 generators on an island that can keep 15 apart, and
+ * `arrangeComposition` cannot spread that many without most of them touching.
+ * With the room folded in it asks for 16, and over ten runs at 15s the mean
+ * goes 44.6AC to 46.2AC; the best either reaches is 49.8AC, fifteen generators
+ * every one isolated. Over three seeds it is worth +12-14% on maps 7 and 8 and
+ * costs 1-4% on maps 2, 5 and 6 — a net gain, not a uniform one.
  *
  * The same table the bound runs on (`island.ts`), and deliberately so — one
  * reading of what a board has room for, rather than a second one here to drift
@@ -1955,10 +1955,10 @@ function tileLoad(building: EffectiveBuilding, row: SimPlacedBuilding): number {
  * `ctx.rate` answers this for every rule but one: a role isolation multiplier is
  * a function of what a tile's NEIGHBOURS are, so `rate` is the identity under it
  * and `simulateIsland` resolves it per layout through `rateIsolated` instead.
- * That leaves right-sizing measuring a x2.5 load against a x1 capacity: an
- * isolated generator authored 320, rated 800 and absorbing 300, was never
- * offered the authored 120 tier that covers it at its own rating of 300, so the
- * pass left 500 of intake nobody pays it to have — which is exactly the money it
+ * That leaves right-sizing measuring a x4 load against a x1 capacity: an
+ * isolated generator authored 320, rated 1280 and absorbing 300, was never
+ * offered the authored 120 tier that covers it at its own rating of 480, so the
+ * pass left 980 of intake nobody pays it to have — which is exactly the money it
  * exists to hand back. In the other direction the plain figure is over-generous,
  * and there the re-simulation below catches it, so only the waste escaped.
  *

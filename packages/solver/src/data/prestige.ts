@@ -14,7 +14,7 @@ import type {
  * carries a `multiplier` array that is just `1 + values`, and it is not copied,
  * because deriving it is what keeps the two from drifting.
  *
- * **Three of the game's ten are here.** The other seven change the economy
+ * **Three of the game's eleven are here.** The other eight change the economy
  * around the board rather than anything on it, and the solver cannot feel any
  * of them — they are listed so it is clear they were read and dismissed rather
  * than missed:
@@ -23,6 +23,7 @@ import type {
  * - `chrono_accelerator` — research time
  * - `chronon_reactor` — chronons earned per timeline
  * - `erased_from_time` / `phase_breaker` — obstacle removal time and cost
+ * - `quantum_exchange` — energy sale price
  * - `quantum_replicator` — building prices
  * - `zero_time_protocol` — free research speed-up window
  *
@@ -41,7 +42,7 @@ export const PRESTIGE_UPGRADES: readonly PrestigeUpgrade[] = [
     effect: "Cooling Output",
     description: "Boosts the Cooling output of all cooling systems.",
     roles: ["cooler"],
-    bonuses: [1.0, 1.5, 2.25, 3.0, 4.0],
+    bonuses: [0.1, 0.25, 0.45, 0.7, 1.0],
   },
   {
     id: "infinite_grid",
@@ -54,14 +55,14 @@ export const PRESTIGE_UPGRADES: readonly PrestigeUpgrade[] = [
     // `EffectiveBuilding`'s three figures, and the third -- waste -- is derived
     // as `snap(heat - energy)` from the pair after they are scaled, so it grows
     // with them. That is what keeps this from being free power: a generator
-    // rated x5 makes x5 the waste and needs x5 the cooling to stay online.
+    // rated x2 makes x2 the waste and needs x2 the cooling to stay online.
     //
     // The overheat threshold it also names is not modelled and is not the
     // reason. It sizes a power source's waste-heat *store*, not the waste it
     // makes, and a sustainable layout never fills it, so per
     // `docs/game-logic.md` it is never the binding constraint.
     roles: ["generator", "direct_producer"],
-    bonuses: [1.0, 1.5, 2.25, 3.0, 4.0],
+    bonuses: [0.1, 0.25, 0.45, 0.7, 1.0],
   },
   {
     id: "stellar_forge",
@@ -86,7 +87,7 @@ export const PRESTIGE_UPGRADES: readonly PrestigeUpgrade[] = [
      * as `["reactor"]` is that rule, not an approximation of it.
      */
     roles: ["reactor"],
-    bonuses: [1.0, 1.5, 2.25, 3.0, 4.0],
+    bonuses: [0.1, 0.2, 0.3, 0.4, 0.5],
   },
 ];
 

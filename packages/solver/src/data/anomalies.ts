@@ -67,15 +67,15 @@ export const ANOMALIES: readonly AnomalyDefinition[] = [
     id: "singularity_isolation",
     rule: "role_isolation",
     name: "Singularity Isolation",
-    benefit: "Isolated generators ×2.5",
+    benefit: "Isolated generators ×4",
     drawback: "Adjacent generators ×0.8",
     description:
-      "A Generator with no other Generator next to it gets ×2.5 Energy " +
+      "A Generator with no other Generator next to it gets ×4 Energy " +
       "output, Heat output, and overheat capacity. If another Generator " +
       "touches it, including at a corner, those values drop to ×0.8. More " +
       "neighbours do not make the penalty worse.",
     role: "generator",
-    isolated: 2.5,
+    isolated: 4,
     crowded: 0.8,
   },
 ];

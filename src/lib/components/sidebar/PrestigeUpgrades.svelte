@@ -7,7 +7,7 @@
    * The Time Lab research that changes what buildings are worth.
    *
    * Only the three the solver can feel are listed — `PRESTIGE_UPGRADES` says
-   * which of the game's ten those are and why the other seven are not: the
+   * which of the game's eleven those are and why the other eight are not: the
    * rest change the economy around the board rather than anything on it.
    *
    * **Toggled and levelled exactly like a building**, down to the edge stripe

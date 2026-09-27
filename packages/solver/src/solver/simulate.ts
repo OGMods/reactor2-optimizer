@@ -23,8 +23,8 @@ export interface SimPlacedBuilding extends PlacedBuilding {
    * two differ by the multiplier, and a consumer comparing a delivery against
    * the wrong one silently reads a full tile as a starved one (or the reverse):
    * the walk's "under-fed reactor" move measured `heatProduced` against
-   * `baseValue` for a while and stopped firing below x1/k fill — 20% under a
-   * x5 research, 60% on a Tidal shore — with nothing failing anywhere.
+   * `baseValue` for a while and stopped firing below x1/k fill — 66.7% under a
+   * maxed Stellar Forge, 60% on a Tidal shore — with nothing failing anywhere.
    *
    * It stays on `SimPlacedBuilding` rather than on `PlacedBuilding`, so it does
    * not cross the worker boundary: it is the search's own units, meaningless to

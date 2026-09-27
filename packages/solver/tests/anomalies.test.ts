@@ -360,7 +360,7 @@ describe("role isolation reaching the board", () => {
    *
    * The roster gives the reactor far more heat than the generator can take, so
    * the generator is never starved: with a reactor only as large as the
-   * generator's authored intake, a x2.5 intake bonus buys nothing at all and
+   * generator's authored intake, a x4 intake bonus buys nothing at all and
    * every case below would read as 1.0.
    */
   const singularity = getAnomaly("singularity_isolation");
@@ -414,7 +414,7 @@ describe("role isolation reaching the board", () => {
 
     const base = powers(spec, getAnomaly("none")).get("2,1")!;
     expect(base).toBeGreaterThan(0);
-    expect(powers(spec).get("2,1")).toBeCloseTo(base * 2.5, 6);
+    expect(powers(spec).get("2,1")).toBeCloseTo(base * 4, 6);
   });
 
   it("penalises both generators the moment they touch", () => {
@@ -480,7 +480,7 @@ describe("role isolation reaching the board", () => {
     const base = powers(spec, getAnomaly("none"));
     const under = powers(spec);
 
-    expect(under.get("2,1")).toBeCloseTo(base.get("2,1")! * 2.5, 6);
+    expect(under.get("2,1")).toBeCloseTo(base.get("2,1")! * 4, 6);
     // And the turbine beside it is rated exactly as authored.
     expect(under.get("3,1")).toBeCloseTo(base.get("3,1")!, 6);
   });
@@ -802,7 +802,7 @@ describe("role isolation for a role that is not the generator", () => {
       }
       const lone = rated.get("4,0")!;
       expect(lone.rated, "three tiles from the nearest one").toBeCloseTo(
-        lone.base * 2.5,
+        lone.base * 4,
         6,
       );
 
@@ -879,7 +879,7 @@ describe("one island context scoring one layout after another", () => {
     const lone = simulateIsland(layoutOn(shared, LONE), shared, true);
     const row = lone.placements.find((r) => r.x === 1 && r.y === 0)!;
 
-    expect(row.ratedValue, "nothing beside it any more").toBeCloseTo(250, 6);
+    expect(row.ratedValue, "nothing beside it any more").toBeCloseTo(400, 6);
     expect(lone.placements.some((r) => r.x === 2 && r.y === 0)).toBe(false);
 
     // And the whole report is what a context that had never seen the first
@@ -1037,7 +1037,7 @@ describe("the search running under each rule", () => {
      * `getEffectiveBuildings` folds it in and nothing below that knows a Time Lab
      * exists — so a solve on a researched roster is a path nothing else here
      * walks. It is also the one place both multipliers meet on a board: Infinite
-     * Grid at x5 on the generator and Absolute Zero at x5 on the cooler, and then
+     * Grid at x2 on the generator and Absolute Zero at x2 on the cooler, and then
      * a shore bonus on top of both.
      */
     const tidal = getAnomaly("tidal_ascendancy");
@@ -1049,8 +1049,8 @@ describe("the search running under each rule", () => {
     );
     expect(
       roster.map((b) => b.effectiveValue),
-      "the reactor is untouched; the other two are x5",
-    ).toEqual([100, 500, 500]);
+      "the reactor is untouched; the other two are x2",
+    ).toEqual([100, 200, 200]);
 
     const [island] = splitGridIntoIslands(
       makeGrid(BOARD),
@@ -1076,8 +1076,8 @@ describe("the search running under each rule", () => {
      * runtime getter, which is the order these two layers happen to be in —
      * `getEffectiveBuildings` folds research into the roster and `ctx.rate`
      * scales what comes out — and it is not the same double as the other way
-     * round: generator7's fourth tier under Infinite Grid maxed and then a Tidal
-     * shore is 7.38975e22, against 7.389749999999999e22 reversed.
+     * round: generator7's fourth tier under Infinite Grid at level 2 and then a
+     * Tidal shore is 1.8474375e22, against 1.8474374999999997e22 reversed.
      *
      * `scaling.test.ts` pins the arithmetic; this pins that the production path
      * is that way round, which no test reached — `prestige.test.ts` never builds
@@ -1087,9 +1087,9 @@ describe("the search running under each rule", () => {
     const [researched] = getEffectiveBuildings(
       BUILDINGS,
       { generator7: 3 },
-      prestigeScales({ infinite_grid: 4 }),
+      prestigeScales({ infinite_grid: 1 }),
     );
-    expect(researched.effectiveValue).toBe(8.85e21 * 5);
+    expect(researched.effectiveValue).toBe(8.85e21 * 1.25);
     expect(researched.baseValue, "the tier it identifies as").toBe(8.85e21);
 
     // Bare grass, so every tile of it is on the board's edge and therefore
@@ -1097,10 +1097,10 @@ describe("the search running under each rule", () => {
     const ctx = buildIslandContext(makeGrid(["GGG"]), undefined, tidal);
     const onShore = ctx.rate(ctx.tiles[0], researched);
 
-    expect(onShore.effectiveValue).toBe(8.85e21 * 5 * 1.67);
-    expect(onShore.effectiveValue).toBe(7.38975e22);
+    expect(onShore.effectiveValue).toBe(8.85e21 * 1.25 * 1.67);
+    expect(onShore.effectiveValue).toBe(1.8474375e22);
     // The anomaly first and the research second, which is the wrong way round.
-    expect(onShore.effectiveValue).not.toBe(8.85e21 * 1.67 * 5);
+    expect(onShore.effectiveValue).not.toBe(8.85e21 * 1.67 * 1.25);
     expect(onShore.baseValue).toBe(8.85e21);
   });
 });

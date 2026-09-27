@@ -576,9 +576,9 @@ describe("the theoretical max-power bound", () => {
     /*
      * The case a random-layout test cannot find, and the one that shipped
      * broken. `role_isolation` scales an isolated generator's heat *intake* by
-     * 2.5, so wherever generator intake is the short side of
+     * 4, so wherever generator intake is the short side of
      * `min(nReact * rVal, nGen * gVal)` a layout that keeps its generators apart
-     * absorbs up to 2.5x the heat the bound allowed. Random placement almost
+     * absorbs up to 4x the heat the bound allowed. Random placement almost
      * never isolates four generators, so this layout is built by hand:
      *
      *     G R G      four generators on the corners, which on a 3x3 are
@@ -608,9 +608,9 @@ describe("the theoretical max-power bound", () => {
 
     const { totalPower } = simulateIsland(placement, ctx);
 
-    // 4 generators x (20 x 2.5) of intake against 400 of reactor heat, at 0.75
-    // energy, with 50 of waste against 100 of cooling.
-    expectClose(totalPower, 150);
+    // 4 generators x (20 x 4) of intake against 400 of reactor heat, at 0.75
+    // energy, with 80 of waste against 100 of cooling.
+    expectClose(totalPower, 240);
     // The bound that ignored the anomaly: 8 engine tiles + 1 cooler, capped at
     // 2 reactors feeding 6 generators, so 120 of heat and 90 of power.
     expectClose(boundFor(island, roster), 90);
@@ -635,7 +635,7 @@ describe("the theoretical max-power bound", () => {
      *
      * It is homogeneous in the roster, so no rule that scales everything at
      * once can make it bite. A rule that scales a single role is exactly what
-     * it takes, and `role_isolation` is that rule: rating a lone generator x2.5
+     * it takes, and `role_isolation` is that rule: rating a lone generator x4
      * while leaving the reactors that fill it alone let the LP spend fewer
      * tiles on generators than eight neighbours apiece can serve, and the
      * shipped maps' bound sat ~5% above anything the board allows.
@@ -675,7 +675,7 @@ describe("the theoretical max-power bound", () => {
        * A generator authored at 4000 and one rated there by the anomaly are
        * the same building to the cap, so the plain bound on the first is the
        * anomaly's bound on the second. Which is also why the anomaly buys so
-       * much less than its x2.5 suggests: past eight reactors it buys nothing.
+       * much less than its x4 suggests: past eight reactors it buys nothing.
        */
       const island = islandFor(board, basicRoster());
 
@@ -785,9 +785,9 @@ describe("the theoretical max-power bound", () => {
      *
      * `isolationRoom` reads the ceiling off a 2x2 block partition — four
      * mutually adjacent tiles, so one isolated generator between them, and no
-     * other generator at all in that block. Gale Hills at generator7 tier 2
-     * asked for 17.4 isolated generators where the island admits 15, and read
-     * 83% layout efficiency for layouts within 3% of the best anything finds.
+     * other generator at all in that block. Gale Hills at generator7 tier 1
+     * asked for 19.3 isolated generators where the island admits 15, and read
+     * 78% layout efficiency for the best layout any run has found.
      */
     const singularity = getAnomaly(
       "singularity_isolation",

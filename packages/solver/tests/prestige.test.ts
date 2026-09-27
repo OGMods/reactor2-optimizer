@@ -111,7 +111,7 @@ describe("research reaching the roster", () => {
       prestigeScales({ absolute_zero: 0 }),
     );
     const by = (id: string) => roster.find((b) => b.id === id)!;
-    expect(by("c").effectiveValue).toBe(100 * 2);
+    expect(by("c").effectiveValue).toBe(100 * 1.1);
     expect(by("r").effectiveValue).toBe(200);
     expect(by("g").effectiveValue).toBe(400);
   });
@@ -126,7 +126,11 @@ describe("research reaching the roster", () => {
       prestigeScales({ infinite_grid: 0 }),
     );
     const g = roster.find((b) => b.id === "g")!;
-    expect([g.effectiveValue, g.energy, g.waste]).toEqual([800, 600, 200]);
+    expect([g.effectiveValue, g.energy, g.waste]).toEqual([
+      400 * 1.1,
+      300 * 1.1,
+      110, // derived as snap(heat - energy), not the authored waste scaled
+    ]);
   });
 
   it("scales a reactor's heat for Stellar Forge", () => {
@@ -135,7 +139,7 @@ describe("research reaching the roster", () => {
       ALL,
       prestigeScales({ stellar_forge: 4 }),
     );
-    expect(roster.find((b) => b.id === "r")!.effectiveValue).toBe(200 * 5);
+    expect(roster.find((b) => b.id === "r")!.effectiveValue).toBe(200 * 1.5);
   });
 
   it("changes nothing when passed no research", () => {
@@ -166,7 +170,7 @@ describe("research reaching a solve", () => {
       prestigeScales({ absolute_zero: 0 }),
     );
     const cooler = plan!.effectiveBuildings.find((b) => b.id === "c")!;
-    expect(cooler.effectiveValue).toBe(200);
+    expect(cooler.effectiveValue).toBe(100 * 1.1);
   });
 
   it("resolves it unresearched when given none", () => {
@@ -215,7 +219,7 @@ describe("what a solved placement reports under research", () => {
    * error anywhere.
    */
   it("reports the authored tier value, not the scaled one", () => {
-    const scales = prestigeScales({ absolute_zero: 0 }); // level 1, x2
+    const scales = prestigeScales({ absolute_zero: 0 }); // level 1, x1.1
     const roster = getEffectiveBuildings(
       DEFS as BuildingDefinition[],
       ALL,
@@ -223,12 +227,12 @@ describe("what a solved placement reports under research", () => {
     );
     const cooler = roster.find((b) => b.id === "c")!;
 
-    expect(cooler.effectiveValue).toBe(200); // what the search works with
+    expect(cooler.effectiveValue).toBe(100 * 1.1); // what the search works with
     expect(cooler.baseValue).toBe(100); // what a placement records
   });
 
   it("round-trips a scored placement back to the same rating", () => {
-    const scales = prestigeScales({ infinite_grid: 0 }); // level 1, x2
+    const scales = prestigeScales({ infinite_grid: 0 }); // level 1, x1.1
     const roster = getEffectiveBuildings(
       DEFS as BuildingDefinition[],
       ALL,

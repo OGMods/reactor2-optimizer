@@ -80,8 +80,9 @@ describe("a report row's two capacity figures", () => {
      *
      * A shore reactor rated 167 feeding a generator that can only take 100.2 is
      * under-fed by a third — and sits ABOVE its authored 100, so the move's
-     * predicate read against `baseValue` never fires. Under a x5 research the
-     * same reactor has to fall below 20% fill before the walk notices it.
+     * predicate read against `baseValue` never fires. Under a maxed Stellar
+     * Forge (x1.5) the same reactor has to fall below 66.7% fill before the walk
+     * notices it.
      */
     const [R, G, C] = basicRoster({
       reactorValue: 100,
@@ -132,19 +133,19 @@ describe("what to build, counted in the layout's units", () => {
    * The same mistake as the rest of this file, made by the one stage that
    * decides *what* to build rather than where to put it. `targetCompositions`
    * counts, and counting needs to know what a generator is worth — which under
-   * `role_isolation` is two numbers, x2.5 with no generator beside it and x0.8
+   * `role_isolation` is two numbers, x4 with no generator beside it and x0.8
    * with. Which a tile gets is the layout's business, so neither is in the pool
    * the stage draws on, and the count it produced was the one for a roster
    * nobody is playing.
    *
-   * Sizing at the bonus alone is not the fix either, and that half was measured
-   * apart: it asked Gale Hills at generator7 tier 2 for 18 generators on an
-   * island that can keep 15 apart, the arrangement came back with most of them
-   * touching, and the stage was rejected for the layout already in hand. The
-   * count has a ceiling the roster cannot see and the island can —
-   * `isolationRoom` — so the table is the one `estimateTotalMaxPower` runs on,
-   * imported rather than restated. With it the search reaches 60.7AC on that
-   * island where it plateaued at 58.8AC from 5s to 150s.
+   * Sizing at the bonus alone is not the fix either: it asks Gale Hills at
+   * generator7 tier 1 for 20 generators on an island that can keep 15 apart,
+   * and no arrangement holds that many clear of each other. The count has a
+   * ceiling the roster cannot see and the island can — `isolationRoom` — so the
+   * table is the one `estimateTotalMaxPower` runs on, imported rather than
+   * restated. With it the mean of ten 15s runs on that island goes from 44.6AC
+   * to 46.2AC, where without it the search plateaued at 43.2-45.2AC from 5s to
+   * 150s.
    */
   const { generatorCapacityTable, targetCompositions } = internals;
   const roster = [reactor(100), generator(40), cooler(100)];
@@ -183,7 +184,7 @@ describe("what to build, counted in the layout's units", () => {
     const table = generatorCapacityTable(island, ctx, G)!;
 
     // Four generators on a 4x4 can all stand clear of each other...
-    expect(table[4]).toBe(4 * 40 * 2.5);
+    expect(table[4]).toBe(4 * 40 * 4);
     // ...and a fifth cannot be put anywhere that is not beside one of them, so
     // it costs one of the four its bonus rather than adding to them.
     expect(table[5]).toBeLessThan(table[4]);
@@ -191,9 +192,9 @@ describe("what to build, counted in the layout's units", () => {
 
   it("asks for fewer generators, and for more than they used to be worth", () => {
     /*
-     * The stage's answer on this board: 7 generators where the plain count
-     * says 10, and a target worth 321 against 300 — three isolated and four
-     * crowded, which is a layout this island can hold, where ten at the bonus
+     * The stage's answer on this board: 4 generators where the plain count
+     * says 10, and a target worth 480 against 300 — all four isolated, one per
+     * 2x2 block, which is a layout this island can hold, where ten at the bonus
      * is not.
      */
     const { island, ctx } = islandAndContext(singularity);
@@ -252,7 +253,7 @@ describe("the island's rating ceiling", () => {
     // Which one a tile gets is a function of the layout rather than the island,
     // and a search free to keep generators apart rates every one at the bonus.
     const ctx = buildIslandContext(makeGrid(["GGG"]), undefined, singularity);
-    expect(islandRatingCeiling(ctx, probes, false)).toBeCloseTo(2.5, 9);
+    expect(islandRatingCeiling(ctx, probes, false)).toBeCloseTo(4, 9);
   });
 
   it("drops the isolation half once the target carries it", () => {
@@ -381,8 +382,8 @@ describe("right-sizing a layout whose ratings come from its own shape", () => {
    * `role_isolation` is the one rule `ctx.rate` cannot answer: a generator's
    * multiplier is a function of what its neighbours ARE, so `simulateIsland`
    * resolves it per layout. Right-sizing measures a load that came off one of
-   * those rows against a candidate from the plain roster, and the two are three
-   * halves apart.
+   * those rows against a candidate from the plain roster, and the two are four
+   * times apart.
    */
   const REACTOR = reactor(300);
   const GEN_S = generator(120, "gen_s");
@@ -392,15 +393,15 @@ describe("right-sizing a layout whose ratings come from its own shape", () => {
 
   it("hands back the capacity an isolated generator never uses", () => {
     /*
-     * A lone generator is rated x2.5, so the authored 320 tile is running at 800
+     * A lone generator is rated x4, so the authored 320 tile is running at 1280
      * and absorbing 300 of it. The smallest tier that covers that load is the
-     * authored 120 — rated 300, exactly enough — and at the same power, because a
-     * generator's energy scales with how full it is: 0.75 x 800 x 0.375 is 0.75 x
-     * 300 x 1. Compared in the roster's units instead, 120 does not cover 300 and
-     * the pass leaves 500 of intake the player paid for and nothing uses.
+     * authored 120 — rated 480 — and at the same power, because a generator's
+     * energy scales with how full it is: 0.75 x 1280 x 300/1280 is 0.75 x 480 x
+     * 300/480. Compared in the roster's units instead, 120 does not cover 300 and
+     * the pass leaves 980 of intake the player paid for and nothing uses.
      *
      * The worked example one step up is NOT a downgrade and must not become one:
-     * the same tile absorbing 700 keeps the 320, since 120 rated 300 cannot carry
+     * the same tile absorbing 700 keeps the 320, since 120 rated 480 cannot carry
      * it.
      */
     const ctx = buildIslandContext(makeGrid(["GGG"]), undefined, singularity);
@@ -413,7 +414,7 @@ describe("right-sizing a layout whose ratings come from its own shape", () => {
     const generatorRow = before.placements.find(
       (r) => r.buildingId === GEN_L.id,
     )!;
-    expect(generatorRow.ratedValue).toBeCloseTo(800, 9);
+    expect(generatorRow.ratedValue).toBeCloseTo(1280, 9);
     expect(generatorRow.heatConsumed).toBeCloseTo(300, 9);
 
     const after = downgradeOversized(
@@ -425,7 +426,7 @@ describe("right-sizing a layout whose ratings come from its own shape", () => {
 
     expect(
       after.rows.find((r) => r.x === 1)!.buildingId,
-      "the isolated generator kept a tier it runs at 37.5% of",
+      "the isolated generator kept a tier it runs at 23% of",
     ).toBe(GEN_S.id);
     // The pass re-tiers and nothing else: same power, same occupied tiles.
     expect(after.power).toBeCloseTo(before.totalPower, 9);
