@@ -589,14 +589,14 @@ class LayoutState {
    * the anomaly and the research live on `configState`.
    */
   exportBlueprint(
-    rules: BlueprintRules,
+    rules: BlueprintRules | null,
     placements: readonly PlacedBuilding[] = this.placements,
   ): Promise<string> {
     return encodeBlueprint(
       this.grid,
       placements,
       placementTiers(placements),
-      rules,
+      rules ?? undefined,
     );
   }
 
@@ -1156,6 +1156,16 @@ class LayoutState {
    * not say rates it under none. Taking the reader's own would rate someone
    * else's shoreline under rules it was never laid out for.
    */
+  /**
+   * The rules the previewed board's code names, exactly as it named them —
+   * null off preview, and null on a code that says nothing. Exposed so a board
+   * re-shared from preview carries the author's rules onward rather than the
+   * reader's, and silence onward as silence.
+   */
+  get previewRules(): BlueprintRules | null {
+    return this.isPreview ? this.#previewRules : null;
+  }
+
   get placementAnomaly(): AnomalyDefinition {
     return this.isPreview
       ? getAnomaly(this.#previewRules?.anomalyId ?? undefined)

@@ -787,9 +787,13 @@ class UIState {
     this.copiedForm = null;
     try {
       // The rules the board on screen was built under travel with it — this
-      // is the one place that can see both the board and `configState`.
+      // is the one place that can see both the board and `configState`. A
+      // previewed board was built under its author's, so re-sharing it passes
+      // those on (or their absence) rather than restating it under the reader's.
       const code = await layoutState.exportBlueprint(
-        blueprintRules(configState.anomalyId, configState.prestigeLevels),
+        layoutState.isPreview
+          ? layoutState.previewRules
+          : blueprintRules(configState.anomalyId, configState.prestigeLevels),
         this.visiblePlacements,
       );
       this.shareCode = code;
@@ -875,6 +879,19 @@ class UIState {
   /** True while the canvas is showing someone else's board, from a link. */
   get isPreview(): boolean {
     return layoutState.isPreview;
+  }
+
+  /**
+   * Whether the board on screen runs under an anomaly — the author's on a
+   * previewed board, the player's otherwise. It is what the theme keys on:
+   * the theme says "this timeline is not the ordinary rules", and on a shared
+   * link the timeline being read is the author's, which is also the one the
+   * board's figures are rated under (`layoutState.placementAnomaly`).
+   */
+  get boardHasAnomaly(): boolean {
+    return this.isPreview
+      ? layoutState.placementAnomaly.rule !== "baseline"
+      : configState.hasAnomaly;
   }
 
   /**

@@ -237,11 +237,13 @@
   component learning that anomalies exist. It hangs here rather than on each
   panel because this is the one place allowed to see `configState` beside
   everything else, and because a theme applied in eleven places is eleven
-  places to forget.
+  places to forget. It keys on the board's anomaly rather than the player's:
+  on a shared link those differ, and the theme follows the author's timeline
+  the board is rated under.
 -->
 <main
   class="app-shell"
-  data-theme={configState.hasAnomaly ? "anomaly" : null}
+  data-theme={uiState.boardHasAnomaly ? "anomaly" : null}
   style:--header-clearance="{uiState.headerBottom}px"
   style:--sidebar-clearance="{uiState.sidebarWidth}px"
   style:--hud-clearance="{uiState.hudHeight}px"

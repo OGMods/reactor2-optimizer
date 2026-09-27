@@ -15,7 +15,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { layoutState } from "./layout.svelte";
 import { editorState } from "./editor.svelte";
-import { encodeBlueprint } from "@reactor2/solver";
+import { decodeBlueprint, encodeBlueprint } from "@reactor2/solver";
 import { buildShareUrl, readSharedCode } from "../encoding/shareLink";
 import { findBuilding, getAnomaly, levelValue } from "@reactor2/solver";
 import type { Tile } from "../types";
@@ -227,6 +227,21 @@ describe("preview mode", () => {
 
     expect(layoutState.placementAnomaly.id).toBe("tidal_ascendancy");
     expect(layoutState.placementPrestige?.cooler).toBeGreaterThan(1);
+  });
+
+  it("re-shares a previewed board under its author's rules", async () => {
+    await layoutState.loadPreview(await ruledCode(), READER_UNLOCKS);
+
+    // What `shareLayout` hands on from preview: the code's own rules, never
+    // the reader's — and a re-encode carries them through unchanged.
+    expect(layoutState.previewRules).toEqual(RULED);
+    const reshared = await decodeBlueprint(
+      await layoutState.exportBlueprint(layoutState.previewRules),
+    );
+    expect(reshared.rules).toEqual(RULED);
+
+    await layoutState.exitPreview(READER_UNLOCKS);
+    expect(layoutState.previewRules).toBeNull();
   });
 
   it("hands the player's own rules back when the preview ends", async () => {

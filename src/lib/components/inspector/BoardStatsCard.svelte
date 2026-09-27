@@ -15,6 +15,7 @@
     formatNumber,
     getAnomaly,
     levelIndexForValue,
+    PRESTIGE_UPGRADES,
   } from "@reactor2/solver";
   import { placementStatus } from "../../data/placements";
   import { ratedPlacementAt } from "../../simulation/simulator";
@@ -240,6 +241,44 @@
       resultAnomaly !== null &&
       (configState.hasAnomaly || resultAnomaly.rule !== "baseline"),
   );
+
+  /*
+   * A shared board's own anomaly, named when it has one. The figures above it
+   * are rated under the author's timeline, not the reader's (see
+   * `layoutState.placementAnomaly`), and without the row nothing on the card
+   * says so — the theme alone does not say *which* anomaly. Null off preview,
+   * and under the baseline, where there is nothing to name.
+   */
+  let previewAnomaly = $derived(
+    layoutState.isPreview && layoutState.placementAnomaly.rule !== "baseline"
+      ? layoutState.placementAnomaly
+      : null,
+  );
+
+  /*
+   * The shared board's Time Lab research, one entry per upgrade its code
+   * names, for the same reason as `previewAnomaly`: the figures are rated
+   * under it (`layoutState.placementPrestige`) and nothing else on screen says
+   * so. Walked in `PRESTIGE_UPGRADES` order, so the rows read as Setup's cards
+   * do; a level is clamped the way `prestigeScales` clamps it, so the row
+   * names the level the figures were actually rated at.
+   */
+  let previewResearch = $derived.by(() => {
+    const research = layoutState.previewRules?.research ?? {};
+    return PRESTIGE_UPGRADES.flatMap((upgrade) => {
+      const level = research[upgrade.id];
+      if (level === undefined) return [];
+      const idx = Math.max(0, Math.min(level, upgrade.bonuses.length - 1));
+      return [
+        {
+          id: upgrade.id,
+          name: upgrade.name,
+          level: idx + 1,
+          bonus: Math.round(upgrade.bonuses[idx] * 1000) / 10,
+        },
+      ];
+    });
+  });
 
   const plural = (n: number) => (n === 1 ? "building" : "buildings");
 
@@ -638,6 +677,22 @@
                 </div>
               {/if}
             </div>
+
+            {#if panel !== "solver" && previewAnomaly}
+              <div class="row">
+                <span class="row-label">Anomaly</span>
+                <span class="row-value">{previewAnomaly.name}</span>
+              </div>
+            {/if}
+
+            {#if panel !== "solver"}
+              {#each previewResearch as r (r.id)}
+                <div class="row">
+                  <span class="row-label">{r.name}</span>
+                  <span class="row-value">Lv. {r.level} · +{r.bonus}%</span>
+                </div>
+              {/each}
+            {/if}
 
             {#if panel === "solver"}
               <div class="row">

@@ -365,11 +365,13 @@
  * ── The anomaly theme ──────────────────────────────────────────────
  *
  * `App.svelte` sets `data-theme="anomaly"` on `.app-shell` whenever
- * `configState.hasAnomaly` is true — on every tab and every board, because
+ * `uiState.boardHasAnomaly` is true — on every tab and every board, because
  * that is what it says: this timeline is not running the ordinary rules, and
  * the island list, the roster and the board's figures are all read under them.
- * Nothing selected leaves the attribute off and every token below falls back
- * to the navy above, which is the common case.
+ * On a shared link that is the author's timeline, not the reader's, since it
+ * is the one the previewed board is rated under. Nothing selected leaves the
+ * attribute off and every token below falls back to the navy above, which is
+ * the common case.
  *
  * The values are sampled from the game's own "Choose an anomaly" screen, so
  * the cards on that tab sit on the ground they came from rather than floating
