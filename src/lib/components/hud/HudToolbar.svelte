@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { editorState, uiState, viewportState } from "../../state";
+  import {
+    editorState,
+    uiState,
+    viewportState,
+  } from "../../state";
   import type { BuildingCategory } from "@reactor2/solver";
   import {
     ArrowLeft,
@@ -112,6 +116,13 @@
   });
 
   function dismissConfigPanel() {
+    /*
+     * Nothing to dismiss while Setup is off screen for a run. Folding it there
+     * would still *persist* the collapse — `collapseSidebar` writes the
+     * preference — so a press on the view toggle mid-run would hand the user
+     * back a panel that had shut itself while they were not looking.
+     */
+    if (uiState.setupHidden) return;
     if (viewportState.isCompact) {
       if (uiState.sheetDetent !== "closed") uiState.setSheetDetent("closed");
     } else {
@@ -152,9 +163,11 @@
     374px of screen, so the toggle takes its own centred line above them and
     the other two take the ends of the row below. It renders itself away
     entirely when there is no solve to switch to, in which case neither line
-    costs anything.
+    costs anything — and on a phone the line goes for the length of a run as
+    well, so mid-run this stack is the action pill alone, Setup having gone
+    with the panel it opens.
   -->
-  {#if viewportState.isCompact && uiState.hasSolverPlacements}
+  {#if viewportState.isCompact && uiState.canSwitchBoards}
     <!--
       Right-aligned, not centred. Centred it sat in the middle of the line
       above Setup and Run, which are pinned to opposite edges — three pills in
@@ -162,14 +175,20 @@
       edge with the action pill below reads as one stack of board controls,
       and leaves Setup alone on the other side, which is what it is.
 
-      Rendered on the same condition the toggle itself uses, so an empty row
-      never contributes its gap to the stack's measured height.
+      Gated more tightly than the toggle itself, which holds its box through a
+      run so the wide-screen row does not re-centre around it. Here there is
+      nothing to hold: this line is the toggle and its gap, and on a phone
+      that is a whole row of chrome to leave standing empty. The pill below
+      is pinned to the band's right edge either way, so nothing moves by
+      taking the line away.
     -->
     <div class="view-row"><PlacementViewToggle /></div>
   {/if}
 
   <div class="hud-top">
-    {#if viewportState.isCompact}
+    {#if !viewportState.isCompact}
+      <PlacementViewToggle />
+    {:else if !uiState.setupHidden}
       <!--
         Setup lived in its own floating tab pinned to the bottom-right corner,
         stacked directly above this row. Two bottom-right pills on two lines
@@ -183,6 +202,12 @@
         that bought was a view of a board nothing could touch, at the cost of
         more than half the list the user came to read. Setup is a task you
         finish and leave, and the grabber still drags it back down.
+
+        It is gone for the length of a run, along with the panel it opens —
+        see `uiState.setupHidden`. The branches are ordered widest-first so
+        that case drops out of the chain entirely: written compact-first, a
+        phone mid-run would fall through to the docked layout's view toggle,
+        which is already on its own line above it.
       -->
       <button
         class="setup-btn"
@@ -192,8 +217,6 @@
         <SlidersHorizontal size={16} />
         <span>Setup</span>
       </button>
-    {:else}
-      <PlacementViewToggle />
     {/if}
     <BoardActions />
   </div>
@@ -215,7 +238,11 @@
       <BuildingPalette category={activeBuildingCategory} />
     {/if}
 
-    <div class="hud-modes ribbon" role="toolbar" aria-label="Editing tools">
+    <div
+      class="hud-modes ribbon"
+      role="toolbar"
+      aria-label="Editing tools"
+    >
       {#if hudMode === "tiles"}
         <TerrainPalette onEnterBuildings={enterBuildingsMode} />
       {:else}
@@ -354,10 +381,10 @@
   }
 
   /*
-   * The same pill the rest of the HUD stack wears. Neutral, not neon: it is
-   * not a selection, and neon means selection everywhere in this app — see the
-   * colour law in `app.css`. Neon here would say "chosen" of a panel that is
-   * closed.
+   * The same pill the rest of the HUD stack wears. Neutral, not accented: it
+   * is not a selection, and `--accent` means selection everywhere in this app
+   * — see the colour law in `app.css`. Accenting it would say "chosen" of a
+   * panel that is closed.
    */
   .setup-btn {
     display: flex;
@@ -367,17 +394,20 @@
     min-height: var(--tap);
     padding: 0 0.85rem;
     border-radius: var(--radius-pill);
-    background: rgba(10, 14, 23, 0.92);
+    background: rgba(var(--surface-panel-rgb), 0.92);
     backdrop-filter: blur(14px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     color: var(--text);
     font-size: var(--fs-sm);
     font-weight: 700;
     letter-spacing: 0.5px;
     white-space: nowrap;
     cursor: pointer;
+    transition:
+      border-color var(--dur) var(--ease),
+      color var(--dur) var(--ease);
     box-shadow:
-      0 0 30px var(--neon-faint),
+      0 0 30px var(--accent-faint),
       0 8px 32px rgba(0, 0, 0, 0.5);
   }
 
@@ -386,10 +416,17 @@
    * everything after it to the far end, which is the gap the two are meant to
    * have between them. `justify-content: center` still governs the wide-screen
    * case above, where the row is only as wide as its contents.
+   *
+   * `flex-end` is what holds the run pill still when Setup leaves for the
+   * length of a run. With an auto margin ahead of it the property does
+   * nothing, because auto margins take the free space first; with Setup gone
+   * it is the whole of the rule, and it keeps STOP where the finger that
+   * pressed RUN put it rather than centring it across the row.
    */
   @media (max-width: 1023px) {
     .hud-top {
       width: 100%;
+      justify-content: flex-end;
     }
 
     .setup-btn {
@@ -400,16 +437,24 @@
   /* ── Mode row ──────────────────────────────────────────────────── */
   .hud-modes {
     gap: 0.25rem;
-    background: rgba(10, 14, 23, 0.92);
+    background: rgba(var(--surface-panel-rgb), 0.92);
     backdrop-filter: blur(14px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius-pill);
     padding: 0.35rem 0.5rem;
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
     box-shadow:
       0 0 30px rgba(0, 243, 255, 0.06),
       0 8px 32px rgba(0, 0, 0, 0.5);
   }
 
+  /*
+   * Same reminder as the ribbons that sit above this row and the Setup pill
+   * beside it — see `BuildingPalette`. Only the ground moves; `.tool-btn.active`
+   * stays `--accent`, the same call Setup's own tabs make for the same reason.
+   */
   /*
    * Shared toolbar-button primitives. These are `:global` because the buttons
    * they style are rendered by `TerrainPalette` as well as by this component,
@@ -458,17 +503,17 @@
 
   /*
    * One active rule for every tool in the HUD, including the ones
-   * `TerrainPalette` renders into this row. Neon means selected; the icons say
-   * which tool that is. See the colour law in `app.css`.
+   * `TerrainPalette` renders into this row. `--accent` means selected; the
+   * icons say which tool that is. See the colour law in `app.css`.
    *
    * Two classes, so a per-tool modifier in a child component still outranks
    * it — which is exactly how `.erase-btn.active` stays red.
    */
   :global(.tool-btn.active) {
-    background: var(--neon-bg);
-    border-color: var(--neon-line);
-    color: var(--neon);
-    box-shadow: 0 0 14px var(--neon-glow);
+    background: var(--accent-bg);
+    border-color: var(--accent-line);
+    color: var(--accent);
+    box-shadow: 0 0 14px var(--accent-glow);
   }
 
   :global(.mode-icon) {

@@ -167,13 +167,55 @@
   // Seeded before the first run, so mounting does not re-score a board that
   // nothing has changed.
   let previousRoster = rosterSignature();
+  let previousAnomaly = configState.anomalyId;
+  let previousPrestige = configState.prestige;
 
+  /*
+   * The anomaly and the Time Lab research are the second and third inputs of
+   * this kind and are handled in the same effect, because it is the same
+   * argument: each changes what the buildings already on both boards are worth,
+   * not just what the next run may build.
+   *
+   * It is tracked separately from the roster rather than folded into one
+   * signature because the two ask for different work. A tier bought behind a
+   * standing building changes which tier that *placement* resolves to, which
+   * is what `rebasePlacements` re-reads; an anomaly changes none of them — the
+   * same building at the same tier is simply rated differently — so it needs
+   * the re-score and nothing else.
+   *
+   * Like a roster change, this deliberately does not re-optimise. That layout
+   * was chosen under the old rules and may no longer be the best shape or a
+   * stable one; what it reports is the honest output of those buildings under
+   * the new ones, and re-running is the player's call.
+   */
   $effect(() => {
     const signature = rosterSignature();
-    if (signature === previousRoster) return;
-    previousRoster = signature;
+    const anomaly = configState.anomalyId;
+    const prestige = configState.prestige;
+    if (
+      signature === previousRoster &&
+      anomaly === previousAnomaly &&
+      prestige === previousPrestige
+    )
+      return;
 
-    layoutState.rebasePlacements(configState.buildingUpgrades);
+    const rosterChanged = signature !== previousRoster;
+    const prestigeChanged = prestige !== previousPrestige;
+    const anomalyChanged = anomaly !== previousAnomaly;
+    previousRoster = signature;
+    previousAnomaly = anomaly;
+    previousPrestige = prestige;
+
+    if (rosterChanged)
+      layoutState.rebasePlacements(configState.buildingUpgrades);
+    // Research does not change which *tier* a placement is, only what that
+    // tier is worth — so the board is re-rated rather than re-based, and
+    // `setPrestige` re-scores on its own.
+    if (prestigeChanged) layoutState.setPrestige(prestige);
+    // Pushed for the same reason and by the same route: a terrain bonus is
+    // resolved per tile when the board is scored, so the readout has to be
+    // rating the board under the timeline the search is.
+    if (anomalyChanged) layoutState.setAnomaly(configState.activeAnomaly);
     solverState.rescoreResult();
   });
 </script>
@@ -187,9 +229,21 @@
   palette ribbon opens. `--preview-clearance` is the shared-link banner, which
   grows a line whenever an import is refused and is 0px on every board but a
   shared one. All three are published rather than assumed.
+
+  `data-theme` is the other thing this element carries, and it is the whole of
+  how an anomaly is signalled. The token rebindings live in one block in
+  `app.css`, and every surface inside the shell — the header, the HUD's pills,
+  the readout, Setup, the dialogs, the toast — follows without a single
+  component learning that anomalies exist. It hangs here rather than on each
+  panel because this is the one place allowed to see `configState` beside
+  everything else, and because a theme applied in eleven places is eleven
+  places to forget. It keys on the board's anomaly rather than the player's:
+  on a shared link those differ, and the theme follows the author's timeline
+  the board is rated under.
 -->
 <main
   class="app-shell"
+  data-theme={uiState.boardHasAnomaly ? "anomaly" : null}
   style:--header-clearance="{uiState.headerBottom}px"
   style:--sidebar-clearance="{uiState.sidebarWidth}px"
   style:--hud-clearance="{uiState.hudHeight}px"
@@ -233,7 +287,14 @@
     ></div>
   {/if}
 
-  {#if !readOnly && !uiState.uiHidden}
+  <!--
+    Setup is absent for the length of a run as well — see
+    `uiState.setupHidden`. Unmounted rather than folded: folding is a
+    preference the user owns (`sidebarCollapsed`, persisted), so a run would
+    hand them back a panel that had shut itself while they were watching the
+    board.
+  -->
+  {#if !readOnly && !uiState.uiHidden && !uiState.setupHidden}
     <ConfigSidebar />
   {/if}
 
@@ -420,7 +481,7 @@
     height: var(--tap);
     background: var(--surface-panel);
     backdrop-filter: blur(12px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius-pill);
     color: var(--text-muted);
     cursor: pointer;

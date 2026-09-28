@@ -1,7 +1,11 @@
 import type { CustomIsland } from "../types/building";
 import type { ImageScale, PlacementView } from "../types/ui";
 import { DEFAULT_SOLVE_MODE, type SolveModeId } from "../worker/solveModes";
-import type { OptimizationResult } from "@reactor2/solver";
+import {
+  DEFAULT_ANOMALY_ID,
+  type AnomalyId,
+  type OptimizationResult,
+} from "@reactor2/solver";
 
 export interface SavedTemplateData {
   /** Blueprint code — terrain and hand-placed buildings, see `lib/encoding/blueprint.ts`. */
@@ -18,6 +22,8 @@ export interface StoragePayload {
 const KEYS = {
   GRID_STATE: "grid_state",
   BUILDINGS: "buildings",
+  ANOMALY: "anomaly",
+  PRESTIGE: "prestige",
   UI: "ui_prefs",
   SOLVE: "solver_result",
 } as const;
@@ -121,6 +127,19 @@ export interface SavedSolveData {
   variants?: StoredPlacement[][];
   /** Which entry of `variants` the user applied. */
   selectedVariant?: number;
+  /**
+   * The anomaly `result`/`variants` were actually *searched* under.
+   *
+   * Not the same fact as the anomaly inside `signature`, which is the one the
+   * record was last filed under: re-scoring a standing solve after the player
+   * picks another anomaly re-rates its figures and re-files it under the new
+   * signature without searching again, so the shapes stay the old rules'.
+   * This is what survives the reload still saying so.
+   *
+   * Absent on a record written before the field existed, where a matching
+   * signature already settles it — see `solverState.restore`.
+   */
+  anomalyId?: AnomalyId;
   /** Wall-clock length of the run, in ms. */
   durationMs: number;
   /** When it finished, epoch ms. Shown as "solved N ago". */
@@ -184,6 +203,38 @@ export const buildingStorage = {
   loadBuildings: (): Record<string, number> => getItem(KEYS.BUILDINGS, {}),
   saveBuildings: (data: Record<string, number>): void =>
     setItem(KEYS.BUILDINGS, data),
+};
+
+/**
+ * The anomaly the player's current timeline is running under.
+ *
+ * Its own key rather than a field on `ui_prefs`, because it is not a
+ * preference about the app: it changes the rules a solve runs under, the way
+ * the roster does, and `solveSignature()` counts it for exactly that reason. A
+ * bare string, so a record written by a later build naming an anomaly this one
+ * has never heard of reads back and falls through `getAnomaly` to the baseline.
+ */
+export const anomalyStorage = {
+  loadAnomaly: (): string => getItem<string>(KEYS.ANOMALY, DEFAULT_ANOMALY_ID),
+  saveAnomaly: (id: string): void => setItem(KEYS.ANOMALY, id),
+};
+
+/**
+ * Time Lab research: upgrade id -> researched level index.
+ *
+ * Same shape and same rule as `buildingUpgrades` above — presence of the key is
+ * what "researched" means, and the value is a 0-based level index. Two records
+ * rather than one because they are unrelated catalogues, but one convention,
+ * because they are picked with the same control.
+ *
+ * Its own key rather than joining the anomaly's, even though both are timeline
+ * state: they are written by different controls at different times, and a
+ * shared record would make every research level rewrite the anomaly.
+ */
+export const prestigeStorage = {
+  loadPrestige: (): Record<string, number> => getItem(KEYS.PRESTIGE, {}),
+  savePrestige: (data: Record<string, number>): void =>
+    setItem(KEYS.PRESTIGE, data),
 };
 
 export const uiStorage = {

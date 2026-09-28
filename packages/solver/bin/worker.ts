@@ -13,6 +13,8 @@ import { BUILDINGS } from "../src/data/buildings";
 import { solveIsland } from "../src/solver/placementSearch";
 import { solve } from "../src/solver/solver";
 import type {
+  AnomalyDefinition,
+  AnomalyId,
   EffectiveBuilding,
   IslandSubGrid,
   Tile,
@@ -25,6 +27,7 @@ type Task =
       effectiveBuildings: EffectiveBuilding[];
       budgetS: number;
       seed?: number;
+      anomaly?: AnomalyDefinition;
     }
   | {
       kind: "attempt";
@@ -32,6 +35,7 @@ type Task =
       unlockedUpgrades: Record<string, number>;
       timeLimitS: number;
       seed?: number;
+      anomalyId?: AnomalyId;
     };
 
 parentPort?.on(
@@ -46,13 +50,14 @@ parentPort?.on(
               payload.budgetS,
               undefined,
               payload.seed,
+              payload.anomaly,
             )
           : await solve(
               payload.grid,
               [...BUILDINGS],
               payload.unlockedUpgrades,
               payload.timeLimitS,
-              undefined,
+              { anomalyId: payload.anomalyId },
               payload.seed,
             );
       parentPort?.postMessage({ meta, result });

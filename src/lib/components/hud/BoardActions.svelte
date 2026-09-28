@@ -101,13 +101,16 @@
     display: flex;
     align-items: center;
     gap: 0.2rem;
-    background: rgba(10, 14, 23, 0.92);
+    background: rgba(var(--surface-panel-rgb), 0.92);
     backdrop-filter: blur(14px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius-pill);
     padding: 0.25rem;
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
     box-shadow:
-      0 0 30px var(--neon-faint),
+      0 0 30px var(--accent-faint),
       0 8px 32px rgba(0, 0, 0, 0.5);
   }
 
@@ -167,8 +170,15 @@
     padding: 0 0.75rem;
     border-radius: var(--radius-pill);
     border: none;
-    background: var(--neon);
-    color: var(--surface-void);
+    /*
+     * `--action`, not `--accent`: a fill carrying ink is a different role from a
+     * stroke on a dark ground, and a theme answers the two differently. Under
+     * the anomaly theme this is the game's purple with white on it, while the
+     * selection lavender that `--accent` becomes could not carry either ink at
+     * AA. See the `--action` note in `app.css`.
+     */
+    background: var(--action);
+    color: var(--action-ink);
     font-size: var(--fs-base);
     font-weight: 700;
     letter-spacing: 0.5px;
@@ -185,7 +195,7 @@
   }
 
   .run:hover {
-    background: var(--neon-strong);
+    background: var(--action-hover);
   }
 
   /* Stopping is destructive of the run in progress, so it takes `--danger`. */

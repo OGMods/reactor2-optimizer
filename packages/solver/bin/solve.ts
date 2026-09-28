@@ -31,10 +31,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { ANOMALIES, DEFAULT_ANOMALY_ID } from "../src/data/anomalies";
 import { BUILDINGS, allUpgradesUnlocked } from "../src/data/buildings";
 import { getEffectiveBuildings } from "../src/data/effectiveBuildings";
 import {
   blueprintKey,
+  blueprintRules,
   decodeBlueprint,
   encodeBlueprint,
   placementTiers,
@@ -46,6 +48,7 @@ import {
   solve,
 } from "../src/solver/solver";
 import type {
+  AnomalyId,
   IslandLayout,
   OptimizationResult,
   Tile,
@@ -55,6 +58,7 @@ import { Leaderboard } from "./leaderboard";
 import { DEFAULT_MAP_NUM, MAPS, MAPS_BY_NUM, type CliMap } from "./maps";
 import { WorkerPool } from "./pool";
 import {
+  anomalyLine,
   printRunComparison,
   printSessionReport,
   printSummary,
@@ -101,7 +105,11 @@ const DEFAULT_TOP_N = 3;
  */
 const SEED_STRIDE = 100003;
 
-const TEST_FILENAME_RE = /^test_(\d+)\.txt$/;
+// The optional tail is the anomaly tag `anomalyTag` appends. It has to be
+// matched here rather than left to a looser pattern elsewhere: this regex is what
+// finds the previous ids, so a tagged filename it could not see would restart
+// numbering at 1 and overwrite an untagged run.
+const TEST_FILENAME_RE = /^test_(\d+)(?:_[a-z_]+)?\.txt$/;
 const ISLAND_FILENAME_RE = /^(\d+)_island_\d+_\d+.*\.txt$/;
 
 function nextOutputId(pattern: RegExp): number {
@@ -143,6 +151,7 @@ async function solveWithPool(
   unlockedUpgrades: Record<string, number>,
   timeBudgetS: number,
   seed: number | undefined,
+  anomalyId: AnomalyId | undefined,
   pool: WorkerPool | null,
 ): Promise<OptimizationResult> {
   const plan = planSolve(
@@ -151,6 +160,7 @@ async function solveWithPool(
     unlockedUpgrades,
     timeBudgetS,
     seed,
+    anomalyId,
   );
   if (!plan || plan.islands.length < 2 || !pool || pool.size < 2)
     return solve(
@@ -158,7 +168,7 @@ async function solveWithPool(
       [...BUILDINGS],
       unlockedUpgrades,
       timeBudgetS,
-      undefined,
+      { anomalyId },
       seed,
     );
 
@@ -176,6 +186,10 @@ async function solveWithPool(
         effectiveBuildings: plan.effectiveBuildings,
         budgetS: plan.budgetsS[i],
         seed: plan.seeds[i],
+        // The resolved definition rather than the id: the plan has already
+        // resolved it, and a worker re-resolving would be a second reading of
+        // the same string.
+        anomaly: plan.anomaly,
       },
     })),
     (i, result) => {
@@ -186,15 +200,51 @@ async function solveWithPool(
   return buildOptimizationResult(plan, results);
 }
 
+/**
+ * A run's blueprint code — the one code writer all three CLI paths go through.
+ *
+ * It states the rules as well as the tiers, which a share code must: a code with
+ * no rules section decodes as "rules unknown", and the app's preview then rates
+ * the board under *no* anomaly and no research. A coast-hugging Tidal layout
+ * would come back at roughly its baseline figure with nothing on screen saying
+ * why.
+ *
+ * The research table is **empty rather than absent**, which is a truthful
+ * statement and not the same claim: the CLI solves at full building unlocks and
+ * no Time Lab (there is no flag for one), so "the author had no research" is
+ * exactly what it knows. `DEFAULT_ANOMALY_ID` spells the absence of `--anomaly`
+ * for the same reason — "no anomaly" is a real choice, and stating it is what
+ * keeps a reader off their own.
+ */
 async function codeFor(
   grid: Tile[][],
   result: OptimizationResult,
+  anomalyId: AnomalyId | undefined,
 ): Promise<string> {
   return encodeBlueprint(
     grid,
     result.placements,
     placementTiers(result.placements),
+    blueprintRules(anomalyId ?? DEFAULT_ANOMALY_ID, {}),
   );
+}
+
+/**
+ * The anomaly marked into a filename, or nothing under the base rules.
+ *
+ * The same argument `anomalyLine` makes about a header, applied to the artifact:
+ * `solves/` accumulates across runs and a code says nothing from the outside, so
+ * a directory of three timelines is unreadable without opening every file. The
+ * precedent is `formatNumberForFilename` and the app's `layoutImageFilename` —
+ * the figure that identifies an artifact belongs in its name.
+ *
+ * The full id rather than an abbreviation of it: there is no second table to
+ * keep in step, and it is what `--anomaly` takes, so a filename can be pasted
+ * back into the flag that produced it. Empty under `none`, so every existing
+ * filename is unchanged.
+ */
+function anomalyTag(anomalyId: AnomalyId | undefined): string {
+  return !anomalyId || anomalyId === DEFAULT_ANOMALY_ID ? "" : `_${anomalyId}`;
 }
 
 async function solveMap(
@@ -205,6 +255,7 @@ async function solveMap(
   label: string,
   filenameFor: (run: SolveRun, bestPower: number) => string,
   seed: number | undefined,
+  anomalyId: AnomalyId | undefined,
   pool: WorkerPool | null,
 ): Promise<SolveRun[]> {
   const { grid } = await decodeBlueprint(gameMap.code);
@@ -219,13 +270,14 @@ async function solveMap(
       unlockedUpgrades,
       timeLimitS,
       offsetSeed(seed, runNum - 1),
+      anomalyId,
       pool,
     );
     results.push({
       runNum,
       result,
       elapsedS: (Date.now() - started) / 1000,
-      code: await codeFor(grid, result),
+      code: await codeFor(grid, result, anomalyId),
     });
   }
 
@@ -246,26 +298,29 @@ async function runSingle(
   unlockedUpgrades: Record<string, number>,
   timeLimitS: number,
   seed: number | undefined,
+  anomalyId: AnomalyId | undefined,
   pool: WorkerPool | null,
 ): Promise<void> {
   const testId = nextOutputId(TEST_FILENAME_RE);
+  const filename = `test_${testId}${anomalyTag(anomalyId)}.txt`;
   const runs = await solveMap(
     gameMap,
     unlockedUpgrades,
     1,
     timeLimitS,
     `Solving map ${gameMap.num} (test ID: ${testId})`,
-    () => `test_${testId}.txt`,
+    () => filename,
     seed,
+    anomalyId,
     pool,
   );
 
   const run = runs[0];
+  const rules = anomalyLine(anomalyId);
+  if (rules) console.log(rules);
   printSummary(run.result, run.elapsedS);
   console.log(`Blueprint: ${run.code}`);
-  console.log(
-    `Test output written to: ${path.join(SOLVES_DIR, `test_${testId}.txt`)}\n`,
-  );
+  console.log(`Test output written to: ${path.join(SOLVES_DIR, filename)}\n`);
 }
 
 async function runComparison(
@@ -274,17 +329,19 @@ async function runComparison(
   runs: number,
   timeLimitS: number,
   seed: number | undefined,
+  anomalyId: AnomalyId | undefined,
   pool: WorkerPool | null,
 ): Promise<void> {
   const sessionId = nextOutputId(ISLAND_FILENAME_RE);
+  const tag = anomalyTag(anomalyId);
 
   for (let idx = 0; idx < gameMaps.length; idx++) {
     const gameMap = gameMaps[idx];
     const filenameFor = (run: SolveRun, bestPower: number): string => {
       if (run.result.totalPower >= bestPower)
-        return `${sessionId}_island_${gameMap.num}_${run.runNum}_${formatNumberForFilename(bestPower)}.txt`;
+        return `${sessionId}_island_${gameMap.num}_${run.runNum}_${formatNumberForFilename(bestPower)}${tag}.txt`;
       const diff = formatNumberForFilename(bestPower - run.result.totalPower);
-      return `${sessionId}_island_${gameMap.num}_${run.runNum}_minus_${diff}.txt`;
+      return `${sessionId}_island_${gameMap.num}_${run.runNum}_minus_${diff}${tag}.txt`;
     };
 
     const mapRuns = await solveMap(
@@ -295,10 +352,11 @@ async function runComparison(
       `Map ${gameMap.num} [${idx + 1}/${gameMaps.length}]`,
       filenameFor,
       seed,
+      anomalyId,
       pool,
     );
 
-    printRunComparison(sessionId, gameMap.num, mapRuns);
+    printRunComparison(sessionId, gameMap.num, mapRuns, anomalyId);
     const best = mapRuns.reduce((a, b) =>
       b.result.totalPower > a.result.totalPower ? b : a,
     );
@@ -331,6 +389,7 @@ async function runSession(
     estimatedMaxPower: 0,
     topN: args.top,
     workers: inFlight,
+    anomalyId: args.anomalyId,
     powers: [],
     top: [],
     elapsedS: 0,
@@ -361,6 +420,7 @@ async function runSession(
         unlockedUpgrades,
         timeLimitS: args.timeLimitS,
         seed: offsetSeed(args.seed, i),
+        anomalyId: args.anomalyId,
       },
     })),
     (attempt, raw) => {
@@ -379,7 +439,7 @@ async function runSession(
           power: result.totalPower,
           attempt,
           activeTiles: result.activeTilesCount,
-          code: await codeFor(grid, result),
+          code: await codeFor(grid, result, args.anomalyId),
           key: blueprintKey(grid, result.placements),
         };
         board.offer(candidate);
@@ -427,10 +487,12 @@ interface Args {
   top: number;
   workers: number | undefined;
   seed: number | undefined;
+  anomalyId: AnomalyId | undefined;
 }
 
 const USAGE = `usage: solve [-h] [--map NUM] [--all] [--runs RUNS] [--time TIME_LIMIT_S]
              [--attempts N] [--top K] [--workers N] [--seed SEED]
+             [--anomaly ID]
 
 Decode a map, solve it, and report on the result.
 
@@ -448,9 +510,15 @@ options:
   --seed SEED    base seed for the search's random stream; narrows run-to-run
                  variance for debugging (stage deadlines remain wall-clock, so
                  runs are not bit-identical)
+  --anomaly ID   the timeline's anomaly (default: ${DEFAULT_ANOMALY_ID}).
+                 One of: ${ANOMALIES.map((a) => a.id).join(", ")}.
+                 Only the rules the solver implements take effect; the rest are
+                 accepted and ignored, exactly as in the app.
 
 This renders no picture. Each run writes its blueprint code to solves/, named
-after what it found; paste one into the app's Import to see the board.`;
+after what it found and after the anomaly it found it under; paste one into the
+app's Import to see the board. The code states its tiers and its anomaly, so the
+app rates the layout the way this run did.`;
 
 function parseArgs(argv: string[]): Args | null {
   const args: Args = {
@@ -462,6 +530,7 @@ function parseArgs(argv: string[]): Args | null {
     top: DEFAULT_TOP_N,
     workers: undefined,
     seed: undefined,
+    anomalyId: undefined,
   };
 
   const takeValue = (
@@ -533,6 +602,23 @@ function parseArgs(argv: string[]): Args | null {
         [raw, i] = takeValue(flag, inline, i);
         args.seed = asInt(flag, raw);
         break;
+      case "--anomaly":
+        [raw, i] = takeValue(flag, inline, i);
+        // Checked here rather than left to `getAnomaly`, which is total and
+        // would silently run the base rules on a typo — fine for an id off
+        // localStorage, useless for one a person just typed.
+        {
+          const match = ANOMALIES.find((a) => a.id === raw);
+          if (!match) {
+            throw new Error(
+              `unknown anomaly '${raw}'. One of: ${ANOMALIES.map((a) => a.id).join(", ")}`,
+            );
+          }
+          // Taken off the table entry rather than off the argument, so what is
+          // carried is an `AnomalyId` and not a string that happens to match.
+          args.anomalyId = match.id;
+        }
+        break;
       default:
         throw new Error(`unrecognized arguments: ${token}`);
     }
@@ -590,6 +676,7 @@ export async function main(argv: string[]): Promise<number> {
         args.runs,
         args.timeLimitS,
         args.seed,
+        args.anomalyId,
         pool,
       );
     else
@@ -598,6 +685,7 @@ export async function main(argv: string[]): Promise<number> {
         unlockedUpgrades,
         args.timeLimitS,
         args.seed,
+        args.anomalyId,
         pool,
       );
   } finally {

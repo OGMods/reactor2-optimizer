@@ -16,8 +16,13 @@ import {
   blueprintKey,
   decodeBlueprint,
   encodeBlueprint,
+  getAnomaly,
   placementTiers,
+  prestigeScales,
+  type AnomalyDefinition,
+  type BlueprintRules,
   type DecodedBlueprint,
+  type PrestigeScales,
 } from "@reactor2/solver";
 import {
   createPlacement,
@@ -575,10 +580,24 @@ class LayoutState {
    * Saving to `localStorage` deliberately goes the other way and records no
    * tiers at all — see `#writeBlueprint`.
    */
+  /**
+   * The share code for a board: its shape, its tiers, **and the rules it was
+   * built under**.
+   *
+   * The rules are passed in rather than read, for the same reason the unlock
+   * levels are — this class reaches nothing else in the state layer, and both
+   * the anomaly and the research live on `configState`.
+   */
   exportBlueprint(
+    rules: BlueprintRules | null,
     placements: readonly PlacedBuilding[] = this.placements,
   ): Promise<string> {
-    return encodeBlueprint(this.grid, placements, placementTiers(placements));
+    return encodeBlueprint(
+      this.grid,
+      placements,
+      placementTiers(placements),
+      rules ?? undefined,
+    );
   }
 
   // ── Preview: someone else's board, opened from a link ────────────────────
@@ -593,6 +612,13 @@ class LayoutState {
    * saw. A code from before the table existed names none, and those buildings
    * fall back to the visitor's levels — the best guess available, and what
    * every reader did before there was anything better.
+   *
+   * The same argument runs one level up: a tier is only worth what the author's
+   * Time Lab research made it worth, so a code that carries rules rates the
+   * board with **the author's** research, and one that carries none rates it
+   * with no research at all. That is the honest reading of silence — an old
+   * code cannot tell us, and reaching for the reader's own would restate
+   * someone else's board in figures they never saw.
    *
    * Nothing here is persisted and `activeTemplateId` is left alone, so the
    * island the visitor was last on is still selected underneath and
@@ -619,6 +645,7 @@ class LayoutState {
     this.grid = decoded.grid;
     this.width = decoded.width;
     this.height = decoded.height;
+    this.#previewRules = decoded.rules;
     this.placements = decoded.placements.map((p) => {
       const tier = decoded.tiers[p.buildingId];
       return tier === undefined
@@ -646,6 +673,14 @@ class LayoutState {
   async exitPreview(unlockedUpgrades: Record<string, number>) {
     if (!this.isPreview) return;
     this.#previewCode = null;
+    // Dropped with the code, and it has to be: the rules are the *author's*
+    // timeline, and `hydrate()` below brings back a board that was never built
+    // under them. Both accessors that read them branch on `isPreview` first, so
+    // nothing would have printed a wrong figure today — but leaving the
+    // author's research hanging on the singleton makes that guard the only
+    // thing standing between a re-scored board and someone else's timeline,
+    // and a guard is a weaker guarantee than there being nothing to guard.
+    this.#previewRules = null;
     await this.hydrate(unlockedUpgrades);
   }
 
@@ -664,16 +699,24 @@ class LayoutState {
   ): Promise<IslandTemplate> {
     const code = this.#previewCode;
     if (code === null) throw new Error("There is no shared layout to import.");
+    const rules = this.#previewRules;
 
     // Cleared first: importBlueprint writes, and writes are barred in preview.
+    // The rules go with the code, for the reason `exitPreview` gives — and here
+    // there is a second: the adopted board is re-based to the visitor's own
+    // unlocks on the way in, so keeping the author's research would rate their
+    // own buildings under a timeline they were never in.
     this.#previewCode = null;
+    this.#previewRules = null;
     try {
       return await this.importBlueprint(code, unlockedUpgrades);
     } catch (err) {
       // The import was refused — at the island cap, or a board with two
       // transformers. Put the visitor back in front of what they were reading
-      // rather than dropping them onto a board they did not ask for.
+      // rather than dropping them onto a board they did not ask for, rules and
+      // all: they are still reading the author's board.
       this.#previewCode = code;
+      this.#previewRules = rules;
       throw err;
     }
   }
@@ -1045,7 +1088,94 @@ class LayoutState {
       this.grid,
       BUILDINGS,
       this.placements,
+      // A previewed board is the author's, rated at the author's research —
+      // the same reason `rebasePlacements` sits preview out. The code now says
+      // what that research was, so it is used; a code that does not say rates
+      // the board unresearched, which is the honest reading of silence and
+      // never the reader's own.
+      this.isPreview ? this.#previewPrestige : this.#prestige,
+      this.placementAnomaly,
     );
+  }
+
+  /**
+   * The Time Lab research every placement is rated under.
+   *
+   * Pushed in rather than read, because this class imports nothing from the
+   * rest of the state layer and `configState` is where research lives — the
+   * same arrangement `rebasePlacements` uses for unlock levels, except that
+   * `recalculate()` is called from a dozen internal places that cannot all take
+   * an argument, so it is held instead of passed.
+   */
+  #prestige: PrestigeScales | undefined;
+
+  /**
+   * The rules a previewed board names, and the scales they resolve to. Null off
+   * a code that carries none — see `loadPreview`.
+   */
+  #previewRules = $state<BlueprintRules | null>(null);
+
+  #previewPrestige = $derived(
+    this.#previewRules
+      ? prestigeScales(this.#previewRules.research)
+      : undefined,
+  );
+
+  /**
+   * The research every placement on the board **currently on screen** is rated
+   * under — the author's on a previewed board, the player's otherwise.
+   *
+   * Exposed because a reader of those placements has to resolve them the same
+   * way `recalculate()` did. Reaching for `configState.prestige` instead puts a
+   * previewed building's used figures on the author's research and its ceilings
+   * on the reader's, which prints rows like "259AC / 51.8AC" and can paint a
+   * perfectly cooled building red.
+   */
+  get placementPrestige(): PrestigeScales | undefined {
+    return this.isPreview ? this.#previewPrestige : this.#prestige;
+  }
+
+  setPrestige(scales: PrestigeScales) {
+    if (this.#prestige === scales) return;
+    this.#prestige = scales;
+    this.recalculate();
+  }
+
+  /**
+   * The anomaly every placement is rated under. Held rather than read, for the
+   * same reason as `#prestige`.
+   */
+  #anomaly: AnomalyDefinition = getAnomaly(undefined);
+
+  /**
+   * The anomaly the board **on screen** is rated under — the author's on a
+   * previewed board, the player's otherwise.
+   *
+   * A previewed board sits the player's timeline out exactly as it sits their
+   * research out: the code says which anomaly built it, and a code that does
+   * not say rates it under none. Taking the reader's own would rate someone
+   * else's shoreline under rules it was never laid out for.
+   */
+  /**
+   * The rules the previewed board's code names, exactly as it named them —
+   * null off preview, and null on a code that says nothing. Exposed so a board
+   * re-shared from preview carries the author's rules onward rather than the
+   * reader's, and silence onward as silence.
+   */
+  get previewRules(): BlueprintRules | null {
+    return this.isPreview ? this.#previewRules : null;
+  }
+
+  get placementAnomaly(): AnomalyDefinition {
+    return this.isPreview
+      ? getAnomaly(this.#previewRules?.anomalyId ?? undefined)
+      : this.#anomaly;
+  }
+
+  setAnomaly(anomaly: AnomalyDefinition) {
+    if (this.#anomaly === anomaly) return;
+    this.#anomaly = anomaly;
+    this.recalculate();
   }
 }
 

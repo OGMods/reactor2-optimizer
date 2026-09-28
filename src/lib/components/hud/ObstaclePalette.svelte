@@ -94,11 +94,16 @@
     gap: 0.3rem;
     background: var(--surface-sunken);
     backdrop-filter: blur(16px);
-    border: 1px solid var(--border-neon);
-    border-radius: var(--radius-pill);
+    border: 1px solid var(--border-accent);
+    /* `--radius-lg`, not the pill the buttons inside it are not shaped like —
+       see the note in `BuildingPalette`. */
+    border-radius: var(--radius-lg);
     padding: 0.35rem 0.5rem;
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
     box-shadow:
-      0 0 30px var(--neon-faint),
+      0 0 30px var(--accent-faint),
       0 8px 32px rgba(0, 0, 0, 0.5);
   }
 
@@ -128,11 +133,11 @@
     color: var(--text);
   }
 
-  /* Selected is neon, as everywhere else — see the law in `app.css`. */
+  /* Selected takes the accent, as everywhere else — see the law in `app.css`. */
   .obs-btn.active {
-    background: var(--neon-bg);
-    border-color: var(--neon-line);
-    color: var(--neon);
+    background: var(--accent-bg);
+    border-color: var(--accent-line);
+    color: var(--accent);
   }
 
   .tile-icon-wrapper {
@@ -158,7 +163,6 @@
   @media (max-width: 640px) {
     .obstacle-panel {
       width: 100%;
-      border-radius: var(--radius-lg);
     }
   }
 </style>

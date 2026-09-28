@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { MIN_GRID_DIM } from "@reactor2/solver";
   import { layoutState } from "../../state";
   import { Minus, Plus } from "lucide-svelte";
 
@@ -13,7 +14,13 @@
 
   let { variant = "inline" }: Props = $props();
 
-  const MIN = 5;
+  /*
+   * The floor is the codec's, not this component's. A blueprint written before
+   * the format carried a version byte is recognised by its first byte being a
+   * width rather than a version, and that test is "at least `MIN_GRID_DIM`" —
+   * so a smaller board here would have made some old codes unreadable.
+   */
+  const MIN = MIN_GRID_DIM;
   const MAX = 30;
 
   /*
@@ -82,7 +89,10 @@
   </div>
 {/snippet}
 
-<div class="grid-controls" class:stacked={variant === "stacked"}>
+<div
+  class="grid-controls"
+  class:stacked={variant === "stacked"}
+>
   {@render stepper("Width", layoutState.width, setWidth)}
   {@render stepper("Height", layoutState.height, setHeight)}
 </div>
@@ -116,7 +126,7 @@
     display: flex;
     align-items: center;
     background: rgba(20, 28, 46, 0.8);
-    border: 1px solid var(--neon-dim);
+    border: 1px solid var(--accent-dim);
     border-radius: var(--radius-sm);
     overflow: hidden;
   }
@@ -130,13 +140,13 @@
     height: var(--ctl-sm);
     background: transparent;
     border: none;
-    color: var(--neon);
+    color: var(--accent);
     cursor: pointer;
     transition: background var(--dur-fast);
   }
 
   .step-btn:hover:not(:disabled) {
-    background: var(--neon-bg);
+    background: var(--accent-bg);
   }
 
   .step-btn:disabled {
@@ -150,7 +160,7 @@
     border: none;
     border-left: 1px solid var(--border);
     border-right: 1px solid var(--border);
-    color: var(--neon);
+    color: var(--accent);
     font-family: var(--mono);
     font-size: var(--fs-md);
     font-weight: 600;

@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { layoutState, uiState, viewportState } from "../../state";
+  import {
+    layoutState,
+    uiState,
+    viewportState,
+  } from "../../state";
   import { LocateFixed, Share2 } from "lucide-svelte";
   import { asset } from "../../utils";
   import GridControls from "./GridControls.svelte";
@@ -130,9 +134,12 @@
     gap: 0.75rem;
     background: var(--surface-panel);
     backdrop-filter: blur(12px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius);
     padding: 0.5rem 0.85rem;
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
   }
 
   .logo {
@@ -201,7 +208,7 @@
   /*
    * Both header actions are neutral, and that is the point.
    *
-   * Center View was neon and Share was `--amber` — two accents in a bar whose
+   * Center View took the accent and Share `--amber` — two of them in a bar whose
    * job is to sit out of the way, and the amber one was the exact colour the
    * board uses to report an idle building. Under the colour law in `app.css`
    * neither of these is a selection and neither destroys anything, so neither
@@ -217,7 +224,7 @@
 
   .action-btn:hover {
     background: var(--surface-raised);
-    border-color: var(--neon-dim);
+    border-color: var(--accent-dim);
     color: var(--text);
   }
 

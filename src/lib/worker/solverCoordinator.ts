@@ -101,6 +101,8 @@ export class SolverCoordinator {
       unlockedUpgrades,
       timeBudgetS,
       rngSeed,
+      options?.anomalyId,
+      options?.prestige,
     );
     if (!plan)
       return [createEmptyResult(grid?.[0]?.length ? countGrassTiles(grid) : 0)];
@@ -279,6 +281,10 @@ export class SolverCoordinator {
           effectiveBuildings: plan.effectiveBuildings,
           timeBudgetS: plan.budgetsS[index],
           reportIntervalMs: options?.reportIntervalMs,
+          // Resolved once by `planSolve` and sent as an id: the worker resolves
+          // it again on the far side, which keeps the message a plain string
+          // rather than a table entry that has to survive structured cloning.
+          anomalyId: plan.anomaly.id,
           // Every attempt needs its own random stream — running the same walk
           // ten times over would only cost ten times as much. An unseeded run
           // gets a fresh stream per task already; a seeded one is offset so it

@@ -28,7 +28,14 @@ import type {
 
 /** A pure heat source: heat out, no power and nothing to cool. */
 export function reactor(value: number, id = "reactor"): EffectiveBuilding {
-  return { id, type: "reactor", effectiveValue: value, energy: 0, waste: 0 };
+  return {
+    id,
+    type: "reactor",
+    effectiveValue: value,
+    energy: 0,
+    waste: 0,
+    baseValue: value,
+  };
 }
 
 /** Converts reactor heat to power; `value` is its max heat input H_max. */
@@ -39,11 +46,19 @@ export function generator(value: number, id = "generator"): EffectiveBuilding {
     effectiveValue: value,
     energy: value * GENERATOR_ENERGY_RATIO,
     waste: value * GENERATOR_WASTE_RATIO,
+    baseValue: value,
   };
 }
 
 export function cooler(value: number, id = "cooler"): EffectiveBuilding {
-  return { id, type: "cooler", effectiveValue: value, energy: 0, waste: 0 };
+  return {
+    id,
+    type: "cooler",
+    effectiveValue: value,
+    energy: 0,
+    waste: 0,
+    baseValue: value,
+  };
 }
 
 /**
@@ -63,6 +78,7 @@ export function directProducer(
     effectiveValue: value,
     energy: value * (1 - wasteRatio),
     waste: value * wasteRatio,
+    baseValue: value,
   };
 }
 

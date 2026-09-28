@@ -1,4 +1,5 @@
 import type { OptimizationResult, PlacedBuilding } from "../types";
+import { DEFAULT_ANOMALY_ID, type AnomalyId } from "@reactor2/solver";
 import {
   SolverWorkerClient,
   type SolveTaskHandle,
@@ -229,6 +230,21 @@ class SolverState {
   isRestored = $state(false);
 
   /**
+   * The anomaly the on-screen shortlist was actually *searched* under.
+   *
+   * Not `configState.activeAnomaly.id`, and the gap between the two is the
+   * whole point of the field. `rescoreResult()` re-rates every variant's
+   * figures under a newly selected anomaly but never searches again, so the
+   * shapes on screen go on being the ones some other set of rules produced —
+   * this is what still says which. A run in flight sets it to `#runAnomalyId`
+   * for the same reason: the search reads the anomaly once, at launch, so
+   * moving the selection while one is running cannot change what it returns.
+   *
+   * Null until a result exists at all.
+   */
+  resultAnomalyId = $state<AnomalyId | null>(null);
+
+  /**
    * How the next run spends its time: one long search, or several short ones.
    *
    * Persisted, because it is a standing answer to "how much wall-clock am I
@@ -243,16 +259,20 @@ class SolverState {
   #ticker: ReturnType<typeof setInterval> | null = null;
 
   /**
-   * The island a run was started on, and the board it was started against.
+   * The island a run was started on, the board it was started against, and
+   * the rules it was started under.
    *
    * A solve belongs to the island it was launched from, not to whatever is on
-   * screen when it lands: the user may switch away mid-run. Both are captured
-   * at the start so the result is filed under the right island with the right
-   * signature, and so a late progress report cannot paint itself over a
-   * different board.
+   * screen when it lands: the user may switch away mid-run. All three are
+   * captured at the start so the result is filed under the right island with
+   * the right signature, so a late progress report cannot paint itself over a
+   * different board, and so every stage of the run — the request, the streamed
+   * layouts, the record — names the one anomaly it was actually searched
+   * under.
    */
   #runTemplateId = "";
   #runSignature = "";
+  #runAnomalyId: AnomalyId = DEFAULT_ANOMALY_ID;
 
   #client = new SolverWorkerClient({
     reportIntervalMs: 1000, // 1 second
@@ -294,16 +314,21 @@ class SolverState {
     const effectiveBuildings = getEffectiveBuildings(
       BUILDINGS,
       configState.buildingUpgrades,
+      configState.prestige,
     );
     if (!effectiveBuildings.length) return 0;
 
     const islands = splitGridIntoIslands(
       grid,
       canCoolDirectProducer(effectiveBuildings),
+      configState.activeAnomaly,
     );
     if (!islands.length) return 0;
 
-    const tileCounts = islands.map((island) => countGrassTiles(island.grid));
+    // `tileCount`, not the window's grass: an island's sub-grid is padded and
+    // carries the board's real terrain, so a neighbouring island's tiles sit
+    // inside it and counting them would inflate every budget estimate.
+    const tileCounts = islands.map((island) => island.tileCount);
     return estimateMakespanMs(
       taskDurationsMs(mode, tileCounts),
       defaultPoolSize(),
@@ -329,12 +354,33 @@ class SolverState {
     if (!grid || !grid.length || !grid[0] || !grid[0].length) return 0;
 
     const upgrades = configState.buildingUpgrades;
-    const effectiveBuildings = getEffectiveBuildings(BUILDINGS, upgrades);
+    const effectiveBuildings = getEffectiveBuildings(
+      BUILDINGS,
+      upgrades,
+      configState.prestige,
+    );
     if (!effectiveBuildings.length) return 0;
 
     const hasCoolingSupport = canCoolDirectProducer(effectiveBuildings);
-    const subGrids = splitGridIntoIslands(grid, hasCoolingSupport);
-    return estimateTotalMaxPower(subGrids, effectiveBuildings);
+    // The same anomaly the run will be planned under, because the anomaly
+    // changes the decomposition itself: under a shared cooling pool there are
+    // no islands at all — `splitGridIntoIslands` hands the whole board over as
+    // one, unbuildable scraps and one-tile patches included, since a pool that
+    // spans the map makes every grass tile part of one problem. A bound that
+    // decomposed the board differently from the run would be measured against
+    // another board. It is passed to the estimate below for a second reason: a
+    // terrain bonus rates some tiles above the roster, so a bound computed on
+    // the plain roster is one a real layout walks past.
+    const subGrids = splitGridIntoIslands(
+      grid,
+      hasCoolingSupport,
+      configState.activeAnomaly,
+    );
+    return estimateTotalMaxPower(
+      subGrids,
+      effectiveBuildings,
+      configState.activeAnomaly,
+    );
   }
 
   /** How many layouts this solve offers. Below two, there is nothing to cycle. */
@@ -382,7 +428,15 @@ class SolverState {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([id, level]) => `${id}:${level}`)
       .join(",");
-    return `${blueprintKey(layoutState.grid)}|${roster}`;
+    // The anomaly and the Time Lab research are both part of the rules the
+    // layout was found under, so a solve from another set describes a board
+    // that no longer exists — stale in exactly the way a cleared obstacle or a
+    // bought upgrade is.
+    const research = Object.entries(configState.prestigeLevels)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([id, level]) => `${id}:${level}`)
+      .join(",");
+    return `${blueprintKey(layoutState.grid)}|${roster}|${configState.anomalyId}|${research}`;
   }
 
   /**
@@ -434,6 +488,12 @@ class SolverState {
     this.finishedAt = saved.finishedAt;
     this.isRestored = true;
     this.optimizationError = null;
+    // Off the record rather than assumed from `configState`: the two are
+    // allowed to disagree, once `rescoreResult` has left them that way. A
+    // record written before this field existed carries none — but the anomaly
+    // was already folded into `signature` by then, and the signature matched
+    // to get here, so the current selection is what it was found under.
+    this.resultAnomalyId = saved.anomalyId ?? configState.activeAnomaly.id;
   }
 
   /**
@@ -446,7 +506,13 @@ class SolverState {
     bound: number,
   ): OptimizationResult {
     const grid = layoutState.grid;
-    const scored = simulatePlacedBuildings(grid, BUILDINGS, placements);
+    const scored = simulatePlacedBuildings(
+      grid,
+      BUILDINGS,
+      placements,
+      configState.prestige,
+      configState.activeAnomaly,
+    );
 
     let totalPower = 0;
     let totalHeatProduced = 0;
@@ -487,6 +553,7 @@ class SolverState {
     this.finishedAt = null;
     this.elapsedMs = 0;
     this.isRestored = false;
+    this.resultAnomalyId = null;
   }
 
   /**
@@ -531,12 +598,14 @@ class SolverState {
     if (this.variants.length === 0) return;
 
     const upgrades = configState.buildingUpgrades;
-    // `null` from each variant that nothing moved on; if that is all of them,
-    // the roster change did not touch this board and there is nothing to do.
+    // `null` from each variant that no *tier* moved on. That is not a reason to
+    // stop: this also runs for an anomaly or a Time Lab change, neither of which
+    // moves a tier — they change what the same tier is worth. Returning early
+    // there left the panel printing figures from the old rules and, worse, left
+    // the stored record under the old signature, so a reload dropped the solve.
     const rebased = this.variants.map((variant) =>
       rebaseToUnlocks(variant.placements, upgrades),
     );
-    if (rebased.every((placements) => placements === null)) return;
 
     // Every variant is re-rated, not just the one on screen: they are all this
     // island's answer and the user can cycle to any of them. A tier bought
@@ -548,6 +617,12 @@ class SolverState {
       this.#scoreLayout(placements ?? this.variants[i].placements, bound),
     );
     this.optimizationResult = this.variants[this.variantIndex] ?? null;
+    // `resultAnomalyId` deliberately stays where it is. This puts every
+    // variant's *figures* under the current anomaly but searches nothing, so
+    // the shapes are still the ones the old rules produced. Moving it to the
+    // current selection erased the "solved under a different timeline" warning
+    // it exists to raise, and let Run's "keep the better one?" dialog defend a
+    // layout that had never been searched under the new rules.
 
     this.#persistCurrent();
   }
@@ -581,6 +656,7 @@ class SolverState {
     finishedAt: number,
     templateId: string,
     signature: string,
+    anomalyId: AnomalyId,
   ) {
     const applied = variants[selectedVariant];
     if (!applied) return;
@@ -595,6 +671,7 @@ class SolverState {
         toStoredPlacements($state.snapshot(v).placements),
       ),
       selectedVariant,
+      anomalyId,
       durationMs,
       finishedAt,
     });
@@ -612,6 +689,10 @@ class SolverState {
     if (this.variants.length === 0) return;
     if (this.lastRunDurationMs === null || this.finishedAt === null) return;
 
+    // `resultAnomalyId`, not the current selection: `rescoreResult` calls this
+    // after re-rating the figures under a newly chosen anomaly without
+    // re-searching, and the record has to keep saying which one the *shape*
+    // was found under.
     this.#persistResult(
       this.variants,
       this.appliedVariant,
@@ -619,6 +700,7 @@ class SolverState {
       this.finishedAt,
       layoutState.activeTemplateId,
       this.solveSignature(),
+      this.resultAnomalyId ?? configState.activeAnomaly.id,
     );
   }
 
@@ -663,11 +745,20 @@ class SolverState {
         : null;
     const previousDurationMs = this.lastRunDurationMs;
     const previousFinishedAt = this.finishedAt;
+    const previousAnomalyId = this.resultAnomalyId;
 
-    // Captured before anything can await: this is the island being solved, and
-    // the board it is being solved against.
+    // Captured before anything can await: this is the island being solved, the
+    // board it is being solved against, and the rules it is solved under.
     this.#runTemplateId = layoutState.activeTemplateId;
     this.#runSignature = this.solveSignature();
+    this.#runAnomalyId = configState.activeAnomaly.id;
+    // Setup is hidden for the run, but `solve_done` should still name the
+    // rules the run started with rather than re-read them at the end.
+    const runRules = configState.rulesParams();
+    // The streamed and then finished layouts are both searched under the
+    // anomaly launched with, which the player may move off before either
+    // lands — see `resultAnomalyId`.
+    this.resultAnomalyId = this.#runAnomalyId;
 
     this.isOptimizing = true;
     this.isStopping = false;
@@ -683,6 +774,7 @@ class SolverState {
       island: this.#runTemplateId,
       tiles: countGrassTiles(layoutState.grid),
       roster: Object.keys(configState.buildingUpgrades).length,
+      ...runRules,
       cores:
         typeof navigator !== "undefined"
           ? navigator.hardwareConcurrency || 0
@@ -737,7 +829,18 @@ class SolverState {
             return;
           this.optimizationResult = progressResult;
         },
-        { attempts: mode.attempts, attemptBudgetMs: mode.attemptBudgetMs },
+        {
+          attempts: mode.attempts,
+          attemptBudgetMs: mode.attemptBudgetMs,
+          // The rules this timeline runs under, and both halves have to be
+          // here: the research reaches the search only through `prestige`,
+          // because the coordinator resolves the roster itself, and the anomaly
+          // only through `anomalyId`, because every rule that reads it is
+          // resolved on the far side of the worker boundary — per tile, per
+          // layout, or in how the board is split.
+          anomalyId: this.#runAnomalyId,
+          prestige: configState.prestige,
+        },
       );
       this.activeTask = handle;
       this.#startWatchdog(mode);
@@ -782,6 +885,11 @@ class SolverState {
         const finishedAt = defended
           ? (previousFinishedAt ?? Date.now())
           : Date.now();
+        // A defended shortlist is the *held* layouts, rated under whatever
+        // anomaly was selected when they were made — not this run's.
+        const winningAnomalyId = defended
+          ? (previousAnomalyId ?? this.#runAnomalyId)
+          : this.#runAnomalyId;
 
         // Filed under the island it was started on, whether or not that is
         // still the one being looked at.
@@ -792,6 +900,7 @@ class SolverState {
           finishedAt,
           this.#runTemplateId,
           this.#runSignature,
+          winningAnomalyId,
         );
         if (onScreen()) {
           this.variants = variants;
@@ -801,6 +910,7 @@ class SolverState {
           this.elapsedMs = winningDurationMs;
           this.lastRunDurationMs = winningDurationMs;
           this.finishedAt = finishedAt;
+          this.resultAnomalyId = winningAnomalyId;
         }
         donePower = variants[selected]?.totalPower ?? 0;
       } else if (onScreen()) {
@@ -820,6 +930,7 @@ class SolverState {
         this.lastRunDurationMs = previousDurationMs;
         this.finishedAt = previousFinishedAt;
         this.elapsedMs = previousDurationMs ?? 0;
+        this.resultAnomalyId = previousAnomalyId;
       }
 
       // Every `solve_run` gets one of these, so a status other than `ok` is
@@ -835,6 +946,7 @@ class SolverState {
         bound: Math.round(bound),
         bound_pct: bound > 0 ? Math.round((donePower / bound) * 100) : 0,
         variants: this.variants.length,
+        ...runRules,
       });
     }
   }

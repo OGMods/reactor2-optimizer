@@ -59,7 +59,8 @@ assume them.
 
 - **Hidden, not disabled.** A control that cannot act in the current mode is not
   rendered — the grid steppers on a shipped island, the terrain brushes over the
-  solver's board, `PlacementViewToggle` with no solve, the variants row during a
+  solver's board, the whole of Setup while a run is in flight,
+  `PlacementViewToggle` with no solve or during one, the variants row during a
   run. Screen space on a phone is scarce and a row of inert buttons explains
   nothing. The one exception is `BoardActions`' Undo/Redo, which are _disabled_:
   they must stay findable before there is anything to undo, and a control that
@@ -100,21 +101,421 @@ place that resolves them, so a panel cannot disagree with the layout it
 describes. It answers two questions that must not be confused:
 `getEffectiveBuildings` reads the player's _unlock level_ ("what may the solver
 build?"), while `effectiveAtValue` resolves a **placed** building's tier from
-the value it was placed at ("what is this one rated for?"). The scorer and the
-board readout both use the latter, so the ceilings the card prints are the tier
-the building actually ran at — the two diverge the moment an upgrade is bought
-behind a standing building.
+the value it was placed at ("what is this one rated for?"). The scorer resolves a
+placement through the latter and the board readout takes its ceilings from the
+scorer, so the ceilings the card prints are the tier the building actually ran at
+— the two diverge the moment an upgrade is bought behind a standing building.
+The readout goes through the scorer rather than calling `effectiveAtValue` itself
+because a tier is not the whole answer once an anomaly rates the tile as well;
+see the readout's own section.
 
 **The catalogue is generated, so don't hand-edit it.** An external extraction
-script in `tools/` (gitignored — it reads the game's own files and does not
-ship) emits the `BUILDING_TABLE` block in `packages/solver/src/data/buildings.ts`
-from the extracted roster. It splices only that declaration; the prose and the
-helpers around it are hand-owned and survive regeneration.
+script — it reads the game's own files and is not part of this repo — emits the
+`BUILDING_TABLE` block in `packages/solver/src/data/buildings.ts` from the
+extracted roster. It splices only that declaration; the prose and the helpers
+around it are hand-owned and survive regeneration.
 
 The tables carry the game's **authored ScriptableObject doubles**, not the
 3-significant-figure numbers its UI shows and not the extractor's rounded JSON
 (which loses 22 of the roster's 301 numbers): cooler2 tier 3 is 18662, not
 1.86e4.
+
+## The Time Lab: research and anomalies
+
+Prestiging ("Time Jump") does two things to the numbers, and Setup's third tab —
+named **Time Lab** after the game's own screen — holds both.
+
+### Time Lab research
+
+`PRESTIGE_UPGRADES` (`data/prestige.ts`) carries **three** of the game's eleven
+researches: Absolute Zero (cooler cooling), Infinite Grid (generator and wind
+turbine stats) and Stellar Forge (reactor heat). The other eight move research
+income, research time, chronons, obstacle-removal, energy sale price and
+building prices — all
+decided *before* the solver is handed a board, so none can change which layout
+is best. The file names them so it is clear they were read and dismissed.
+
+Three things bind:
+
+- **Each is a uniform multiplier on the roles it names**, the same shape the
+  stat anomalies turned out to have, so both go through
+  `scaleEffectiveBuilding`. That is what keeps it from being free power: waste
+  is re-derived as `snap(heat - energy)` from the pair that was just scaled, so
+  a generator rated ×2 makes ×2 the waste and needs ×2 the cooling to stay
+  online. The overheat threshold Infinite Grid also names is **not** the reason
+  — it sizes a waste-heat *store* rather than the waste itself, and a
+  sustainable layout never fills it, so per `docs/game-logic.md` it is never the
+  binding constraint and `EffectiveBuilding` does not model it at all.
+- **It folds into the roster, not into the solver.** `prestigeScales()` resolves
+  levels to one factor per role and `getEffectiveBuildings` applies it, so by the
+  time an `EffectiveBuilding` crosses the worker boundary the research is already
+  in its three numbers and nothing in the engine knows a Time Lab exists — which
+  is why the worker protocol has no field for it.
+
+  **That means the scales have to reach `planSolve`, and a run does not resolve
+  its own roster.** `solveProgressive` hands over `buildings` and
+  `unlockedUpgrades` and the coordinator resolves from those, so research
+  applied anywhere else — the readout, the run estimate — reaches the search
+  only if `SolveRunOptions.prestige` carries it there. Omit it and the run comes
+  back with a perfectly valid layout optimised for a roster the player does not
+  have, which nothing on screen would contradict. `prestige.test.ts` pins the
+  plan's roster and its upper bound against exactly that.
+  `effectiveAtValue` takes it too, and must: a placement stores the **authored**
+  tier value, which identifies the tier and is deliberately never rewritten, so
+  the research is applied on the way out every time.
+- **A multiplier breaks what `effectiveValue` used to mean, so
+  `EffectiveBuilding` carries `baseValue` beside it** — the authored tier value,
+  which every scaling helper passes through **untouched**. `simulateIsland`
+  reports that, never `effectiveValue`, because a placement's tier is resolved
+  back out of the reported number by matching the catalogue: report a scaled one
+  and it matches a *higher* tier and gets scaled a second time. A generator at
+  authored 320 under a x2 research reported 640, resolved as the authored 640
+  tier, and came back 1280 at one level too high — in the readout's ceilings,
+  the `Lv.` chip, `copySolveToBoard` and the tier table of every share code, with
+  nothing failing anywhere.
+- **It follows `buildingUpgrades`' convention exactly** — presence of the key is
+  what "researched" means, the value is a 0-based level index the UI numbers from
+  1, and un-researching deletes the key. Same control, same gesture, so a second
+  convention would only be a way to rate a board at the wrong level without
+  failing. `PrestigeUpgrades` is `BuildingUnlockCard`'s idiom down to the edge
+  stripe and the tier row disabling when off.
+- **The table authors the game's `BonusPercentage`, not the multiplier.** The
+  game works and reads in bonuses — its UI says "+100%", never "×2" — so
+  `bonuses` is what is carried and `prestigeMultiplier` (`1 + bonus`) is the one
+  place the factor comes from. Carrying both would be two spellings of one number
+  to keep in step; the card prints the bonus and puts the factor in the tier
+  button's tooltip.
+
+`layoutState` cannot read `configState`, so it **holds** the scales
+(`setPrestige`) rather than taking them per call — `recalculate()` runs from a
+dozen internal places that cannot all grow an argument. `hydrateState` seeds it
+before the board exists; `App.svelte`'s effect pushes changes. A previewed board
+sits it out, the same as `rebasePlacements`: it is the author's board at the
+author's research, and a blueprint does not record what that was.
+
+**Stellar Forge does not cover wind turbines.** The game's `heat_producer`
+category holds reactors *and* direct producers, so "all Heat Producers" read
+literally would take the turbine — but a turbine's SO inherits
+`PowerSourceBuildingSO` and reads Infinite Grid, while Stellar Forge is read only
+by `HeatProducerBuildingSO`. That is why Infinite Grid goes out of its way to
+name turbines. The rule is "every heat producer", and a reactor is the only one
+the game ships, so it is modelled as reactors.
+
+### Anomalies
+
+Prestiging also picks an **anomaly** that changes the rules for the whole next
+timeline. `docs/game-logic.md` is the authority on what each one does and
+`docs/SOLVER.md` on how the table is shaped; the short version:
+
+- `AnomalyDefinition` (`solver/types.ts`) is a tagged union over the **rule
+  shape**, not the anomaly's name, and `ANOMALIES` (`data/anomalies.ts`) is
+  **hand-owned** — unlike `BUILDING_TABLE` beside it, what the extractor can
+  read is the text and the multipliers, never the rule shape those numbers plug
+  into.
+- `"none"` is an entry, not an absence, and `getAnomaly` is total: an id it does
+  not know resolves to the baseline, because the id arrives off `localStorage`
+  and the worker boundary.
+- Every stat anomaly is a **uniform** scale on a building's three figures
+  (`scaleEffectiveBuilding`), so a bonus is never free power — the cooling it
+  needs grows with it. **Waste is derived rather than scaled**:
+  `scaleEffectiveBuilding` recomputes `snapToAuthoredPrecision(heat - energy)`
+  from the pair it just scaled, because that is the game's runtime getter and
+  carrying the authored waste through the same multiply disagrees in the last
+  digit, where the fixtures assert exactly. Only the two roles that *have* waste
+  derive one — `heat - energy` over a cooler or a reactor would turn its whole
+  output into waste.
+
+  **Research and anomaly arrive as two successive calls, in that order**, which
+  is how the game applies them (the Time Lab in the SO getter, the anomaly in
+  the runtime getter) and is not the same double as one combined factor:
+  generator7's fourth tier under Infinite Grid level 4 (x1.7) then a crowded
+  x0.8 is 1.2036e22, against 1.2036000000000001e22 for x1.36, and the order
+  shows too — under x1.25 then a x1.67 shore it is 1.8474375e22, against
+  1.8474374999999997e22 the other way round. `scaling.test.ts` pins both,
+  against the shipped catalogue rather than round numbers — every divergence
+  here is in the last bit, so a test on tidy figures passes under either
+  reading.
+- `configState.anomalyId` is the live choice, persisted under its own key rather
+  than in `ui_prefs` because it is a **solve input** like the roster, not a
+  preference about the app — which is also why `solveSignature()` counts it and
+  a solve found under another anomaly restores as stale.
+- **Cryo Nexus pools across the whole board, so under it the board is one
+  island.** The game's "island" is the map, so the components
+  `splitGridIntoIslands` produces **do** interact — against the assumption the
+  worker pool, the budget split, `IslandBest` and `variants.ts` all rest on. The
+  answer is to stop producing them: `wholeBoardIsland` hands the board over
+  entire, which makes the pool board-wide by construction and leaves every one
+  of those assumptions true.
+
+  It costs nothing in the rest of the simulation, because `runDistribution`
+  already scopes its round budget and its repair to each connected component of
+  the supplier/consumer graph — a finer partition than the island — so heat
+  stays adjacency-bound. It is also what brings the unbuildable scraps in: every
+  grass tile is on the one island, including the 21 tiles across the shipped
+  maps that no decomposition keeps. `minIslandTiles` therefore has no Cryo case;
+  there is nothing to apply a floor to.
+
+  **The price is per-island parallelism** — one island is one pool task, so a
+  board of two large landmasses searches on one core where it could use two. A
+  small loss on the shipped maps, where one landmass already holds ~95% of the
+  budget, and it buys the whole board-level problem for nothing: the alternative
+  is describing each component by a frontier of power against net cooling
+  contributed and combining those under one scalar budget.
+
+  **The pool itself is in `simulateIsland` and needs no second code path.** It
+  serves every source the same fraction of what it is owed, so a short pool
+  leaves *all* of them under their waste and the ordinary per-producer online
+  test turns that into the board-wide all-or-nothing the rule describes. The
+  x0.88 is a uniform scale on the cooler role, applied through `ctx.rate` like
+  any other multiplier, because the game applies it to `CoolerBuilding.
+  CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
+  not a charge levied at the pool.
+
+  It is worth real power, and most on a fragmented board: map 7 at 25s goes
+  271AC to 294AC, map 3 at 20s 139AC to 145AC, and map 1 — one landmass, already
+  at 98% of its bound — is unchanged. The x0.88 has to be earned back before any
+  of that shows.
+
+  **The seed is the one stage that branches on the rule.** Under a pool
+  `constructSeed` builds every hub engine-first — a phantom cooler sizes the
+  fit, so the neighbour slots all go to reactors — charges the cooling as a
+  board-wide debt in each candidate's rank, reserves the tiles for it, and pays
+  it off onto the least-connected free tiles, scraps first; the base seed spent
+  a hub's best-connected tiles on coolers and never filled a scrap. The seed
+  goes from ~76% of the bound to ~99% on maps 3, 7 and 8 and map 7 now returns
+  its bound at 5s; `docs/SOLVER.md` has the tables.
+- **Off the board counts as water**, which is a fact about our data rather than
+  about the game: the game has one global map with open water between islands,
+  and our eight boards are rectangles cut out of it, so the water past an edge is
+  real and simply not in the blueprint. It barely moves the shipped maps (+4 on
+  island3, +2 on island7, the rest unchanged) and is the whole of the anomaly on
+  a custom island, whose blank 10x10 of grass has no water in it at all.
+
+  `IslandSubGrid`'s one-tile padding is **clamped to the board**, so it cannot
+  tell an off-board neighbour from the window's own edge — which is why
+  `computeWaterAdjacency` runs on the full grid before the split and each
+  sub-grid carries a `waterAdjacent` mask indexed like `buildable`.
+- **`ANOMALIES` is transcribed by hand from the same extractor's output**, which
+  emits an anomaly record alongside the roster and drops the icons into
+  `public/icons/anomaly_<id>.webp`. Unlike `BUILDING_TABLE`, **nothing splices
+  this table** — the extractor writes its record and stops — so a new anomaly is
+  brought across by hand. The game's `{0}`-templated strings land here with their
+  `values` resolved, so the wording and the numbers the solver runs on cannot
+  disagree.
+
+  **What catches a half-finished job is the codec's byte maps.** They are keyed
+  on the closed id unions — `Record<AnomalyId, number>` and `PrestigeUpgradeId`,
+  the same shape and for the same reason — so an anomaly or a research added to
+  its table without a byte here fails to compile. Both failures are otherwise
+  silent in both directions: an anomaly would be written as 0 and a research
+  dropped altogether, and the recipient rates the board under rules its author
+  never ran with a perfectly confident figure printed for it. A compile error is
+  the only check that arrives before the code is shared. The encode-side
+  `?? none` fallback survives that and now covers only one case — a string that
+  is not an anomaly id at all, arriving off `localStorage` or the worker
+  boundary — which is the same total reading `getAnomaly` makes. Decode stays
+  tolerant: an unknown byte reads as no anomaly.
+- **`sidebar/AnomalySelector` is the only place it is chosen**, under the
+  research on Setup's Time Lab tab. It mirrors a choice already made in the game rather than making one, so
+  it is built to be recognised rather than shopped: icon and name first, the
+  game's benefit/drawback pair beside them, and the full rule only under the
+  selected card — four rules at once is a wall of text on a phone describing
+  three timelines nobody is in.
+- **Changing it re-scores both boards** through the same `$effect` in
+  `App.svelte` a roster change goes through, and for the same reason. It is
+  tracked separately there because the two ask for different work: a bought tier
+  changes which tier a *placement* resolves to (`rebasePlacements`), while an
+  anomaly changes none of them — the same building at the same tier is simply
+  rated differently — so it needs the re-score alone.
+- **All four entries are implemented**, `none` being the one with nothing to do
+  — it is an entry rather than an absence. The anomaly is threaded the whole way
+  — `SolveOptions.anomalyId` / `SolveRunOptions.anomalyId`, the worker request,
+  and `IslandContext.anomaly` — and each rule is resolved wherever its inputs
+  are settled: a terrain bonus per tile when the context is built, a role
+  isolation per layout inside `simulateIsland`, and a shared cooling pool in the
+  decomposition, before there is an island at all.
+
+  **Singularity is resolved per layout, in `simulateIsland`, and it has to be.**
+  A generator's rating is a function of what its neighbours *are*, so placing
+  one re-rates up to eight other tiles — it cannot be folded into a tile like a
+  terrain bonus, and it cannot be settled at the write. `simulateIsland` copies
+  the layout into `ctx.ratedLayout` (held by the island, not allocated per
+  call), re-rates the affected role's tiles, and reads its figures through that.
+  The neighbour scan reads the *original* placement, since the test is on what a
+  neighbour is and no rating changes that — so there is no order to get right.
+
+  **The bonus is on a capacity, which is why the rule is close to power-neutral
+  at full unlocks.** x4 scales a generator's *intake*, and a generator fed by
+  the reactors it already had simply fills to 25% and produces exactly what it
+  did before; the bonus is worth something only alongside more adjacent reactor
+  heat. The penalty is real and avoidable, so the search's job under this
+  anomaly is mostly to keep generators apart. Map 3 at 15s over three seeds:
+  1.420e23 at best under both, where the one baseline layout whose generators
+  touch re-rates to 1.182e23 — so the search recovers the whole penalty and
+  finds no gain. Map 1 comes back identical to three significant figures either
+  way.
+
+  **On a generator-bound roster it is not neutral, and the count is what the
+  search gets wrong.** `targetCompositions` is the one stage that decides *what*
+  to build, and how many generators are worth their tile depends on what a
+  generator is worth — two numbers under this rule, neither of them in the pool
+  the stage draws on (`rateRole` is the identity here, since which one a tile
+  gets is the layout's business). With everything unlocked but generator7 at
+  tier 1, Gale Hills plateaued at 43.2-45.2AC from 5s to **150s**. Sizing at the
+  bonus alone does not fix it — it asks for 20 generators where the island can
+  keep 15 apart. `generatorCapacityTable` builds `island.ts`'s own
+  `generatorCapacities` over `isolationRoom` — the same table the bound runs on,
+  imported rather than restated — and the target asks for 16: the mean of ten
+  runs goes 44.6AC to **46.2AC**, against a best of 49.8AC (fifteen generators,
+  every one isolated) that either reaches only occasionally. It pays most on
+  the largest boards (+12-14% on maps 7 and 8) and costs 1-4% on maps 2, 5 and
+  6, over three seeds — a net gain, not a uniform one.
+  `islandRatingCeiling` takes `sizedByIsolation` so a target sized through the
+  table is not scaled by the rating a second time. Null under every other rule,
+  so the fixtures reproduce byte for byte.
+
+  **A terrain bonus is resolved per tile, once, when the context is built.**
+  Nothing about a layout can change which tiles qualify, so `terrainScales`
+  settles it at construction and `ctx.rate(tile, building)` is a lookup — which
+  is why the rule costs the search nothing. `uniformRating` is the flag that
+  says `rate` is the **identity** — `ctx.rate(t, b) === b` for every tile and
+  every building — so a stage may skip the call entirely, and it therefore has
+  to promise the whole of `rate` rather than only its per-tile half: `rate`
+  carries a per-role factor beside its per-tile one, so the flag is false under
+  a terrain bonus *and* under a cooling pool's ×0.88, and true under `none` and
+  under Singularity, which `rate` does not answer at all.
+
+  It is called where a building is **written onto a tile**, never where its
+  figures are read: a step of the walk writes one or two tiles and then
+  simulates the island, which reads every occupied tile, so the write is some
+  25x less work and `simulateIsland` stays untouched. `put()` in
+  `placementSearch.ts` is the only way a building enters a placement, so the
+  bonus cannot be missed at one of three dozen sites — and a miss would be
+  silent, since the layout would simply be worth less than it is.
+
+  **`rate` is idempotent**, which is what makes that safe: the search swaps
+  buildings between tiles and restores them when a move is rejected, handing
+  back objects it was already given. Without it a restore would scale a scaled
+  building and the layout would quietly be worth 2.8x.
+
+  **A placement holds rated buildings, so anything compared against one has to
+  be in the tile's units.** The roster is what every stage reaches for — the
+  candidate pools, a composition's score, the downgrade ladder — and none of
+  those figures mean what is on the board once a rule rates a tile above or
+  below the roster. Four comparisons turn on it and each fails silently: the
+  no-op guards (`ratedFor`, so a move that would write a tile what it already
+  holds is skipped rather than simulated for a delta of zero), the under-fed
+  reactor test (`isUnderFed`, against `ratedValue` — against the authored value
+  it only fires below 1/k fill and stops firing on almost everything it exists
+  for), the composition retarget's gate (`targetCanBeat`, which scales the
+  target by an island-wide `islandRatingCeiling`; the gate is a `break`, so
+  getting it wrong throws the whole stage away, and on island3 under Tidal it
+  never ran at any realistic budget), and right-sizing (`ratedCapacity`, which
+  has to ask `rateIsolated` rather than `rate`, or an isolated generator is
+  never offered the smaller tier that covers what it actually absorbs).
+  `docs/SOLVER.md` has the measurements; the retarget fix restored the stage
+  from 1 of 3 targets attempted to 3 of 3 with the power difference inside
+  run-to-run noise, so it buys back a stage rather than a number.
+
+  **A bonus is genuinely not free power here.** A shore generator makes x1.67
+  the waste while an inland cooler still covers x1, so a cluster straddling the
+  shoreline goes offline — a layout optimised under the base rules scores
+  *lower* re-rated under Tidal. The search has to keep a cluster on one side of
+  the coast, which is a harder problem than the uniform one. On Magma Rift at
+  20s, `--anomaly tidal_ascendancy` returns 181AC against the baseline's 142AC.
+  The seeding heuristics pick candidates by unscaled roster figures. Two ways of
+  making them tile-aware were measured and **neither paid for itself**: ranking
+  a candidate hub by its fit times the tile's multiplier, and restricting a
+  hub's tiles to one class so it cannot straddle the coast. Both came back at or
+  below the unchanged search over three seeds. `powerPerTile` orders a greedy
+  claim that later stages rewrite, so skewing it toward the coast mostly moves
+  which tiles get claimed first. Don't re-attempt either without a wider
+  measurement than three seeds at 15s.
+
+  **`estimateTotalMaxPower` takes the anomaly, and every rule of it.** Any rule
+  that rates a tile above the roster makes a bound computed on the plain roster
+  one a real layout walks past, and "no layout may ever beat it" is an invariant
+  the rest of the solver is entitled to assume: Magma Rift reported 119.9%
+  layout efficiency before the terrain case existed, and the generator-bound
+  3x3 in `island.test.ts` reads 267% against a bound that ignores Singularity.
+  A rule that scales a whole role goes **into the roster** the bound is run on
+  (`roleRatedRoster`: coolers ×0.88 under a pool, generators ×4 under
+  Singularity), where the bound is exact in it; scaling the LP's result by the
+  largest factor instead rates reactors and coolers up too and would leave the
+  Singularity bound 3.8x the tight one, so a near-optimal layout reads 25%. A
+  rule that scales a *tile* splits the island's tile budget by class
+  (`estimateIslandBound`, `estimateMixedIslandMaxPower`): a shore building is
+  worth the shore-scaled roster, an inland one the plain roster, and both pay
+  into the one heat and the one cooling total, since the bound relaxes
+  adjacency away. Rating the whole island at its best tile (`islandMaxScale`,
+  kept as the ceiling) had every inland tile standing on the coast, and the
+  coast is 36-44% of the shipped grass — a quarter loose, with Magma Rift's
+  best 15s layout reading 72% of it against 93% now. The engine side is
+  enumerated integer and the producer/cooler remainder is a fractional
+  knapsack, which is what keeps it under 10ms; a mixed island takes the
+  smaller of that and the whole-island figure — both are bounds, so the
+  minimum is, and a two-tile island's fractional cooler cannot make it looser
+  than it was. An all-shore island is the plain LP at the multiplier, bit for
+  bit; an all-inland one the plain LP. Scaling a result is sound because the
+  estimate is positively homogeneous of degree 1 in the roster's figures, and
+  that is still what the ceiling rests on where the mask cannot say which
+  tiles it reaches.
+
+  **The one adjacency the bound does not relax away is `neighbourHeatCap`.**
+  Heat crosses a tile boundary and nothing else, so a generator's intake is
+  whatever the reactors beside it make, and the all-or-nothing cooling rule
+  wants coolers beside it too — out of the same eight tiles. So
+  `estimateIslandMaxPower` runs on `min(gVal, 8 / (1 / rVal + wasteRatio /
+  cVal))`, and the cooler term goes under a pool, where cooling reaches the
+  whole island. The cap is homogeneous like the LP, so a rule that scales
+  everything at once can never make it bite; a rule that scales **one role**
+  is what it takes, and Singularity's ×4 puts the top generator at 290% of
+  it — without the cap the bound sits 6-9% above anything the board allows,
+  reading 83-87% efficiency for layouts that are not 83-87% of anything. With
+  it the maps read 89.4-95.0%, and the base, Cryo and Tidal figures do not move
+  a digit.
+
+  **The second half of that is `isolationRoom`: how many generators an island
+  can keep apart.** Isolated generators are pairwise non-adjacent, so they are
+  an independent set in the 8-neighbour graph — and on a roster where the
+  generators are the short side, the split wants a third of the island to be
+  one. Maximum independent set is NP-hard, so the ceiling is read off a 2x2
+  block partition: four mutually adjacent tiles, so one isolated generator
+  between them and no other generator in that block at all. `crowdedRatedRoster`
+  is the pair to `roleRatedRoster` that lets `generatorCapacities` bend there
+  rather than running the bonus out to the whole island. Only the generator
+  role — it is the one figure the LP counts per tile — and every other role
+  keeps the better rating alone, which stays sound and loose.
+
+  **Both switches are exhaustive with no `default`**, so a fifth rule shape
+  fails to typecheck rather than silently returning 1 or the plain roster —
+  which is precisely what `role_isolation` did while a layout beat the bound by
+  64%. The roster allows both variants of an isolation multiplier, since which
+  one a tile gets is a function of the layout and a search free to keep
+  generators apart rates every one of them at the bonus; and under a terrain
+  list the tile half errs high wherever the shore mask cannot decide the
+  question, which is any list that is not exactly `["water"]`.
+
+  The anomaly crosses the worker boundary **as an id**, resolved again on the
+  far side, so the message stays a string rather than a table entry that has to
+  survive structured cloning. `replayIslandDeterministic` passes none and never
+  will: the fixtures are a determinism harness for the search, and a rule change
+  is a different question asked of it.
+
+**Three Time Lab upgrades scale building stats too**, and they are not anomalies:
+they are bought with Chronons, survive a Time Jump, and stack with whatever
+anomaly is running — **multiplicatively**, so a generator under Singularity
+Isolation with Infinite Grid maxed is rated x8. The extractor's record covers
+all eleven Time Lab upgrades; the three a layout can see are **Stellar Forge**
+(every heat producer, so reactors), **Infinite Grid** (generators *and* wind
+turbines), and **Absolute Zero** (every cooler), each five levels of
+`BonusPercentage`. Absolute Zero and Infinite Grid share one curve, 0.1 to 1.0;
+Stellar Forge a shallower one, 0.1 to 0.5. That field is a fraction rather than
+a percent -- the same field is 0.05 on Chronon Reactor, which the game shows as
++5% -- so the levels are worth x1.1 to x2 (Absolute Zero, Infinite Grid) and
+x1.1 to x1.5 (Stellar Forge). Like an anomaly's, the scale is uniform, so the
+cooling a boosted producer needs grows with it. Their badges ship as
+`public/icons/prestige_<id>.webp`.
 
 ## Architecture
 
@@ -167,8 +568,8 @@ cascade.
 ### Blueprint is the format
 
 `encoding/blueprint.ts` in the solver package is deflate + base64url, one byte
-per tile, carrying terrain **and** buildings in a single payload with the grid's
-dimensions in the first two bytes. The shipped island templates (`data/maps.ts`),
+per tile, carrying terrain **and** buildings in a single payload behind a
+version byte and the grid's dimensions. The shipped island templates (`data/maps.ts`),
 the user's saved edits (`localStorage`), the Share button and the CLI's output
 all use it. It needs
 `CompressionStream`, so encode and decode are **async** — which is why loading a
@@ -177,6 +578,17 @@ grid is an awaited step rather than something a constructor can do.
 - **Never compare encoded codes to test whether two layouts match.** DEFLATE is
   only required to round-trip; two engines may emit different bytes for the same
   input. Use `blueprintKey()`, which compares the uncompressed payload.
+- **A code says which format it is, and an old one is recognised by its
+  width.** `BLUEPRINT_VERSION` is byte 0 of every new code; codes written before
+  it began with the width instead, so the two are told apart by *value* — a
+  board is at least `MIN_GRID_DIM` (5) on a side, so a first byte below that
+  cannot be a width. Which is why that constant now lives in the codec rather
+  than in the size stepper that enforces it, and why lowering it would not
+  shrink a board but would make some old codes unreadable. It constrains old
+  codes only: a versioned code states its width where no value is ambiguous, so
+  the 4x4 fixtures encode fine. An unknown version is **refused**, never
+  guessed at — the tiles are positional, so misreading one produces a different
+  board rather than an error.
 - **`IslandTemplate` has no `width`/`height`.** The code carries them, so there
   is nothing to drift out of sync with the terrain. To author a new island, build
   it in the app and press Share.
@@ -192,6 +604,25 @@ ends after the tiles, and a reader that predates it stops there too. An **empty*
 table means "tiers unknown", never "everything at tier 0", and the caller
 resolves them from its own unlocks.
 
+**A third section carries the rules the board was built under** — the anomaly
+byte, then a count and one `[research byte][level index]` pair per Time Lab
+upgrade. Tiers say what the buildings were, and that stopped being the whole
+story once research changed what a tier is worth: a board shared out of a
+×2-cooling timeline is not the board a reader without that research would get.
+
+Two things about it:
+
+- **Rules are read only after the tier table, so a code carrying them carries a
+  tier count byte first, even a zero one.** A byte for a strictly sequential
+  parse, and zero there is not a contradiction — an empty table already meant
+  "tiers unknown".
+- **`rules` decodes to `null` when the code does not say**, which is not the
+  same as a code that states "no anomaly, no research". A reader that confused
+  the two would rate someone else's board at nothing and still print a figure.
+  `loadPreview` uses the author's research where the code names it and **no**
+  research where it does not — never the reader's own, for the same reason it
+  uses the author's tiers.
+
 Two rules follow, and they are not symmetric:
 
 - **`encodeBlueprint` takes tiers; `blueprintKey` never does.** The key answers
@@ -199,11 +630,42 @@ Two rules follow, and they are not symmetric:
   template, the solver's board signature — mean the arrangement, not what the
   roster currently rates it at. Fold tiers in and buying an upgrade reads as a
   repainted board.
-- **Share codes carry tiers, saved layouts do not.** A save is the player's own
+- **Share codes carry tiers and rules, saved layouts carry neither.** A save is the player's own
   board and is meant to pick up upgrades bought since (`#applySaved` on load,
   `rebasePlacements` live). Freezing tiers into the save would put those two in
   permanent disagreement, so `persist()` calls `encodeBlueprint` directly while
   `exportBlueprint` (the share path) adds `placementTiers(placements)`.
+
+**The CLI writes share codes, so it states rules too.** `codeFor` is the one code
+writer all three of its paths go through and it always passes
+`blueprintRules(anomalyId, {})` — an **empty** research table, which is a
+statement and a true one rather than an omission: the CLI solves at full unlocks
+and no Time Lab, and there is no flag for one, so "the author had no research" is
+exactly what it knows, where leaving the section out would say "rules unknown"
+and hand the reader their own timeline. `--anomaly` also tags the output filename
+and every header names it (`docs/SOLVER.md` has the reasoning); `TEST_FILENAME_RE`
+had to widen to match the tag, because that regex is what finds the previous ids
+and a tagged file it could not see would restart numbering at 1 and overwrite an
+untagged run.
+
+**Two consequences of the version byte are worth knowing before a release, and
+neither is fixable in code.**
+
+- **It is a one-way break.** A reader written before the byte existed takes
+  `data[0]` as the width, so a new code's version byte of `1` makes a 13x13 board
+  decode as 1x13 — and the truncation guard passes, so nothing throws and a board
+  simply comes back wrong. That reaches a stale browser tab, a recipient on an
+  older deploy, and `localStorage` written by the new build and read by the old.
+  The other direction is the one that is right: a new reader **refuses** a version
+  it does not know rather than guessing, because the tiles are positional and a
+  misread produces a different board rather than an error.
+- **Every stored solve is invalidated once, on upgrade.** `blueprintKey` now
+  includes the version byte and `solveSignature` gained the anomaly and the
+  research, so a record written before either stops matching. `restore()` clears
+  on a mismatch and says nothing, so a player who had a five-minute run saved per
+  island loses all of them at this release with no message. That is the correct
+  behaviour for a signature that cannot vouch for the board — but it happens once
+  and it happens silently, which is worth knowing rather than discovering.
 
 **A share code has a second form: a link.** `encoding/shareLink.ts` owns the
 `?bp=` parameter's name so nothing else knows it, builds the URL from the live
@@ -348,6 +810,15 @@ context equals solving each island separately, which holds because distribution
 scopes its round budget and its repair to each connected component of the
 supplier↔consumer graph — a finer partition than the island.
 
+It answers two questions and both go through one `layoutFor`: what every building
+is doing (`simulatePlacedBuildings`) and what one of them was rated for
+(`ratedPlacementAt`, which the readout's ceilings come from). A second copy of
+that loop is precisely how the two would come to rate the same board differently.
+The tiers it resolves are interned per (definition, tier value), because
+`effectiveAtValue` mints a fresh record every call while the context's rating memo is
+keyed on object identity — a guaranteed miss on a context kept alive for the
+whole session, growing two dead entries per placement change.
+
 Two details there are easy to trip over. `simulateIsland`'s `fullReport` argument
 turns off its "nothing can come online" short-circuits: the search wants power
 and stops early, but a player looking at a coolerless board still wants to see
@@ -375,7 +846,7 @@ layout is stable" and "pruning a _stable_ layout never reduces power".
 
 ### Verifying a solver change
 
-Start with `npm test`. Three parts of it are what actually catch a regression:
+Start with `npm test`. Four parts of it are what actually catch a regression:
 
 - **`tests/fixtures.test.ts`** replays the golden fixtures in
   `packages/solver/fixtures/`. Two layers: `expected` (annealing off) is
@@ -387,6 +858,22 @@ Start with `npm test`. Three parts of it are what actually catch a regression:
   tiles. **These numbers must never go down.**
 - **`tests/distribution.test.ts`** pins the flow rules against measurements from
   the live game and against an independent max-flow oracle.
+- **The anomaly suite** — `tests/anomalies.test.ts`, `tests/scaling.test.ts`,
+  `tests/placementSearch.rating.test.ts` and the water-adjacency block in
+  `tests/island.test.ts` — is the only thing that can catch a rule regression at
+  all, because **every fixture is solved under the base rules**. Between them
+  they pin each rule reaching the layout the search reports and the search
+  running end to end under every one of them; the research-then-anomaly ordering
+  and the waste re-derived at each step, down to the last bit; a report row's two
+  capacity figures; the rating ceiling that keeps the composition retarget alive;
+  the no-op guards skipping rather than simulating on a rated tile; right-sizing
+  a layout whose ratings come from its own shape; that every building a seed
+  writes is already rated for the tile it landed on; and that each island's
+  `waterAdjacent` mask is translated by its window's own origin, checked against
+  all eight shipped codes. That last one is the shape of the whole problem: a
+  mis-indexed read passed the **entire** suite while mismatching between 28 and
+  166 tiles per map, because a rule that is threaded but misapplied produces a
+  layout that is merely worth less than it says.
 
 Regenerate the fixtures with `npm run fixtures` and **read the diff** — it is the
 clearest statement of what a solver change actually did. Re-running against an
@@ -650,12 +1137,17 @@ The measurement id is a constant, since it ships in the bundle anyway.
 view for someone who said no) or closed (the tag off for everyone), and neither
 is visible in the app.
 
-**Four events beyond `page_view`**, each fired from the one place that knows
+**Six events beyond `page_view`**, each fired from the one place that knows
 the answer: `solve_run` and `solve_done` in `runOptimizer` (paired, so a status
 other than `ok` is countable rather than inferred from a run that never
-reported), `share_copy` in `copyShare`, and `board_failed` in `PixiCanvas`'s
+reported), `share_copy` in `copyShare`, `board_failed` in `PixiCanvas`'s
 init catch — one event for both halves, since an atlas that never arrives and a
-WebGL context that never starts are the same empty board. `trackEvent` buffers
+WebGL context that never starts are the same empty board — and the Time Lab's
+two, `anomaly_select` in `configState.setAnomaly` and `research_set` in
+`toggleResearch` / `setResearchLevel`. Both solve events also carry the rules
+the run was launched under (`configState.rulesParams()`: `anomaly`, and
+`research` as `id:level` pairs numbered from 1), captured at launch, so power
+and bound can be split by timeline. `trackEvent` buffers
 until the tag lands, because it is fetched on idle and the app is usable well
 before that; nothing buffered before an opt-out is ever sent. A param is not
 reportable until it is registered as a custom dimension or metric in GA.
@@ -778,10 +1270,27 @@ and that column is what pays for the sprite beside it being 40px rather than 30p
 
 Each figure row is **used / total** — `10.1AC / 13.3AC` — because the live figure
 alone cannot distinguish a building doing nothing from one with little to do. The
-ceiling comes from `effectiveAtValue`, so it is the tier the building was placed
-at. **Cooling is the exception**: it is measured against the waste the building is
-actually making, not the tier's full-tilt waste, because what it needs falls with
-its fill — against the ceiling a half-fed generator would read as starved while
+ceiling is the tier the building was placed at, **rated for the tile it stands
+on**, and it comes from the scorer rather than from the roster:
+`simulation/simulator.ts` exports `ratedPlacementAt`, which lays the whole board
+out through the same `layoutFor` that scored the rows and hands back what that
+tile was rated for. Two things force that. A placement carries only its
+_authored_ tier value — rightly, since the tier is resolved back out of it — so
+`effectiveAtValue` on its own answers a question with no tile in it: against the
+plain roster a shore cooler printed `8.35AC / 8AC`, a used figure past the total
+it was measured against, and a Cryo cooler at full tilt could never reach one.
+And a role isolation rates a building by _what its neighbours are_, so the whole
+board has to go in, not the one building — which is why the answer comes back
+through `simulateIsland` and `ctx.ratedLayout` rather than from a second
+neighbour scan written in the component. A second reading of the rules in the
+card is exactly what would drift from the rows above it. The board it lays out is
+the one this panel describes, and the rules are `layoutState`'s, which on a
+previewed board are the author's. A tile the scorer cannot place gets no ceiling
+at all rather than an invented one: every figure beside it is zero anyway.
+
+**Cooling is the one row not measured against a ceiling at all**: it is measured
+against the waste the building is actually making, not the tier's full-tilt
+waste, because what it needs falls with its fill — against the ceiling a half-fed generator would read as starved while
 being perfectly covered. That row turns **red** when cooling does not cover waste,
 and the test is `placementStatus` — the solver's own `wasteIsCovered` tolerance,
 not a bare `<`, which would paint running buildings red.
@@ -1219,8 +1728,9 @@ It is **fully read-only**, and that is one rule with a lot of surfaces:
   preference moves. `importBlueprint` throws outright — it claims an island slot
   that `#saveState` would then refuse to write.
 - `rebasePlacements` sits it out. A previewed board is rated at **the author's**
-  tiers, read from the code's tier table, and it is the one board the reader's
-  roster does not speak for. This is the reason the tier table exists.
+  tiers, read from the code's tier table, and at the author's rules where the
+  code names them — it is the one board the reader's roster and the reader's
+  timeline do not speak for. This is the reason the tier and rules tables exist.
 - The HUD and the config panel are not rendered at all, so there is no Run button
   and no roster.
 
@@ -1230,6 +1740,17 @@ re-bases it to the visitor's own unlocks on the way in, because once the board i
 theirs it is their roster that rates it — or `exitPreview()` simply leaves. An
 adoption that is refused (island cap, two transformers) puts the flag back and
 leaves them reading. `state/previewMode.test.ts` pins every refusal.
+
+**The author's rules are dropped with the code, on both ways out, and restored
+with it when an adoption is refused.** Exiting re-hydrates a board that was never
+built under them, and an adopted board is re-based to the visitor's own unlocks,
+so keeping the author's research would rate the visitor's own buildings under a
+timeline they were never in. Every accessor that reads the rules branches on
+`isPreview` first, so nothing would print a wrong figure today — but that makes
+the guard the only thing standing between a re-scored board and someone else's
+timeline, and there being nothing to guard is the stronger guarantee. On the
+refused path the rules go back with the code, because the visitor is still
+reading the author's board.
 
 The state lives on `layoutState` rather than `uiState` because it is a property of
 the _document_: this board is not saved, not editable, and not the player's.
@@ -1258,6 +1779,78 @@ dismiss the panel. Not a matter of taste: at the sheet's `peek` detent the HUD i
 lifted above the sheet, so dismissing it drops the row by 176px between
 `pointerdown` and `pointerup` — the button slides out from under the finger and
 the click never lands.
+
+### Setup is gone while a run is in flight
+
+`uiState.setupHidden` takes the panel off screen for the length of a run, and
+both ways back into it with it — the HUD's Setup button and the docked panel's
+own handle. Everything on its three tabs is an input to *that* run (the island
+it is solving, the roster it was planned with, the timeline it is rating
+against) and a run reads every one of them once, at launch, so a press there
+either cannot reach the search at all or, on the island list, stops it outright.
+Hidden rather than disabled, which also replaces a half-measure:
+`SolveModeSelector` and `AnomalySelector` already greyed themselves out while
+the island list and the roster beside them stayed live, so the panel was part
+working and part dead with nothing saying which was which. Both keep their
+`disabled` as a backstop for the frame between the run starting and the panel
+unmounting. Stop is untouched, because it is in the HUD.
+
+Three things follow, and each is something that would otherwise be left behind:
+
+- **`ConfigSidebar` holds `uiState.sidebarWidth` for the run, and clears it
+  otherwise.** Its teardown is the same call `HudToolbar` makes for
+  `hudHeight` — a width left behind reserves canvas, and the HUD's own
+  `padding-left` tracks the same edge — and that is right for a preview or a
+  hidden interface, which are states the user is *in*. A run is not: Setup is
+  away for seconds and comes back on its own, so handing the space over means
+  taking it again a moment later, with the action pill gliding 190px out from
+  under the cursor that pressed RUN and back when it lands. Held, the whole
+  scene stays still and all the run changes is that the panel is not drawn
+  over it. The effect also skips the `0` that `bind:clientWidth` reports
+  before it has measured, which would otherwise drop the inset for one paint
+  every time Setup came back — and `padding-left` transitions, so one paint is
+  a visible glide out and straight back.
+- **The sheet is shut on the way in**, in `#beginSolve`, the one route both Run
+  and the re-run dialog take to `runOptimizer`. Same reason `setUiHidden` shuts
+  it: a detent left open describes a panel that is no longer rendered, and on a
+  compact viewport it takes the whole HUD down with it — which is where STOP is.
+  In practice it is already closed, since the HUD unmounts while the sheet is
+  open and Run is in the HUD; the case it covers is a sheet opened on a phone
+  and then run from a window that has since been widened.
+- **`dismissConfigPanel` sits the run out.** `collapseSidebar` persists, so a
+  press on the view toggle mid-run would otherwise hand the user back a panel
+  that had shut itself.
+
+**The Edit/Solver switch goes with it**, on `uiState.canSwitchBoards` — which
+is `hasSolverPlacements` and no run in flight, and is what both the toggle and
+the compact line it sits on render against. `showingSolver` keeps reading
+`hasSolverPlacements` alone, since which board is drawn is a different question
+from whether the switch is offered. Three reasons, all pointing the same way:
+the readout is pinned to the run for the duration (`statsPanel`), so switching
+to Edit leaves the card reporting the search while the canvas draws the user's
+board — the one disagreement `visiblePlacements` exists to make impossible; the
+switch to the solver's board is an edge on the run *starting* (`PixiCanvas`), so
+a layout finishing while the user is on their own board lands where nobody is
+looking; and on a first-ever run the pill would appear partway through anyway,
+the moment the first progress report gives it something to switch to, which on
+a phone is a line arriving in the HUD unasked. So mid-run on a compact viewport
+the whole stack is the action pill alone.
+
+**Hidden there does not mean unmounted, and the difference is the wide-screen
+row.** On a phone the toggle has a line of its own and the pill below is pinned
+to the band's right edge, so the line is simply not rendered. On a wide screen
+the toggle shares one centred row with the action pill, and dropping out of the
+flow re-centres RUN/STOP under the cursor that just pressed it — so it renders
+on `hasSolverPlacements`, keeps its box, and takes `visibility: hidden`, which
+is the one declaration that gives up paint, hit testing and the accessibility
+tree at once while leaving the layout alone. That is why the `.view-row` gate
+and the toggle's own are deliberately not the same condition.
+
+On a compact viewport `.hud-top` is `justify-content: flex-end`, which is what
+keeps the run pill still as Setup leaves. Setup's `margin-right: auto` takes the
+free space first while it is there, so the property does nothing; with Setup
+gone it is the whole of the rule, and STOP stays where the finger that pressed
+RUN put it instead of centring itself across the row.
 
 ### The HUD dismisses the config panel
 
@@ -1357,20 +1950,27 @@ descendants still bubble through an element with `pointer-events: none` — that
 property only stops the element being a hit target itself, which is what keeps
 canvas drags working through the HUD's empty margins.
 
-### Setup is two tasks, and it shows one at a time
+### Setup is three tasks, and it shows one at a time
 
-The panel holds two unrelated jobs — **which island** and **which buildings**.
-Stacked in one scroller with the islands on top, the roster is never on screen
-when Setup opens on a 390x844 phone, and the Reactors tab behind it is 24
-cards.
+The panel holds three unrelated jobs — **which island**, **which buildings** and
+**the Time Lab** (research, then anomaly). Stacked in one scroller with the islands on top, the roster is
+never on screen when Setup opens on a 390x844 phone, and the Reactors tab behind
+it is 24 cards.
+
+The Time Lab is a tab rather than a row somewhere because it is a third input of
+the same kind, not a qualifier on either of the other two: it changes what a run
+comes back with, it is set once and then tried against island after island, and
+it needs room — four cards, each with the game's own icon and wording. Three
+labels do fit a 374px phone, but only because each may ellipsize (`min-width: 0`
+on the buttons).
 
 `uiState.setupTab` picks between them and `ConfigSidebar` renders the switch and
 the body as **snippets**, used by both shells: a sheet and a docked column differ
 in their chrome and their gesture, never in this. Four things about it:
 
-- **It defaults to `islands`, and is not persisted.** The roster is set once; the
-  same roster is then tried against one island after another, so the island list
-  is the recurring task. This is view state, not a preference.
+- **It defaults to `islands`, and is not persisted.** The roster and the Time Lab
+  are set once; both are then tried against one island after another, so the
+  island list is the recurring task. This is view state, not a preference.
 - **The switch sits between the fixed top region and the scroller.** Inside
   `.sheet-top` it would inflate the measured `peekHeight`; inside `.scroll-body`
   it would scroll away, and the one control that says where you are is the last
@@ -1380,7 +1980,7 @@ in their chrome and their gesture, never in this. Four things about it:
   because the island list is scrolled there.
 - **It is an underline, where the category tabs inside the roster are filled
   pills.** Two rows of identical tabs stacked on each other read as one confusing
-  row of five. Both take `--neon` for the active one, because the colour law has a
+  row of five. Both take `--accent` for the active one, because the colour law has a
   single meaning for "this is selected"; the hierarchy is carried by shape.
 
 Two things follow. The roster's category tab bar is **sticky** at the top of the
@@ -1522,6 +2122,22 @@ panel — under WCAG AA. Measure against the _lightest_ backdrop a panel makes
 (roughly `#112226`), not `--surface-void`, because light text loses contrast on
 the lighter one.
 
+### Tokens are named for the role, never the colour
+
+`--accent` was called `--neon` until a theme made it purple, at which point the
+name was simply wrong in half the app — and a wrong name is worse than a vague
+one, because it reads as true. The same trap is waiting for anything spelled
+`--purple`, `--amber` or `--cyan`: a themed token names **what the colour is
+for**, and a theme decides what it holds.
+
+Two corollaries. `--action` is a separate token from `--accent` even though the
+base theme answers both with the same cyan — they are different roles (a fill
+carrying ink, against a stroke on a dark ground) and a theme separates them, so
+collapsing the two would only have to be undone. And `ACCENT` in
+`pixi/gridPainter.ts` keeps the value as a numeric literal because Pixi cannot
+read a custom property: it is pinned to the **base** theme and says so, since a
+name promising it follows the shell would be the same lie again.
+
 ### The colour law
 
 The law lives at the top of `app.css`, one line each. Without it the palette
@@ -1530,11 +2146,19 @@ drifts to twelve-odd hues — a Share button wearing the colour the board uses f
 
 |                 | means                                                       |
 | --------------- | ----------------------------------------------------------- |
-| `--neon`        | this control is selected / active. Nothing else.            |
+| `--accent`      | this control is selected / active. Nothing else.            |
+| `--action`      | the one *filled* primary control. RUN, and nothing else.    |
 | `--status-ok`   | the board only: this building is working.                   |
 | `--status-idle` | the board only: this building is doing nothing.             |
 | `--danger`      | the board: overheating. In the UI: this destroys something. |
 | `--warn`        | a limit is reached, or this board is not yours to edit.     |
+| `--anomaly-*`   | `AnomalySelector`'s cards only, and nowhere else.           |
+
+The first two are themed, the four below them never are — see the theme block
+in `app.css`. `--anomaly-*` is neither: it is the game's own chooser palette,
+not a theme, which is why it kept its name while the purple that used to share
+that prefix became the anomaly theme's binding of `--accent`, `--text` and the
+rest.
 
 **The two board readings are reserved, and that is the whole point.** The pad under
 every building, the pulse that breathes it and the readout in the corner all speak
@@ -1553,6 +2177,96 @@ is most of the header.
 One hue sits outside the law and says so in the file: `--heart`, for the donate
 button, because a donate heart is pink everywhere on the web and `--danger` would
 tell the user the button breaks something.
+
+**The anomaly cards' green/red pair is the second exception, and it is a
+narrower one.** `--benefit-*` and `--drawback-*` are sampled from the game's own
+"Choose an anomaly" screen — both stripe fills and the text on each — because
+that is the one screen in the app mirroring a screen in the game: the player has
+just chosen there and is confirming here, so the pairing they read a moment ago
+is worth more than a palette of our own. They are **not** `--status-ok` and
+`--danger`, which stay reserved to the board, and reusing those would not even
+have looked right: the board speaks as a saturated accent on a dark ground, these
+are muted fills carrying near-white text. A player meets them as panels, not as
+status lights, which is what keeps the reservation honest.
+
+**`--anomaly-selected` is the sharper half of that exception**, because `--accent`
+means selected everywhere else and on this list it does not: the chosen card is
+ringed in the game's own green. Two selection colours is a real cost, and it is
+taken for the same reason and stretches no further — showing a player their own
+choice in a colour they will not recognise from the screen they made it on is the
+larger one. Nothing outside `AnomalySelector` may take it.
+
+**An anomaly is a theme, not a hundred conditionals.** `App.svelte` — the one
+place allowed to see `configState` beside everything else — puts
+`data-theme="anomaly"` on `.app-shell` while one is selected, and a single
+block in `app.css` rebinds the tokens under it. Every surface inside the shell
+follows: the header, the HUD's pills and ribbons, the readout, Setup, the
+overflow menu, the dialogs, the toast. No component reads `hasAnomaly` and none
+of them carries a rule about anomalies at all.
+
+It replaced eleven copies of the signal — ten components each with
+`class:anomalous={configState.hasAnomaly}` and a `.anomalous` rule re-pointing
+*a different subset* of the same tokens, which is exactly how the HUD's ground
+went purple while the selected tool on it stayed cyan, and how
+`BuildingPalette` came to remember `--text-dim` where `ObstaclePalette` beside
+it did not. Every new panel was another place to remember, and forgetting was
+silent.
+
+Keyed on the selection and not on Setup's Time Lab tab, because that is what it
+says: this timeline is not running the ordinary rules, and the island list, the
+roster and the board's figures are all read under them. Nothing selected leaves
+the attribute off and every token falls back to the navy in `:root`, which is
+the common case.
+
+Four things about what a theme may and may not move:
+
+- **Alpha is the component's, hue is the theme's.** Each surface picks its own
+  strength over the board — the sheet 0.97, the readout 0.94, the HUD's pills
+  0.92, the docked panel 0.88 — by composing `rgba(var(--surface-panel-rgb),
+  …)`. That is why the ground is a bare triplet rather than a colour: one
+  decision, not one token per surface. Selecting an anomaly changes the hue and
+  nothing about how much board shows through.
+- **The whole `--accent` family goes**, so every mark meaning "selected" follows
+  the ground under it: Setup's heading, its active tab, the chosen island's
+  row, the roster's category pills, the HUD's active tool, the selected
+  building in the palette, the readout's accents. The purple is **lighter**
+  than the game's badge purple, and that is forced — cyan earns its prominence
+  by contrast, and the badge purple reads 3.3:1 on this panel, unreadable as a
+  heading. `#c9a5f0` puts back the 6.5:1 the cyan had.
+- **`--action` is a separate role from `--accent`, and this is what it is for.**
+  RUN is the one *filled* control in the app: a fill carrying ink, where
+  brighter is *less* legible, against `--accent`'s stroke-on-dark, where brighter
+  is more. The base theme answers both with the same cyan, which is why they
+  looked like one token until a theme needed them apart — the selection
+  lavender carries neither ink at AA, so `--action` is the badge purple pulled
+  two steps down its own ramp (5.4:1 resting, 4.8:1 hover; RUN is 12.8px bold,
+  so 4.5 is the bar). Stop is untouched either way: a stop is destructive of
+  the run in progress whatever rules it began under.
+- **The board's own language is never rebound.** `--status-ok`,
+  `--status-idle`, `--danger` and `--warn` stay out of every theme. The pad
+  under a building, the pulse that breathes it and the readout's red Cooling
+  row mean the same thing under every timeline, and an anomaly is precisely
+  when a player most needs them to.
+
+**The game's chooser palette is not a theme either**, and that is the other
+half of the split: `--anomaly-card`, `--anomaly-selected` and the
+benefit/drawback pair are `AnomalySelector`'s own colours, sampled from a
+screen in the game, and they do not move with the ground. They stay in `:root`
+for that reason — only the ground under them is themed. Two of the three text
+values are **lifted** off what the game uses, since its secondary lavender
+measures 3.8:1 on this panel, under AA — the same trap `--text-dim` was lifted
+out of once already.
+
+That leaves two purples meaning "selected" inside Setup, which is deliberate:
+the lavender is the **app** saying which tab or row you are on, while the green
+ring on an anomaly card is the **game's**, and the card is a second view of the
+game's own chooser.
+
+That list also **stays compact until a card is chosen** — the unselected size is
+the default and `.active` is what loosens it (a larger icon, roomier panels, and
+the full rule). Three of the four describe a timeline nobody is in, and sizing it
+this way makes the selected card obvious by shape as well as by colour, which is
+the reading that survives a colourblind viewer.
 
 ### Overflow and viewport rules
 

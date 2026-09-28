@@ -73,11 +73,22 @@
     max-width: min(100%, 620px);
     background: var(--surface-sunken);
     backdrop-filter: blur(16px);
-    border: 1px solid var(--border-neon);
-    border-radius: var(--radius-pill);
+    border: 1px solid var(--border-accent);
+    /*
+     * `--radius-lg`, not the stack's usual pill: a pill's corner radius tracks
+     * half the container's height, and at this height (~70px) that curve is
+     * far more aggressive than the `--radius-md` items inside it — their own
+     * square-ish corners sat inside the sweep of the outer curve and read as
+     * clipped by it. `--radius-pill` only reads right around a control that is
+     * itself pill-shaped, like the buttons in `.hud-modes`.
+     */
+    border-radius: var(--radius-lg);
     padding: 0.4rem 0.5rem;
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
     box-shadow:
-      0 0 30px var(--neon-faint),
+      0 0 30px var(--accent-faint),
       0 8px 32px rgba(0, 0, 0, 0.5);
   }
 
@@ -101,7 +112,6 @@
   @media (max-width: 640px) {
     .building-panel {
       width: 100%;
-      border-radius: var(--radius-lg);
     }
 
     .empty-msg {

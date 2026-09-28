@@ -4,7 +4,16 @@
   import TemplateSelector from "./TemplateSelector.svelte";
   import BuildingUnlockList from "./BuildingUnlockList.svelte";
   import SolveModeSelector from "./SolveModeSelector.svelte";
-  import { ChevronLeft, ChevronRight, Layers, X, Zap } from "lucide-svelte";
+  import AnomalySelector from "./AnomalySelector.svelte";
+  import PrestigeUpgrades from "./PrestigeUpgrades.svelte";
+  import {
+    ChevronLeft,
+    ChevronRight,
+    FlaskConical,
+    Layers,
+    X,
+    Zap,
+  } from "lucide-svelte";
 
   /*
    * The sheet's top region — grabber, header, run slot. Measured rather than
@@ -27,8 +36,35 @@
   let sidebarWidth = $state(0);
 
   $effect(() => {
-    uiState.sidebarWidth =
-      compact || uiState.sidebarCollapsed ? 0 : sidebarWidth;
+    if (compact || uiState.sidebarCollapsed) {
+      uiState.sidebarWidth = 0;
+    } else if (sidebarWidth > 0) {
+      /*
+       * A `0` out of `bind:clientWidth` means "not measured yet", not "no
+       * panel" — the binding lands a frame after mount. Publishing it would
+       * drop the inset to nothing for one paint every time Setup comes back
+       * from a run, and `.hud`'s `padding-left` transitions, so the whole tool
+       * stack would glide out and straight back again.
+       */
+      uiState.sidebarWidth = sidebarWidth;
+    }
+    /*
+     * Cleared once this component is gone, the same call `HudToolbar` makes
+     * for `hudHeight`: a width left behind reserves canvas — and the HUD's own
+     * `padding-left`, which tracks the same edge — for a column that is not on
+     * screen. That is the right answer for a preview or a hidden interface,
+     * which are states the user is *in*.
+     *
+     * A run is not one of those. Setup is away for a few seconds and comes
+     * back on its own, so handing the space to the board and the HUD means
+     * taking it again a moment later, with the action pill gliding 190px out
+     * from under the cursor that pressed RUN and back once it lands. The inset
+     * is held for the duration instead, which is what keeps the whole scene
+     * still; all the run changes is that the panel is not drawn over it.
+     */
+    return () => {
+      if (!uiState.setupHidden) uiState.sidebarWidth = 0;
+    };
   });
 
   /**
@@ -192,6 +228,20 @@
       <Zap size={15} />
       <span>Buildings</span>
     </button>
+    <!--
+      Named for the game's own screen rather than for either of the two things
+      on it: the research and the anomaly are both chosen in the Time Lab, and
+      a tab called "Anomaly" leaves the research with nowhere to be.
+    -->
+    <button
+      class="switch-btn"
+      class:active={uiState.setupTab === "timelab"}
+      aria-pressed={uiState.setupTab === "timelab"}
+      onclick={() => (uiState.setupTab = "timelab")}
+    >
+      <FlaskConical size={15} />
+      <span>Time Lab</span>
+    </button>
   </div>
 {/snippet}
 
@@ -203,8 +253,12 @@
   -->
   {#if uiState.setupTab === "islands"}
     <TemplateSelector />
-  {:else}
+  {:else if uiState.setupTab === "buildings"}
     <BuildingUnlockList />
+  {:else}
+    <!-- Research first: it applies under every anomaly, including none. -->
+    <PrestigeUpgrades />
+    <AnomalySelector />
   {/if}
 {/snippet}
 
@@ -333,7 +387,7 @@
     margin: 0;
     font-size: var(--fs-md);
     letter-spacing: 1.2px;
-    color: var(--neon);
+    color: var(--accent);
     font-weight: 600;
   }
 
@@ -341,7 +395,7 @@
    * The top-level switch. Deliberately *not* the filled-pill idiom the
    * category tabs inside the roster use — two rows of identical-looking tabs
    * stacked on top of one another read as one confusing row of five. An
-   * underline above a pill is a legible hierarchy; the accent is `--neon` in
+   * underline above a pill is a legible hierarchy; the accent is `--accent` in
    * both, because the colour law has one meaning for "this one is selected".
    */
   .setup-switch {
@@ -349,15 +403,18 @@
     flex-shrink: 0;
     gap: 0.25rem;
     padding: 0 1rem;
-    border-bottom: 1px solid var(--neon-faint);
+    border-bottom: 1px solid var(--accent-faint);
   }
 
   .switch-btn {
     flex: 1;
+    /* Three of these share a 380px panel and a 374px phone, so a long label
+       has to be allowed to shrink rather than widening the row past it. */
+    min-width: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
+    gap: 0.35rem;
     height: var(--ctl);
     background: none;
     border: none;
@@ -373,13 +430,19 @@
     transition: all var(--dur-fast) var(--ease);
   }
 
+  .switch-btn span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .switch-btn:hover {
     color: var(--text);
   }
 
   .switch-btn.active {
-    color: var(--neon);
-    border-bottom-color: var(--neon);
+    color: var(--accent);
+    border-bottom-color: var(--accent);
   }
 
   @media (pointer: coarse) {
@@ -427,15 +490,23 @@
     z-index: var(--z-sheet);
     display: flex;
     flex-direction: column;
-    background: rgba(10, 14, 23, 0.97);
+    /*
+     * Its own 0.97 over the board; the theme decides the hue — see the theme
+     * block in `app.css`. Everything inside follows, because every descendant
+     * already reads `--text` / `--accent` / `--border` and a theme is a
+     * rebinding of exactly those.
+     */
+    background: rgba(var(--surface-panel-rgb), 0.97);
     backdrop-filter: blur(16px);
-    border-top: 1px solid var(--border-neon);
+    border-top: 1px solid var(--border-accent);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.6);
     /* Nothing inside may paint outside the sheet — the belt to `min-height`'s
        braces, and it makes the top corners clip properly too. */
     overflow: hidden;
-    transition: transform var(--dur) var(--ease);
+    transition:
+      transform var(--dur) var(--ease),
+      background var(--dur) var(--ease);
     /* Content clears the home indicator when pulled up. */
     padding-bottom: var(--safe-bottom);
   }
@@ -536,11 +607,14 @@
     flex-direction: column;
     gap: 0.4rem;
     padding: 0.6rem 0;
-    background: rgba(10, 14, 23, 0.9);
-    border: 1px solid var(--neon-dim);
+    background: rgba(var(--surface-panel-rgb), 0.9);
+    border: 1px solid var(--accent-dim);
     border-left: none;
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-    color: var(--neon);
+    color: var(--accent);
+    transition:
+      border-color var(--dur) var(--ease),
+      color var(--dur) var(--ease);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -559,9 +633,11 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    background: var(--surface-panel);
+    /* Its own 0.88, where the header takes 0.94 — see `--surface-panel-rgb`. */
+    background: rgba(var(--surface-panel-rgb), 0.88);
+    transition: background var(--dur) var(--ease);
     backdrop-filter: blur(14px);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius);
     overflow: hidden;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
@@ -569,14 +645,17 @@
 
   .sidebar-head {
     padding: 0.85rem 1rem;
-    border-bottom: 1px solid var(--neon-faint);
+    border-bottom: 1px solid var(--accent-faint);
     flex-shrink: 0;
   }
 
   .sidebar-foot {
     padding: 0.75rem 1rem;
-    border-top: 1px solid var(--neon-faint);
-    background: rgba(15, 23, 42, 0.6);
+    border-top: 1px solid var(--accent-faint);
+    /* A region set apart inside the panel — see `--surface-inset`, which the
+       theme swaps for a neutral where a navy tint would fight the ground. */
+    background: var(--surface-inset);
+    transition: background var(--dur) var(--ease);
     flex-shrink: 0;
   }
 </style>

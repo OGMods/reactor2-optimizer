@@ -113,7 +113,7 @@
   }
 
   .note.running {
-    color: var(--neon);
+    color: var(--accent);
   }
 
   .lead em {
@@ -148,12 +148,12 @@
   }
 
   .mode:hover:not(:disabled) {
-    border-color: var(--neon-dim);
+    border-color: var(--accent-dim);
   }
 
   .mode.active {
-    border-color: var(--neon);
-    background: var(--neon-bg);
+    border-color: var(--accent);
+    background: var(--accent-bg);
   }
 
   .mode:disabled {
@@ -176,7 +176,7 @@
     font-weight: 700;
     letter-spacing: 0.4px;
     text-transform: uppercase;
-    color: var(--neon);
+    color: var(--accent);
   }
 
   .mode-cost {

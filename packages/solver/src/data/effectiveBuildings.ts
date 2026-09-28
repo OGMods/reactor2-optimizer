@@ -4,6 +4,7 @@ import type {
   DirectProducerDefinition,
   EffectiveBuilding,
   GeneratorDefinition,
+  PrestigeScales,
 } from "../solver/types";
 
 /**
@@ -15,10 +16,18 @@ import type {
  * figures are zero. Generators and direct producers carry the game's authored
  * `EnergyPerTick` / `WasteHeatPerTick` for the resolved tier, and only fall back
  * to `heat - energy` for a source that authors no waste at all.
+ *
+ * `prestige` folds the player's Time Lab research in — see `prestigeScales`.
+ * It belongs here rather than anywhere downstream because it is a property of
+ * the *roster*, not of a layout or a tile: by the time an `EffectiveBuilding`
+ * crosses the worker boundary the research is already in its three numbers, and
+ * nothing in the solver has to know the Time Lab exists. Omitted means
+ * unresearched.
  */
 export function getEffectiveBuildings(
   buildings: readonly BuildingDefinition[],
   unlockedUpgrades: Record<string, number>,
+  prestige?: PrestigeScales,
 ): EffectiveBuilding[] {
   const result: EffectiveBuilding[] = [];
 
@@ -52,13 +61,19 @@ export function getEffectiveBuildings(
       effectiveValue = building.levels[clamped].cooling;
     }
 
-    result.push({
-      id: building.id,
-      type: building.type,
-      effectiveValue,
-      energy,
-      waste,
-    });
+    result.push(
+      scaleEffectiveBuilding(
+        {
+          id: building.id,
+          type: building.type,
+          effectiveValue,
+          energy,
+          waste,
+          baseValue: effectiveValue,
+        },
+        prestige?.[building.type] ?? 1,
+      ),
+    );
   }
 
   return result;
@@ -129,11 +144,18 @@ export function rosterCanProducePower(
  *
  * Both `simulatePlacedBuildings` and the board readout go through here, so the
  * panel cannot rate a building differently from the scorer that ran it.
+ *
+ * `prestige` applies here too, and must: a placement stores the **authored**
+ * tier value, which is what identifies the tier and is deliberately not
+ * rewritten when research lands. So the research is applied on the way out,
+ * every time, and both callers pass the same scales the solver was handed.
  */
 export function effectiveAtValue(
   def: BuildingDefinition,
   baseValue: number,
+  prestige?: PrestigeScales,
 ): EffectiveBuilding {
+  const factor = prestige?.[def.type] ?? 1;
   if (def.type === "generator" || def.type === "direct_producer") {
     const levels = (def as GeneratorDefinition | DirectProducerDefinition)
       .levels;
@@ -144,19 +166,94 @@ export function effectiveAtValue(
         break;
       }
     }
-    return {
+    return scaleEffectiveBuilding(
+      {
+        id: def.id,
+        type: def.type,
+        effectiveValue: tier.heat,
+        energy: tier.energy,
+        waste: tier.waste ?? snapToAuthoredPrecision(tier.heat - tier.energy),
+        baseValue: tier.heat,
+      },
+      factor,
+    );
+  }
+  return scaleEffectiveBuilding(
+    {
       id: def.id,
       type: def.type,
-      effectiveValue: tier.heat,
-      energy: tier.energy,
-      waste: tier.waste ?? snapToAuthoredPrecision(tier.heat - tier.energy),
-    };
-  }
+      effectiveValue: baseValue,
+      energy: 0,
+      waste: 0,
+      baseValue,
+    },
+    factor,
+  );
+}
+
+/**
+ * Re-rates a resolved building by a uniform multiplier.
+ *
+ * Every multiplier that changes a building's numbers — a Time Lab research, a
+ * stat anomaly — scales **all of its authored figures by the same factor**. The
+ * game lists "Energy, Heat, Cooling, and overheat capacity" separately, but
+ * those four names are one field each across the four roles, so a bonus is
+ * simply a building whose whole tier is worth more. One function covers every
+ * such rule there will be.
+ *
+ * Which means a multiplier is *not* free power: a scaled producer absorbs more,
+ * makes more, and needs proportionally more cooling, so it goes offline exactly
+ * as readily as an unscaled one. Only `wasteIsCovered` decides that, and it is
+ * relative.
+ *
+ * **Waste is derived here rather than scaled, and that is the whole point of
+ * the function.** The game holds no waste figure of its own at runtime: its
+ * getter is `(HeatPerTick - EnergyPerTick).SnapToAuthoredPrecision()` over
+ * whatever heat and energy currently are, so waste is re-derived from the
+ * scaled pair every time something scales them. Multiplying the incoming waste
+ * instead agrees to about fifteen digits and disagrees in the last, because the
+ * snap is a decimal rounding of the *scaled* difference rather than something
+ * carried along from the table — and the golden fixtures assert exactly.
+ *
+ * That is also what makes this composable. The game applies research in the SO
+ * getter and the anomaly in the runtime getter, one after the other, and
+ * `(authored × research) × anomaly` is not bit-identical to
+ * `authored × (research × anomaly)`. So the two arrive as two successive calls
+ * here, in that order, and each re-derives waste from the pair it produced —
+ * which is exactly what the game does.
+ *
+ * Only the two roles that *have* waste derive one. A cooler and a reactor have
+ * no energy figure, so `heat - energy` would silently turn their whole output
+ * into waste.
+ *
+ * Heat, energy and cooling are left unsnapped: the game multiplies those at
+ * runtime rather than authoring a table entry, so snapping them would be
+ * inventing a rounding it does not do.
+ *
+ * Returns the building unchanged at a factor of 1, so the common case allocates
+ * nothing and the identity holds by reference.
+ */
+export function scaleEffectiveBuilding(
+  building: EffectiveBuilding,
+  factor: number,
+): EffectiveBuilding {
+  if (factor === 1) return building;
+
+  const effectiveValue = building.effectiveValue * factor;
+  const energy = building.energy * factor;
+
   return {
-    id: def.id,
-    type: def.type,
-    effectiveValue: baseValue,
-    energy: 0,
-    waste: 0,
+    id: building.id,
+    type: building.type,
+    effectiveValue,
+    energy,
+    waste:
+      building.type === "generator" || building.type === "direct_producer"
+        ? snapToAuthoredPrecision(effectiveValue - energy)
+        : building.waste,
+    // Carried through untouched, and that is the point of it: it identifies the
+    // tier, and a tier does not change because something scaled what it is
+    // worth. See `EffectiveBuilding.baseValue`.
+    baseValue: building.baseValue,
   };
 }

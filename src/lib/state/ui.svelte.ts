@@ -3,7 +3,7 @@ import type { ImageScale, PlacedBuilding, PlacementView } from "../types";
 import type { BuildingCategory } from "@reactor2/solver";
 import { buildShareUrl, clearSharedCode } from "../encoding/shareLink";
 import { downloadBlob, toFileSlug } from "../utils/downloadFile";
-import { formatNumberForFilename } from "@reactor2/solver";
+import { blueprintRules, formatNumberForFilename } from "@reactor2/solver";
 import {
   analyticsOptedOut,
   doNotTrackRequested,
@@ -78,7 +78,7 @@ export type SheetDetent = "closed" | "peek" | "half" | "full";
  * Defaults to the islands, because that is the recurring task. The roster is
  * set once and then the same roster is tried against one island after another.
  */
-type SetupTab = "islands" | "buildings";
+type SetupTab = "islands" | "buildings" | "timelab";
 
 /**
  * Visible height of the sheet's `peek` detent, in px.
@@ -279,7 +279,7 @@ class UIState {
    * and an explicit choice then wins in both directions.
    *
    * Settings inverts it for display: every switch in that column means "this
-   * is happening", and one inverted row would give `--neon` two readings.
+   * is happening", and one inverted row would give `--accent` two readings.
    */
   #analyticsDisabled = $state<boolean | null>(
     uiStorage.loadPrefs().analyticsDisabled ?? null,
@@ -460,11 +460,40 @@ class UIState {
   }
 
   /**
-   * Whether there is a second board to switch to at all. The toggle renders
-   * only when this is true — with no solve there is nothing to compare.
+   * Whether there is a second board to switch to at all — with no solve there
+   * is nothing to compare. This is what puts the toggle in the layout;
+   * `canSwitchBoards` is what makes it visible and usable.
    */
   get hasSolverPlacements(): boolean {
     return (solverState.optimizationResult?.placements.length ?? 0) > 0;
+  }
+
+  /**
+   * Whether the Edit/Solver switch has anything to offer, which is what both
+   * it and the row it sits in render on.
+   *
+   * Not while a run is in flight, and for three reasons that all point the
+   * same way. The readout is pinned to the run for the duration
+   * (`statsPanel`), so switching to Edit leaves the card reporting the search
+   * while the canvas draws the user's board — the one disagreement
+   * `visiblePlacements` exists to make impossible. The switch back is an edge
+   * on the run *starting* (`PixiCanvas`), so a layout finishing while the
+   * user is on their own board lands on a board nobody is looking at. And the
+   * pill would appear in the middle of a first-ever run anyway, the moment
+   * the first progress report gives it placements to switch to — on a phone,
+   * a whole line arriving in the HUD unasked.
+   *
+   * The run's board is the one on screen throughout, which is what starting a
+   * run asks for; the way onto the other one is to let it finish or press
+   * STOP.
+   *
+   * False does not always mean gone. The compact line the toggle sits on is
+   * not rendered at all, but on a wide screen it shares a centred row with
+   * the action pill and merely goes invisible, holding its box so RUN/STOP
+   * does not re-centre under the cursor that just pressed it.
+   */
+  get canSwitchBoards(): boolean {
+    return this.hasSolverPlacements && !solverState.isOptimizing;
   }
 
   /**
@@ -599,17 +628,49 @@ class UIState {
       );
       return;
     }
-    if (solverState.optimizationResult) {
+    /*
+     * Nothing to ask about across an anomaly change: the layout on screen was
+     * searched under other rules, so its power is not a bar a fresh run has
+     * to clear — defending it would compare two numbers that do not mean the
+     * same thing. Run outright, as if there were no result at all.
+     *
+     * Compared against `activeAnomaly.id` rather than the raw `anomalyId`,
+     * which is whatever `localStorage` held: `resultAnomalyId` is always a
+     * resolved id, so an unknown string would otherwise never match one and
+     * the dialog would be skipped for good.
+     */
+    if (
+      solverState.optimizationResult &&
+      solverState.resultAnomalyId === configState.activeAnomaly.id
+    ) {
       this.activeModal = "solve";
       return;
     }
-    void solverState.runOptimizer();
+    this.#beginSolve();
   }
 
   /** Answers the dialog: `keepBest` defends the layout already on screen. */
   startSolve(keepBest: boolean) {
     this.activeModal = null;
-    void solverState.runOptimizer({ keepBest });
+    this.#beginSolve({ keepBest });
+  }
+
+  /**
+   * The one way a run is started, and the tidying that goes with it.
+   *
+   * Setup is unmounted for the duration (`setupHidden`), so the sheet is shut
+   * on the way in for the same reason `setUiHidden` shuts it: a detent left
+   * open describes a panel that is no longer rendered, and on a compact
+   * viewport it takes the whole HUD down with it — which is where STOP is.
+   *
+   * In practice it is already closed, because the HUD unmounts while the
+   * sheet is open and Run is in the HUD. The case it covers is a sheet opened
+   * on a phone and then run from a window that has since been widened, where
+   * the detent survives unread until the viewport narrows again.
+   */
+  #beginSolve(options: { keepBest?: boolean } = {}) {
+    this.setSheetDetent("closed");
+    void solverState.runOptimizer(options);
   }
 
   /** Folds the corner readout on a small screen, and remembers it. */
@@ -621,6 +682,30 @@ class UIState {
   /** True when the sheet covers enough of the canvas to warrant a scrim. */
   get sheetCoversCanvas(): boolean {
     return this.sheetDetent === "half" || this.sheetDetent === "full";
+  }
+
+  /**
+   * Whether Setup is off screen, and with it both ways back in — the HUD's
+   * Setup button and the docked panel's own handle.
+   *
+   * It goes away for as long as a run is in flight. Everything on its three
+   * tabs is an input to *that* run — the island it is solving, the roster it
+   * was planned with, the timeline it is rating against — and a run reads
+   * every one of them once, at launch. So a press there either cannot reach
+   * the search at all, or, on the island list, stops it outright; neither is
+   * what a live panel appears to be offering.
+   *
+   * Hidden rather than disabled, this app's usual call, and it replaces a
+   * half-measure: the run-length row and the anomaly list already greyed
+   * themselves out while the island list and the roster beside them stayed
+   * live, so what was on screen was a panel part working and part dead with
+   * nothing saying which was which. It also hands the screen to the readout,
+   * which is the one thing a player is actually watching at that moment.
+   *
+   * Stop is untouched — it lives in the HUD, which stays.
+   */
+  get setupHidden(): boolean {
+    return solverState.isOptimizing;
   }
 
   toggleSidebar() {
@@ -701,7 +786,16 @@ class UIState {
     this.shareUrl = "";
     this.copiedForm = null;
     try {
-      const code = await layoutState.exportBlueprint(this.visiblePlacements);
+      // The rules the board on screen was built under travel with it — this
+      // is the one place that can see both the board and `configState`. A
+      // previewed board was built under its author's, so re-sharing it passes
+      // those on (or their absence) rather than restating it under the reader's.
+      const code = await layoutState.exportBlueprint(
+        layoutState.isPreview
+          ? layoutState.previewRules
+          : blueprintRules(configState.anomalyId, configState.prestigeLevels),
+        this.visiblePlacements,
+      );
       this.shareCode = code;
       this.shareUrl = buildShareUrl(code);
     } catch (err) {
@@ -785,6 +879,19 @@ class UIState {
   /** True while the canvas is showing someone else's board, from a link. */
   get isPreview(): boolean {
     return layoutState.isPreview;
+  }
+
+  /**
+   * Whether the board on screen runs under an anomaly — the author's on a
+   * previewed board, the player's otherwise. It is what the theme keys on:
+   * the theme says "this timeline is not the ordinary rules", and on a shared
+   * link the timeline being read is the author's, which is also the one the
+   * board's figures are rated under (`layoutState.placementAnomaly`).
+   */
+  get boardHasAnomaly(): boolean {
+    return this.isPreview
+      ? layoutState.placementAnomaly.rule !== "baseline"
+      : configState.hasAnomaly;
   }
 
   /**

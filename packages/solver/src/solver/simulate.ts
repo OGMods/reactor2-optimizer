@@ -11,6 +11,26 @@ import type { EffectiveBuilding, PlacedBuilding, Placement } from "./types";
  */
 export interface SimPlacedBuilding extends PlacedBuilding {
   idx: number;
+  /**
+   * The capacity this building actually ran at on this tile — its
+   * `effectiveValue` as the layout rated it, anomaly and all.
+   *
+   * The pair with `baseValue` is the whole point of the field, and they must
+   * not be confused. `baseValue` is the **authored** tier value and never
+   * moves, because a placement's tier is resolved back out of it; this is what
+   * the tile was rated for, which is the figure every other number in the row
+   * was measured against. Under a terrain bonus or a role isolation rule the
+   * two differ by the multiplier, and a consumer comparing a delivery against
+   * the wrong one silently reads a full tile as a starved one (or the reverse):
+   * the walk's "under-fed reactor" move measured `heatProduced` against
+   * `baseValue` for a while and stopped firing below x1/k fill — 66.7% under a
+   * maxed Stellar Forge, 60% on a Tidal shore — with nothing failing anywhere.
+   *
+   * It stays on `SimPlacedBuilding` rather than on `PlacedBuilding`, so it does
+   * not cross the worker boundary: it is the search's own units, meaningless to
+   * a caller that does not hold the island's ratings.
+   */
+  ratedValue: number;
 }
 
 export interface SimulationResult {
@@ -91,6 +111,56 @@ export function simulateIsland(
     };
   }
 
+  // A role-isolation rule rates a building by what its neighbours *are*, so it
+  // cannot be folded into a tile and cannot be resolved at the moment a
+  // building is placed — one write re-rates up to eight other tiles. It is
+  // resolved here instead, where a whole layout is in hand, into a buffer held
+  // by the island rather than allocated per call.
+  //
+  // The scan is over the affected role's tiles only, and reads `placement`
+  // rather than the buffer it is filling: the test is on what a neighbour *is*,
+  // which no rating changes, so there is no order to get right.
+  let layout = placement;
+  const isolation = ctx.isolation;
+  if (isolation !== null) {
+    const rated = ctx.ratedLayout;
+    for (let t = 0; t < n; t++) rated[t] = placement[t];
+
+    const affected =
+      isolation.role === "generator"
+        ? generatorTiles
+        : isolation.role === "cooler"
+          ? coolerTiles
+          : isolation.role === "reactor"
+            ? reactorTiles
+            : dpTiles;
+    const count =
+      isolation.role === "generator"
+        ? numGenerators
+        : isolation.role === "cooler"
+          ? numCoolers
+          : isolation.role === "reactor"
+            ? numReactors
+            : numDps;
+
+    for (let i = 0; i < count; i++) {
+      const t = affected[i];
+      const neighbors = ctx.neighbors[t];
+      let crowded = false;
+      for (let k = 0; k < neighbors.length; k++) {
+        const other = placement[neighbors[k]];
+        if (other !== null && other.type === isolation.role) {
+          // One neighbour costs exactly what five do — the rule is a two-way
+          // test, not a count.
+          crowded = true;
+          break;
+        }
+      }
+      rated[t] = ctx.rateIsolated(placement[t]!, crowded);
+    }
+    layout = rated;
+  }
+
   const d = ctx.dist;
   const heatIn = ctx.heatIn;
   const heatOut = ctx.heatOut;
@@ -104,10 +174,10 @@ export function simulateIsland(
 
   if (numReactors > 0 && numGenerators > 0) {
     for (let i = 0; i < numReactors; i++) {
-      d.supplierCap[i] = placement[reactorTiles[i]]!.effectiveValue;
+      d.supplierCap[i] = layout[reactorTiles[i]]!.effectiveValue;
     }
     for (let j = 0; j < numGenerators; j++) {
-      d.consumerCap[j] = placement[generatorTiles[j]]!.effectiveValue;
+      d.consumerCap[j] = layout[generatorTiles[j]]!.effectiveValue;
     }
     runDistribution(
       reactorTiles,
@@ -126,7 +196,7 @@ export function simulateIsland(
   // the conversion is per tier and is not a fixed 75/25. See `physics.ts`.
   for (let j = 0; j < numGenerators; j++) {
     const t = generatorTiles[j];
-    generatorPowerAndWaste(placement[t]!, heatIn[t], conversion);
+    generatorPowerAndWaste(layout[t]!, heatIn[t], conversion);
     powerOf[t] = conversion.power;
     wasteOf[t] = conversion.waste;
   }
@@ -135,7 +205,7 @@ export function simulateIsland(
   // unscaled.
   for (let k = 0; k < numDps; k++) {
     const t = dpTiles[k];
-    const b = placement[t]!;
+    const b = layout[t]!;
     powerOf[t] = b.energy;
     wasteOf[t] = b.waste;
   }
@@ -160,17 +230,66 @@ export function simulateIsland(
   for (let i = 0; i < numCoolers; i++) heatOut[coolerTiles[i]] = 0.0;
 
   if (numWaste > 0) {
-    for (let i = 0; i < numCoolers; i++) {
-      d.supplierCap[i] = placement[coolerTiles[i]]!.effectiveValue;
+    if (ctx.anomaly.rule === "shared_cooling") {
+      /*
+       * One pool for the whole board, handed out in proportion to what each
+       * power source is owed. Port of `CoolingNetwork.DistributeCryoArea`:
+       * adjacency stops mattering, and so do the fair split and the repair
+       * pass — there is one number and one rule for sharing it.
+       *
+       * Nothing downstream changes. Serving every source the same fraction
+       * means a short pool leaves *every* source under its waste, so the
+       * ordinary per-producer online test below turns that into the
+       * board-wide all-or-nothing the rule describes, with no second code
+       * path and no board-level flag.
+       *
+       * The 0.88 is already in each cooler's `effectiveValue` — the game rates
+       * the cooler down rather than charging it at the pool — so this sums
+       * what the buildings are worth, exactly as the local path does.
+       */
+      let totalCooling = 0.0;
+      for (let i = 0; i < numCoolers; i++)
+        totalCooling += layout[coolerTiles[i]]!.effectiveValue;
+
+      let totalDemand = 0.0;
+      for (let j = 0; j < numWaste; j++) totalDemand += wasteOf[wasteTiles[j]];
+
+      const factor =
+        totalDemand > 0 && totalCooling > 0
+          ? totalCooling < totalDemand
+            ? totalCooling / totalDemand
+            : 1.0
+          : 0.0;
+
+      let totalAccepted = 0.0;
+      for (let j = 0; j < numWaste; j++) {
+        const accepted = wasteOf[wasteTiles[j]] * factor;
+        coolingIn[wasteTiles[j]] = accepted;
+        totalAccepted += accepted;
+      }
+
+      // What each cooler is doing, for the readout: its own share of the work
+      // the pool actually did, which is the game's own reporting rule.
+      const share =
+        totalCooling > 0 && totalAccepted > 0
+          ? totalAccepted / totalCooling
+          : 0;
+      for (let i = 0; i < numCoolers; i++)
+        heatOut[coolerTiles[i]] =
+          layout[coolerTiles[i]]!.effectiveValue * share;
+    } else {
+      for (let i = 0; i < numCoolers; i++) {
+        d.supplierCap[i] = layout[coolerTiles[i]]!.effectiveValue;
+      }
+      for (let j = 0; j < numWaste; j++) {
+        d.consumerCap[j] = wasteOf[wasteTiles[j]];
+      }
+      runDistribution(coolerTiles, numCoolers, wasteTiles, numWaste, ctx);
+      for (let i = 0; i < numCoolers; i++)
+        heatOut[coolerTiles[i]] = d.supplierSent[i];
+      for (let j = 0; j < numWaste; j++)
+        coolingIn[wasteTiles[j]] = d.consumerReceived[j];
     }
-    for (let j = 0; j < numWaste; j++) {
-      d.consumerCap[j] = wasteOf[wasteTiles[j]];
-    }
-    runDistribution(coolerTiles, numCoolers, wasteTiles, numWaste, ctx);
-    for (let i = 0; i < numCoolers; i++)
-      heatOut[coolerTiles[i]] = d.supplierSent[i];
-    for (let j = 0; j < numWaste; j++)
-      coolingIn[wasteTiles[j]] = d.consumerReceived[j];
   }
 
   let totalPower = 0.0;
@@ -179,13 +298,13 @@ export function simulateIsland(
 
   for (let i = 0; i < numReactors; i++) {
     const t = reactorTiles[i];
-    const b = placement[t]!;
+    const b = layout[t]!;
     placements[out++] = row(t, ctx, b, 0, heatOut[t], 0, 0, 0, 0);
   }
 
   for (let j = 0; j < numGenerators; j++) {
     const t = generatorTiles[j];
-    const b = placement[t]!;
+    const b = layout[t]!;
     const waste = wasteOf[t];
     const cooling = coolingIn[t];
     // All-or-nothing: a producer whose waste outruns the cooling routed to it
@@ -197,7 +316,7 @@ export function simulateIsland(
 
   for (let k = 0; k < numDps; k++) {
     const t = dpTiles[k];
-    const b = placement[t]!;
+    const b = layout[t]!;
     const waste = wasteOf[t];
     const cooling = coolingIn[t];
     const power = wasteIsCovered(waste, cooling) ? powerOf[t] : 0.0;
@@ -207,14 +326,18 @@ export function simulateIsland(
 
   for (let i = 0; i < numCoolers; i++) {
     const t = coolerTiles[i];
-    const b = placement[t]!;
+    const b = layout[t]!;
     placements[out++] = row(t, ctx, b, 0, 0, 0, 0, heatOut[t], 0);
   }
 
   return { totalPower, placements };
 }
 
-/** Report rows for a layout that produces nothing — every field but the base value is zero. */
+/**
+ * Report rows for a layout that produces nothing — every measured field is
+ * zero, leaving each building's two capacity figures (`baseValue` and the
+ * rating it would have run at) and nothing else.
+ */
 function inertPlacements(
   placement: Placement,
   ctx: IslandContext,
@@ -245,7 +368,14 @@ function row(
     x: ctx.xs[t],
     y: ctx.ys[t],
     buildingId: b.id,
-    baseValue: b.effectiveValue,
+    // The authored tier value, never the scaled one — a placement's tier is
+    // resolved back out of this. See `EffectiveBuilding.baseValue`.
+    baseValue: b.baseValue,
+    // ...and beside it what the tile was actually rated for, which is the
+    // figure the rest of this row was measured against. `b` is the building as
+    // the layout holds it, so this is already the scaled one wherever a rule
+    // scaled it.
+    ratedValue: b.effectiveValue,
     powerGenerated,
     heatProduced,
     heatConsumed,

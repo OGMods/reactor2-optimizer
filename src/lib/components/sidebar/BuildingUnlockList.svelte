@@ -147,7 +147,7 @@
     margin: -0.85rem -1rem 0.75rem;
     padding: 0.85rem 1rem 0.5rem;
     background: var(--surface-panel-solid);
-    border-bottom: 1px solid var(--neon-faint);
+    border-bottom: 1px solid var(--accent-faint);
   }
   @keyframes spin {
     to {
@@ -164,7 +164,7 @@
   .tabs-bar {
     display: flex;
     background: rgba(10, 14, 23, 0.65);
-    border: 1px solid var(--neon-faint);
+    border: 1px solid var(--accent-faint);
     border-radius: var(--radius);
     padding: 3px;
     gap: 3px;
@@ -190,9 +190,9 @@
     background: rgba(255, 255, 255, 0.02);
   }
   .tab-btn.active {
-    background: var(--neon-faint);
-    color: var(--neon);
-    border-color: var(--border-neon);
+    background: var(--accent-faint);
+    color: var(--accent);
+    border-color: var(--border-accent);
   }
 
   .utility-row {

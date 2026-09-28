@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { layoutState, uiState, viewportState } from "../../state";
+  import {
+    layoutState,
+    uiState,
+    viewportState,
+  } from "../../state";
   import GridControls from "./GridControls.svelte";
   import DonateButton from "./DonateButton.svelte";
   import {
@@ -79,7 +83,10 @@
   </button>
 
   {#if uiState.overflowOpen}
-    <div class="menu thin-scroll" role="menu">
+    <div
+      class="menu thin-scroll"
+      role="menu"
+    >
       {#if showSize}
         <div class="menu-section">
           <span class="menu-title">Map size</span>
@@ -179,8 +186,8 @@
     /*
      * The same hairline its neighbours in the bar carry; transparent, it would
      * leave the header reading as two bordered buttons and one floating glyph.
-     * `.icon-btn.open` below still takes the neon, because an open menu is a
-     * selection and that is what neon means.
+     * `.icon-btn.open` below still takes `--accent`, because an open menu is a
+     * selection and that is what the accent means.
      */
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -191,9 +198,9 @@
 
   .icon-btn:hover,
   .icon-btn.open {
-    background: var(--neon-bg);
-    border-color: var(--neon-dim);
-    color: var(--neon);
+    background: var(--accent-bg);
+    border-color: var(--accent-dim);
+    color: var(--accent);
   }
 
   .menu {
@@ -202,9 +209,12 @@
     right: 0;
     min-width: 250px;
     background: var(--surface-panel-solid);
-    border: 1px solid var(--border-neon);
+    border: 1px solid var(--border-accent);
     border-radius: var(--radius);
     padding: 0.75rem;
+    transition:
+      background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
     display: flex;
     flex-direction: column;
@@ -283,8 +293,9 @@
   }
 
   /*
-   * Menu rows are neutral. Neon would say "selected" of rows none of which
-   * are, and singling one out in amber would borrow the board's idle colour.
+   * Menu rows are neutral. The accent would say "selected" of rows none of
+   * which are, and singling one out in amber would borrow the board's idle
+   * colour.
    * Nothing here is a selection — they are all just actions. See the colour
    * law in `app.css`.
    */

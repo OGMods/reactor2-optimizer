@@ -40,7 +40,14 @@ function grassGrid(w: number, h: number): Tile[][] {
 
 /** A stand-in building; only its id reaches the layout key. */
 function stub(id: string): EffectiveBuilding {
-  return { id, type: "cooler", effectiveValue: 1, energy: 0, waste: 0 };
+  return {
+    id,
+    type: "cooler",
+    effectiveValue: 1,
+    energy: 0,
+    waste: 0,
+    baseValue: 1,
+  };
 }
 
 /** `..A.B` — dots are empty tiles, letters are building ids. */

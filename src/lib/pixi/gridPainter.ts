@@ -22,17 +22,25 @@ import { placementStatus, type PlacementStatus } from "../data/placements";
 import { pulseAlpha, STATUS_PULSE, type Pulse } from "./statusPulse";
 
 /**
- * The selection cyan, as Pixi wants it.
+ * The selection accent, as Pixi wants it.
  *
- * This is `--neon` in `src/app.css` (`#00f3ff`), and the two have to stay the
- * same number: the board's hover highlight and the ghost pad under a
- * restorable obstacle are the canvas half of the same "this is selected"
- * language every control in the UI speaks. Pixi takes a numeric literal and
- * cannot read a custom property, so this is the one place the value is
- * repeated — named here rather than spelled out at the three call sites that
- * had it inline, so a change to the palette has somewhere to land.
+ * This is the base theme's `--accent` in `src/app.css` (`#00f3ff`): the
+ * board's hover highlight and the ghost pad under a restorable obstacle are
+ * the canvas half of the same "this is selected" language every control in the
+ * UI speaks. Pixi takes a numeric literal and cannot read a custom property,
+ * so this is the one place the value is repeated — named here rather than
+ * spelled out at the three call sites that had it inline, so a change to the
+ * palette has somewhere to land.
+ *
+ * It is pinned to the *base* theme, and does not follow the one on the shell.
+ * A theme is a rebinding of CSS custom properties, which is precisely what
+ * Pixi cannot see, so these two marks stay cyan while the chrome around them
+ * goes purple. They sit on the board rather than on the chrome, where the
+ * board's own reserved language is likewise never themed — see the theme block
+ * in `app.css` — so the mismatch reads as the board keeping its own colours
+ * rather than as chrome that was missed.
  */
-const NEON = 0x00f3ff;
+const ACCENT = 0x00f3ff;
 
 /**
  * The pad drawn on the tile beneath a building, saying whether it is running.
@@ -223,7 +231,7 @@ export class GridRenderer {
     this.hoverHighlight = new Graphics();
     this.hoverHighlight
       .poly(TILE_DIAMOND)
-      .fill({ color: NEON, alpha: 0.25 })
+      .fill({ color: ACCENT, alpha: 0.25 })
       .stroke({ width: 1.5, color: 0xffffff, alpha: 0.9 });
 
     this.hoverHighlight.visible = false;
@@ -575,8 +583,8 @@ export class GridRenderer {
       const pad = new Graphics();
       pad
         .poly(TILE_DIAMOND)
-        .fill({ color: NEON, alpha: 0.14 })
-        .stroke({ width: 1.5, color: NEON, alpha: 0.75 });
+        .fill({ color: ACCENT, alpha: 0.14 })
+        .stroke({ width: 1.5, color: ACCENT, alpha: 0.75 });
       node.addChild(pad);
 
       const frameKey = TILE_IMAGE_MAP[ghost.type];

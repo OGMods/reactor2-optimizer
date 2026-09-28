@@ -1,0 +1,198 @@
+/**
+ * `scaleEffectiveBuilding` — the one place a multiplier reaches a building.
+ *
+ * Time Lab research and every stat anomaly go through it, so its arithmetic is
+ * the arithmetic of the whole prestige feature. Nothing in it can fail loudly:
+ * a slip here produces a board that is simply rated wrong, with no crash and no
+ * layout that looks odd, and the golden fixtures assert to the last digit.
+ *
+ * Three rules, each pinned below against the shipped catalogue rather than
+ * against round synthetic numbers — the divergences are in the last bit, so a
+ * test built on tidy figures would pass under either reading.
+ */
+import { describe, expect, it } from "vitest";
+import { BUILDINGS } from "../src/data/buildings";
+import { scaleEffectiveBuilding } from "../src/data/effectiveBuildings";
+import { snapToAuthoredPrecision } from "../src/solver/physics";
+import type { EffectiveBuilding } from "../src/solver/types";
+
+/** The authored tiers of the roster's top generator, the sharpest case here. */
+const G7 = BUILDINGS.find((b) => b.id === "generator7")!;
+if (G7.type !== "generator") throw new Error("generator7 is not a generator");
+
+/** A resolved building at an authored tier, the way the roster produces one. */
+const atTier = (tier: number): EffectiveBuilding => {
+  const level = G7.levels[tier];
+  return {
+    id: G7.id,
+    type: "generator",
+    effectiveValue: level.heat,
+    energy: level.energy,
+    waste: level.waste ?? snapToAuthoredPrecision(level.heat - level.energy),
+    baseValue: level.heat,
+  };
+};
+
+describe("waste is derived from the scaled pair, not scaled itself", () => {
+  it("differs from the scaled authored waste, and takes the derived value", () => {
+    // generator7 at tier 4 under Tidal Ascendancy. The game's runtime getter is
+    // `(HeatPerTick - EnergyPerTick).SnapToAuthoredPrecision()` over the scaled
+    // pair, so this is 3.6907e21 — carrying the authored 2.21e21 through the
+    // same multiply gives 3.6906999999999996e21, half a million short.
+    const scaled = scaleEffectiveBuilding(atTier(3), 1.67);
+
+    expect(scaled.waste).toBe(3.6907e21);
+    expect(scaled.waste).not.toBe(2.21e21 * 1.67);
+    expect(scaled.waste).toBe(
+      snapToAuthoredPrecision(scaled.effectiveValue - scaled.energy),
+    );
+  });
+
+  it("holds for a producer the other way up, at single-digit magnitudes", () => {
+    // The wind turbine's 3.75/3/0.75 goes the opposite way at x0.8: derived is
+    // exactly 0.6, scaled authored is 0.6000000000000001. Both directions have
+    // to be wrong for the identity to be an accident.
+    const turbine = BUILDINGS.find((b) => b.id === "wind_turbine")!;
+    if (turbine.type !== "direct_producer") throw new Error("not a producer");
+    const level = turbine.levels[2];
+
+    const scaled = scaleEffectiveBuilding(
+      {
+        id: turbine.id,
+        type: "direct_producer",
+        effectiveValue: level.heat,
+        energy: level.energy,
+        waste: level.waste!,
+        baseValue: level.heat,
+      },
+      0.8,
+    );
+
+    expect(scaled.waste).toBe(0.6);
+    expect(scaled.waste).not.toBe(0.75 * 0.8);
+  });
+
+  it("leaves a cooler's and a reactor's waste at zero", () => {
+    // The roles with no energy figure. Deriving `heat - energy` for them would
+    // turn a reactor's entire output into waste it then has to have cooled,
+    // and a cooler's entire cooling into waste — silently, since both fields
+    // are plain numbers and nothing downstream range-checks them.
+    const cooler = scaleEffectiveBuilding(
+      {
+        id: "c",
+        type: "cooler",
+        effectiveValue: 100,
+        energy: 0,
+        waste: 0,
+        baseValue: 100,
+      },
+      2.5,
+    );
+    const reactor = scaleEffectiveBuilding(
+      {
+        id: "r",
+        type: "reactor",
+        effectiveValue: 200,
+        energy: 0,
+        waste: 0,
+        baseValue: 200,
+      },
+      2.5,
+    );
+
+    expect([cooler.effectiveValue, cooler.waste]).toEqual([250, 0]);
+    expect([reactor.effectiveValue, reactor.waste]).toEqual([500, 0]);
+  });
+});
+
+describe("two multipliers compose as two calls, not as one product", () => {
+  it("applies research and anomaly successively, as the game's getters do", () => {
+    // The game multiplies the authored figure by the Time Lab bonus in the SO
+    // getter and by the anomaly in the runtime getter, so what a building is
+    // rated at is `(authored x research) x anomaly`. That is not the same
+    // double as `authored x (research x anomaly)`: Infinite Grid at level 4
+    // (x1.7) and a crowded generator under Singularity Isolation (x0.8) over
+    // generator7's fourth tier give 1.2036e22 one way and 1.2036000000000001e22
+    // the other.
+    const researched = scaleEffectiveBuilding(atTier(3), 1.7);
+    const both = scaleEffectiveBuilding(researched, 0.8);
+
+    expect(both.effectiveValue).toBe(8.85e21 * 1.7 * 0.8);
+    expect(both.effectiveValue).toBe(1.2036e22);
+    expect(both.effectiveValue).not.toBe(8.85e21 * (1.7 * 0.8));
+  });
+
+  it("applies them in that order, research first, anomaly second", () => {
+    // Which of the two calls comes first is itself observable, and the factors
+    // above cannot see it: 1.7 x 0.8 and 0.8 x 1.7 land on the same double. The
+    // game's order is the Time Lab in the SO getter and the anomaly in the
+    // runtime getter — research first — and on generator7's fourth tier under
+    // Infinite Grid at level 2 (x1.25) then a Tidal shore (x1.67) the two orders
+    // differ in the last bit: 1.8474375e22 against 1.8474374999999997e22.
+    //
+    // Nothing above this line in the stack would notice: the roster resolves
+    // research into its three figures and the context rates the result, so
+    // reversing the two produces a board rated a few ULPs off — and the golden
+    // fixtures pass no anomaly, so they cannot see it either.
+    const researchFirst = scaleEffectiveBuilding(
+      scaleEffectiveBuilding(atTier(3), 1.25),
+      1.67,
+    );
+    const anomalyFirst = scaleEffectiveBuilding(
+      scaleEffectiveBuilding(atTier(3), 1.67),
+      1.25,
+    );
+
+    expect(researchFirst.effectiveValue).toBe(8.85e21 * 1.25 * 1.67);
+    expect(researchFirst.effectiveValue).toBe(1.8474375e22);
+    expect(anomalyFirst.effectiveValue).toBe(1.8474374999999997e22);
+    expect(researchFirst.effectiveValue).not.toBe(anomalyFirst.effectiveValue);
+  });
+
+  it("re-derives waste at each step, so the last one wins", () => {
+    /*
+     * Waste after two calls is the snapped difference of the twice-scaled pair,
+     * never the once-derived waste carried through a second multiply — and not
+     * the authored waste scaled twice either.
+     *
+     * The tier and the factors are chosen so the three readings actually part
+     * company, which most pairs do not: generator7's third tier (4.43e21 /
+     * 3.32e21) under Infinite Grid at level 1 (x1.1) and then a x0.8 penalty
+     * gives 9.76800000000001e20 derived against 9.768e20 either other way. The
+     * assertion against the identity alone is how `scaleEffectiveBuilding`
+     * computes waste, so it holds for any deriving implementation and cannot
+     * fail on its own.
+     */
+    const once = scaleEffectiveBuilding(atTier(2), 1.1);
+    const both = scaleEffectiveBuilding(once, 0.8);
+
+    expect(both.waste).toBe(9.76800000000001e20);
+    expect(both.waste).toBe(
+      snapToAuthoredPrecision(both.effectiveValue - both.energy),
+    );
+    // The once-derived waste carried through the second multiply...
+    expect(both.waste).not.toBe(snapToAuthoredPrecision(once.waste * 0.8));
+    // ...and the authored waste scaled by both factors. Both are 9.768e20.
+    expect(both.waste).not.toBe(1.11e21 * 1.1 * 0.8);
+  });
+});
+
+describe("what a multiplier must not touch", () => {
+  it("carries baseValue through untouched", () => {
+    // It identifies the tier, and a tier does not change because something
+    // scaled what it is worth. `effectiveAtValue` matches the catalogue on this
+    // number, so a scaled one resolves to a higher tier and scales twice.
+    const scaled = scaleEffectiveBuilding(atTier(2), 1.67);
+
+    expect(scaled.baseValue).toBe(4.43e21);
+    expect(scaled.effectiveValue).not.toBe(scaled.baseValue);
+  });
+
+  it("returns the building itself at a factor of one", () => {
+    // By reference: the unmodified roster is the common case, and every solve
+    // resolves one.
+    const building = atTier(0);
+
+    expect(scaleEffectiveBuilding(building, 1)).toBe(building);
+  });
+});

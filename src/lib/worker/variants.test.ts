@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { buildSolveVariants } from "./variants";
+import { getAnomaly } from "@reactor2/solver";
 import type { IslandPlan } from "@reactor2/solver";
 import type { IslandSolution } from "@reactor2/solver";
 import type { IslandLayout, PlacedBuilding, Tile } from "@reactor2/solver";
@@ -49,11 +50,15 @@ function plan(): IslandPlan {
     width: 2,
     height: 1,
     grid: [] as Tile[][],
+    buildable: Uint8Array.from([1, 1]),
+    waterAdjacent: Uint8Array.from([0, 0]),
+    tileCount: 2,
     originalTileIndices: [offset, offset + 1],
   });
   return {
     islands: [island(0), island(2)],
     effectiveBuildings: [],
+    anomaly: getAnomaly(undefined),
     budgetsS: [1, 1],
     seeds: [undefined, undefined],
     originalWidth: ORIGINAL_WIDTH,

@@ -16,7 +16,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { layoutState } from "./layout.svelte";
-import { ISLAND_TEMPLATES } from "@reactor2/solver";
+import { ISLAND_TEMPLATES, blueprintRules } from "@reactor2/solver";
 
 /** A hand-placed building, scored to zero — `recalculate` re-derives it. */
 function placementAt(x: number, y: number, buildingId = "generator") {
@@ -275,7 +275,7 @@ describe("board history", () => {
   });
 
   it("refuses to record or undo on a previewed board", async () => {
-    const code = await layoutState.exportBlueprint();
+    const code = await layoutState.exportBlueprint(blueprintRules("none", {}));
     expect(code).toBeTruthy();
 
     expect(await layoutState.loadPreview(code!, {})).toBe(true);
