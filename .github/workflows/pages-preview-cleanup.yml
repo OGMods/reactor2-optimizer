@@ -1,0 +1,94 @@
+name: Remove a branch's Pages preview
+
+# A preview outlives the branch it was built from, and nothing in the publish
+# path can notice: that job only ever touches the directory it is publishing.
+# So deletion is its own event. This workflow always runs from the default
+# branch, whatever branch was deleted.
+on:
+  delete:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch whose preview should be removed"
+        required: true
+        type: string
+
+concurrency:
+  group: pages-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  remove:
+    name: Remove the preview
+    # A deleted tag is not a preview. Guard on the ref type rather than on the
+    # name, since a tag and a branch may share one.
+    if: github.event_name == 'workflow_dispatch' || github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Remove it from the site branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ inputs.branch || github.event.ref }}
+        run: |
+          set -euo pipefail
+
+          # main's build is the root of the site, not a preview, so there is
+          # nothing here to remove for it -- and the guard matters, because a
+          # preview now lives beside the root's own files rather than under a
+          # `preview/` prefix, so the path this would clear for "main" is the
+          # published site itself.
+          if [ "$BRANCH" = "main" ]; then
+            echo "main has no preview directory -- nothing to do"
+            exit 0
+          fi
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          mkdir site && cd site
+          git init --quiet --initial-branch=gh-pages
+          git remote add origin "$remote"
+
+          # No site branch means no preview to remove. Not a failure: a branch
+          # can be deleted before it ever published.
+          if ! git fetch --quiet --depth 1 origin gh-pages 2>/dev/null; then
+            echo "gh-pages does not exist -- nothing to do"
+            exit 0
+          fi
+          git checkout --quiet -B gh-pages FETCH_HEAD
+
+          if [ ! -d "$BRANCH" ]; then
+            echo "No preview for $BRANCH -- nothing to do"
+            exit 0
+          fi
+
+          # The `.preview` marker is what says this directory is a published
+          # preview rather than part of the root build, and it is the same test
+          # the root publish holds back on. Without it a branch sharing a name
+          # with one of the build's own directories would delete that directory
+          # out of the live site.
+          if [ ! -f "$BRANCH/.preview" ]; then
+            echo "$BRANCH exists but is not a preview -- refusing to remove it" >&2
+            exit 1
+          fi
+
+          git rm -r --quiet "$BRANCH"
+          git commit --quiet -m "Remove the Pages preview for $BRANCH"
+
+          # Races the publish job, which pushes to this same branch.
+          for attempt in 1 2 3; do
+            if git push --quiet origin gh-pages; then
+              echo "Removed the $BRANCH preview"
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt) -- rebasing onto the branch"
+            git fetch --quiet --depth 1 origin gh-pages
+            git rebase --quiet FETCH_HEAD || git rebase --abort
+          done
+          echo "Could not remove the preview after three attempts" >&2
+          exit 1
