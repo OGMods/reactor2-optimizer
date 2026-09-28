@@ -752,6 +752,9 @@ class SolverState {
     this.#runTemplateId = layoutState.activeTemplateId;
     this.#runSignature = this.solveSignature();
     this.#runAnomalyId = configState.activeAnomaly.id;
+    // Setup is hidden for the run, but `solve_done` should still name the
+    // rules the run started with rather than re-read them at the end.
+    const runRules = configState.rulesParams();
     // The streamed and then finished layouts are both searched under the
     // anomaly launched with, which the player may move off before either
     // lands — see `resultAnomalyId`.
@@ -771,6 +774,7 @@ class SolverState {
       island: this.#runTemplateId,
       tiles: countGrassTiles(layoutState.grid),
       roster: Object.keys(configState.buildingUpgrades).length,
+      ...runRules,
       cores:
         typeof navigator !== "undefined"
           ? navigator.hardwareConcurrency || 0
@@ -942,6 +946,7 @@ class SolverState {
         bound: Math.round(bound),
         bound_pct: bound > 0 ? Math.round((donePower / bound) * 100) : 0,
         variants: this.variants.length,
+        ...runRules,
       });
     }
   }

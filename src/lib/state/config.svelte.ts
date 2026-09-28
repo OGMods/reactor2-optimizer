@@ -13,6 +13,7 @@ import {
   buildingStorage,
   prestigeStorage,
 } from "../storage/storage";
+import { trackEvent } from "../utils/analytics";
 
 /**
  * Which components the player has unlocked and to what level, and which anomaly
@@ -138,8 +139,26 @@ class ConfigState {
   }
 
   setAnomaly(id: string) {
+    // Pressing the card already chosen is not a choice, and would count one
+    // timeline twice.
+    if (id === this.anomalyId) return;
+    trackEvent("anomaly_select", { anomaly: id, from: this.anomalyId });
     this.anomalyId = id;
     anomalyStorage.saveAnomaly(id);
+  }
+
+  /**
+   * The rules a run is launched under, as analytics params: the anomaly, and
+   * the research as `id:level` pairs numbered from 1 the way the tier buttons
+   * are. One string rather than a param per upgrade, so one custom dimension
+   * covers it and a research added later needs no new registration.
+   */
+  rulesParams(): { anomaly: string; research: string } {
+    const research = Object.entries(this.prestigeLevels)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([id, level]) => `${id}:${level + 1}`)
+      .join(",");
+    return { anomaly: this.activeAnomaly.id, research: research || "none" };
   }
 
   isResearchEnabled(id: string): boolean {
@@ -150,11 +169,18 @@ class ConfigState {
   toggleResearch(id: string) {
     if (id in this.prestigeLevels) delete this.prestigeLevels[id];
     else this.prestigeLevels[id] = 0;
+    // 1-based like the tier buttons, 0 for switched off.
+    trackEvent("research_set", {
+      research: id,
+      level: id in this.prestigeLevels ? this.prestigeLevels[id] + 1 : 0,
+    });
     prestigeStorage.savePrestige(this.prestigeLevels);
   }
 
   setResearchLevel(id: string, level: number) {
+    if (this.prestigeLevels[id] === level) return;
     this.prestigeLevels[id] = level;
+    trackEvent("research_set", { research: id, level: level + 1 });
     prestigeStorage.savePrestige(this.prestigeLevels);
   }
 

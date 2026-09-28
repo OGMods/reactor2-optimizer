@@ -1137,12 +1137,17 @@ The measurement id is a constant, since it ships in the bundle anyway.
 view for someone who said no) or closed (the tag off for everyone), and neither
 is visible in the app.
 
-**Four events beyond `page_view`**, each fired from the one place that knows
+**Six events beyond `page_view`**, each fired from the one place that knows
 the answer: `solve_run` and `solve_done` in `runOptimizer` (paired, so a status
 other than `ok` is countable rather than inferred from a run that never
-reported), `share_copy` in `copyShare`, and `board_failed` in `PixiCanvas`'s
+reported), `share_copy` in `copyShare`, `board_failed` in `PixiCanvas`'s
 init catch — one event for both halves, since an atlas that never arrives and a
-WebGL context that never starts are the same empty board. `trackEvent` buffers
+WebGL context that never starts are the same empty board — and the Time Lab's
+two, `anomaly_select` in `configState.setAnomaly` and `research_set` in
+`toggleResearch` / `setResearchLevel`. Both solve events also carry the rules
+the run was launched under (`configState.rulesParams()`: `anomaly`, and
+`research` as `id:level` pairs numbered from 1), captured at launch, so power
+and bound can be split by timeline. `trackEvent` buffers
 until the tag lands, because it is fetched on idle and the app is usable well
 before that; nothing buffered before an opt-out is ever sent. A param is not
 reportable until it is registered as a custom dimension or metric in GA.
