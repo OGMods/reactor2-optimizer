@@ -4,6 +4,7 @@
   import { Cpu, Zap, Snowflake, Lock, Unlock } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import BuildingUnlockCard from "./BuildingUnlockCard.svelte";
+  import UpgradePlanSummary from "./UpgradePlanSummary.svelte";
   import { createConfirmArm } from "../confirmArm.svelte";
 
   /**
@@ -85,6 +86,8 @@
     in — worth having at the top of the list, not worth a permanent band across
     every screen of it.
   -->
+  <UpgradePlanSummary />
+
   <div class="utility-row">
     <button class="action-btn" onclick={() => configState.unlockAll()}>
       <Unlock size={11} />
@@ -111,6 +114,7 @@
         {bld}
         enabled={configState.isBuildingEnabled(bld.id)}
         selectedUpgrade={configState.buildingUpgrades[bld.id] ?? 0}
+        plannedUpgrade={configState.plannedLevel(bld.id)}
         onToggle={() => configState.toggleBuilding(bld.id)}
         onUpgradeChange={(level) => configState.setUpgradeLevel(bld.id, level)}
       />

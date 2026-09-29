@@ -68,6 +68,13 @@ import type {
  * has to cool that share of the waste — and it is still the wrong answer, so
  * only stable layouts are ever recorded as best. "Pruning never reduces power"
  * is NOT a valid invariant here; "the returned layout is stable" is.
+ *
+ * **Under an upgrade plan "stable" means stable at every step.** The search
+ * scores at the plan's target, but every gate that admits a layout — the best
+ * record, repair, the composition swaps, pruning, right-sizing, the tie
+ * shortlist and `stabilize` itself — also asks `planHolds`, so a layout that
+ * overheats at any tier on the way is never kept. Without a plan that call
+ * returns at once and nothing here changes.
  */
 
 const MAX_TOP_REACTOR_COPIES = 3;
@@ -284,6 +291,59 @@ function anyOfflineProducer(
   return false;
 }
 
+/**
+ * An upgrade plan: the rosters a layout has to stay stable under besides the
+ * one it is scored at — the tiers the player holds today and every step on the
+ * way to the target. Each step is keyed by building id, because a placement
+ * holds the target roster's objects and the step's own figures are found by
+ * id; a building the step does not have stands on its tile as nothing.
+ *
+ * A step is simulated with the rating its tiles give it (`ctx.rate`), so a
+ * terrain bonus or a cooling pool applies at every step exactly as it does at
+ * the target.
+ */
+interface UpgradePlan {
+  steps: Map<string, EffectiveBuilding>[];
+  /** Scratch the step layout is written into, one per island. */
+  buffer: Placement;
+}
+
+/**
+ * Held beside the context rather than on it, so the context type — and every
+ * stage that takes one — is untouched when there is no plan, which is always
+ * the case for the fixtures.
+ */
+const upgradePlans = new WeakMap<IslandContext, UpgradePlan>();
+
+/**
+ * The producers that go offline under the first plan step the layout fails, or
+ * null when it runs at every step. Free when the island has no plan.
+ */
+function planFailure(
+  placement: Placement,
+  ctx: IslandContext,
+): number[] | null {
+  const plan = upgradePlans.get(ctx);
+  if (plan === undefined) return null;
+  const buffer = plan.buffer;
+  for (const step of plan.steps) {
+    for (let t = 0; t < ctx.n; t++) {
+      const b = placement[t];
+      const at = b === null ? undefined : step.get(b.id);
+      buffer[t] = at === undefined ? null : ctx.rate(t, at);
+    }
+    const sim = simulateIsland(buffer, ctx);
+    const offline = offlineProducers(buffer, sim.placements);
+    if (offline.length > 0) return offline;
+  }
+  return null;
+}
+
+/** Whether the layout runs at every step of the island's plan. */
+function planHolds(placement: Placement, ctx: IslandContext): boolean {
+  return planFailure(placement, ctx) === null;
+}
+
 interface StableLayout {
   placement: Placement;
   power: number;
@@ -304,7 +364,10 @@ function stabilize(placement: Placement, ctx: IslandContext): StableLayout {
   let sim = simulateIsland(current, ctx);
 
   for (;;) {
-    const offline = offlineProducers(current, sim.placements);
+    let offline = offlineProducers(current, sim.placements);
+    // Stable at the target is not enough under a plan: a producer that
+    // overheats at any step goes too, and so on until every step runs.
+    if (offline.length === 0) offline = planFailure(current, ctx) ?? [];
     if (offline.length === 0) {
       return {
         placement: current,
@@ -1075,14 +1138,15 @@ async function hillClimb(
         !collector.full &&
         powerTies(power, collector.power) &&
         collector.accepts(snapshot) &&
-        !anyOfflineProducer(snapshot, rows)
+        !anyOfflineProducer(snapshot, rows) &&
+        planHolds(snapshot, ctx)
       ) {
         collector.offer(power, snapshot);
       }
       return;
     }
 
-    if (!anyOfflineProducer(snapshot, rows)) {
+    if (!anyOfflineProducer(snapshot, rows) && planHolds(snapshot, ctx)) {
       bestPower = power;
       bestPlacement = snapshot.slice();
       collector?.offer(power, snapshot);
@@ -1720,7 +1784,8 @@ async function arrangeComposition(
       const trial = simulateIsland(current, ctx);
       if (
         trial.totalPower - basePower > bestGain &&
-        !anyOfflineProducer(current, trial.placements)
+        !anyOfflineProducer(current, trial.placements) &&
+        planHolds(current, ctx)
       ) {
         bestGain = trial.totalPower - basePower;
         bestSwap = [a, b];
@@ -1793,7 +1858,7 @@ async function greedyPolish(
   let current = placement.slice();
   const sim = simulateIsland(current, ctx);
   let bestPower = sim.totalPower;
-  if (anyOfflineProducer(current, sim.placements)) {
+  if (anyOfflineProducer(current, sim.placements) || !planHolds(current, ctx)) {
     const stabilized = stabilize(current, ctx);
     current = stabilized.placement;
     bestPower = stabilized.power;
@@ -1823,7 +1888,8 @@ async function greedyPolish(
         const trial = simulateIsland(current, ctx);
         if (
           trial.totalPower - bestPower > bestGain &&
-          !anyOfflineProducer(current, trial.placements)
+          !anyOfflineProducer(current, trial.placements) &&
+          planHolds(current, ctx)
         ) {
           bestGain = trial.totalPower - bestPower;
           bestTile = tile;
@@ -1893,7 +1959,8 @@ function pruneDeadWeight(
     // generator on the board.
     if (
       trial.totalPower >= bestPower - EPS &&
-      !anyOfflineProducer(current, trial.placements)
+      !anyOfflineProducer(current, trial.placements) &&
+      planHolds(current, ctx)
     ) {
       bestPower = trial.totalPower;
       rows = trial.placements;
@@ -2091,7 +2158,8 @@ export function downgradeOversized(
 
         if (
           covers(trial.totalPower, floor) &&
-          !anyOfflineProducer(current, trial.placements)
+          !anyOfflineProducer(current, trial.placements) &&
+          planHolds(current, ctx)
         ) {
           power = trial.totalPower;
           rows = trial.placements;
@@ -2275,6 +2343,7 @@ export async function solveIsland(
   hooks?: SearchHooks,
   rngSeed?: number,
   anomaly?: AnomalyDefinition,
+  upgradeSteps?: EffectiveBuilding[][],
 ): Promise<IslandSolution> {
   const ctx = buildIslandContext(
     island.grid,
@@ -2283,6 +2352,17 @@ export async function solveIsland(
     island.waterAdjacent,
   );
   if (ctx.n === 0) return { placements: [], powerOutput: 0.0 };
+  // The rosters the layout must also run under — see `UpgradePlan`. The search
+  // still scores at `effectiveBuildings`; these only narrow what it may keep.
+  // `upgradeSteps[0]` is today's roster, which the seed below relies on.
+  if (upgradeSteps !== undefined && upgradeSteps.length > 0) {
+    upgradePlans.set(ctx, {
+      steps: upgradeSteps.map(
+        (roster) => new Map(roster.map((b) => [b.id, b])),
+      ),
+      buffer: emptyPlacement(ctx.n),
+    });
+  }
 
   // The pools every stage draws on, in the units the board will hold: a rule
   // that scales a whole role (a cooling pool's x0.88) is folded in here, so the
@@ -2320,7 +2400,7 @@ export async function solveIsland(
   const timeBudgetMs = timeBudgetS * 1000;
   const deadlineMs = performance.now() + timeBudgetMs;
 
-  const seed = constructMultiStartSeed(
+  let seed = constructMultiStartSeed(
     ctx,
     reactors,
     generators,
@@ -2328,6 +2408,40 @@ export async function solveIsland(
     directProducers,
     deadlineMs,
   );
+
+  // Under a plan, a seed built from the target roster is sized for buildings
+  // the player does not have yet: fewer coolers than today's tiers need, so
+  // stabilizing it strips it bare — and nothing downstream puts the cooling
+  // back, since a cooler that only today needs never raises target power. So
+  // seed from the first step (today's tiers) as well, written in target
+  // buildings, and start from whichever runs better across the plan.
+  const plan = upgradePlans.get(ctx);
+  if (plan !== undefined) {
+    const today = plan.steps[0];
+    const byRole = (type: string, key: "effectiveValue" | "energy") =>
+      [...today.values()]
+        .filter((b) => b.type === type)
+        .map(pool)
+        .sort((a, b) => b[key] - a[key]);
+    const todaySeed = constructMultiStartSeed(
+      ctx,
+      byRole("reactor", "effectiveValue"),
+      byRole("generator", "effectiveValue"),
+      byRole("cooler", "effectiveValue"),
+      byRole("direct_producer", "energy"),
+      deadlineMs,
+    );
+    const targetById = new Map(effectiveBuildings.map((b) => [b.id, b]));
+    const remapped = emptyPlacement(ctx.n);
+    for (let t = 0; t < ctx.n; t++) {
+      const b = todaySeed[t];
+      const target = b === null ? undefined : targetById.get(b.id);
+      if (target !== undefined) put(remapped, ctx, t, target);
+    }
+    if (stabilize(remapped, ctx).power > stabilize(seed, ctx).power) {
+      seed = remapped;
+    }
+  }
 
   // Repair the seed before annealing, and again afterwards. Seed construction
   // lays out self-sufficient hubs, so it systematically misses layouts where

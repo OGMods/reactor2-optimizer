@@ -30,6 +30,40 @@ author's research, and a blueprint does not record what that was.
   changes which tier a *placement* resolves to (`rebasePlacements`), while an
   anomaly changes none of them — the same building at the same tier is simply
   rated differently — so it needs the re-score alone.
+## The upgrade plan: the app side
+
+The search side is in `docs/SOLVER.md`; the readout's plan line in
+`components/inspector/CLAUDE.md`.
+
+- **`configState.upgradePlan` stores what the player wrote; `resolvedPlan` is
+  what counts.** A step the roster has caught up with (the upgrade was bought),
+  or whose building is locked, stays in the list, dims, and stops counting, so
+  a plan is carried out rather than edited away. `planKey` spells only the
+  effective steps.
+- **A run searches at the plan's target and comes back at today's tiers.**
+  `runOptimizer` hands the coordinator `resolvedPlan.target` as the roster and
+  `along` as `upgradePlan`, then re-bases every streamed and finished layout to
+  today's unlocks and re-scores it (`toToday`). The board, the readout, a share
+  code and a copy onto the user's board all describe what can be built now.
+- **"Better" is the power after the plan.** That is what the search maximised,
+  so `chooseSolveVariants` takes a `rank`, and under a plan it is
+  `evaluatePlan(...).power` — for the defended bar, the streamed-snapshot gate
+  and the final comparison alike. Today's power is a consequence of the plan,
+  not its aim.
+- **The plan is not in `solveSignature()`.** The signature says whether a
+  layout is still an answer for this board; a plan does not change that, it
+  changes what the layout was optimised for. In the signature, editing the plan
+  would have discarded every other island's stored solve on its next restore.
+  `resultPlanKey` (stored as `SavedSolveData.planKey`) records what the shape
+  was searched under instead, and `requestSolve` offers "keep the better one"
+  only when it matches, the same rule as `resultAnomalyId`.
+- **`uiState.planReport` is `$derived` over `visiblePlacements`**, so it judges
+  whatever board is on screen — a plan solve, a solve found without the plan,
+  or the player's own — through `simulation/upgradePlan.ts`'s `evaluatePlan`,
+  which scores each step with the same `simulatePlacedBuildings` the board
+  uses. Null during a run and on a preview, which is someone else's board at
+  their tiers.
+
 ## The stores
 
 **`layoutState` imports nothing from the rest of the state layer.** It is the

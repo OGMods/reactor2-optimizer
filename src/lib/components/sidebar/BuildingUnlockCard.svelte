@@ -8,6 +8,12 @@
     bld: BuildingDefinition;
     enabled?: boolean;
     selectedUpgrade?: number;
+    /**
+     * The tier the upgrade plan takes this building to, or null when the plan
+     * leaves it alone. Marked on the tier row so the plan is visible where
+     * tiers are chosen; it is edited in the plan's own dialog.
+     */
+    plannedUpgrade?: number | null;
     onToggle: () => void;
     onUpgradeChange: (level: number) => void;
   }
@@ -16,6 +22,7 @@
     bld,
     enabled = true,
     selectedUpgrade = 0,
+    plannedUpgrade = null,
     onToggle,
     onUpgradeChange,
   }: Props = $props();
@@ -114,6 +121,8 @@
               type="button"
               class="tier-btn"
               class:active={selectedUpgrade === idx}
+              class:planned={plannedUpgrade === idx}
+              title={plannedUpgrade === idx ? "Planned upgrade" : undefined}
               disabled={!enabled}
               onclick={(e) => {
                 e.stopPropagation();
@@ -354,6 +363,14 @@
   .tier-btn:disabled {
     cursor: not-allowed;
     opacity: 0.4;
+  }
+
+  /* The upgrade plan's target: dashed, because it is a tier the player means
+     to have rather than one they hold. */
+  .tier-btn.planned {
+    border-style: dashed;
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   @media (pointer: coarse) {

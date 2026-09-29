@@ -11,6 +11,7 @@ import {
   trackEvent,
 } from "../utils/analytics";
 import { uiStorage } from "../storage/storage";
+import { evaluatePlan, type PlanReport } from "../simulation/upgradePlan";
 import { configState } from "./config.svelte";
 import { layoutState } from "./layout.svelte";
 import { solverState } from "./solver.svelte";
@@ -25,7 +26,13 @@ interface TileRef {
 
 /** The dialogs the app can have open. Only ever one at a time. */
 type ActiveModal =
-  "share" | "import" | "solve" | "solveModes" | "settings" | null;
+  | "share"
+  | "import"
+  | "solve"
+  | "solveModes"
+  | "settings"
+  | "upgradePlan"
+  | null;
 
 /**
  * The two forms a layout can be handed to someone else in.
@@ -553,6 +560,37 @@ class UIState {
   }
 
   /**
+   * How the board on screen fares through the upgrade plan — power once every
+   * step is bought, and the first step that shuts a building down — or null
+   * when there is no plan or nothing to judge.
+   *
+   * It follows `visiblePlacements` rather than the solve, so it says the same
+   * thing about any layout: a solve searched under the plan (which never
+   * fails a step), one searched without it, and the player's own board. That
+   * is also the warning the plan buys for free — a layout found before the
+   * plan existed is told the upgrade will overheat it, before the purchase
+   * rather than after.
+   *
+   * `$derived` because it is a simulation per step and the readout reads it on
+   * every render. Absent while a run is in flight, whose streamed layouts are
+   * not answers yet, and on a preview, which is someone else's board at their
+   * own tiers — the reader's plan does not speak for it.
+   */
+  planReport: PlanReport | null = $derived.by(() => {
+    if (!configState.hasPlan || this.isPreview) return null;
+    if (solverState.isOptimizing) return null;
+    const placements = this.visiblePlacements;
+    if (placements.length === 0) return null;
+    return evaluatePlan(
+      layoutState.grid,
+      placements,
+      configState.resolvedPlan,
+      configState.prestige,
+      configState.activeAnomaly,
+    );
+  });
+
+  /**
    * Which stats panel `BoardStatsCard` shows, if any.
    *
    * The card describes **the board on screen**, so it follows the toggle: the
@@ -638,10 +676,16 @@ class UIState {
      * which is whatever `localStorage` held: `resultAnomalyId` is always a
      * resolved id, so an unknown string would otherwise never match one and
      * the dialog would be skipped for good.
+     *
+     * The upgrade plan is the same question asked of a different input. A
+     * layout searched for another plan was maximising another figure, and
+     * under a plan the comparison is made on the power *after* it — so the
+     * held layout is only a fair bar when both runs aim at the same plan.
      */
     if (
       solverState.optimizationResult &&
-      solverState.resultAnomalyId === configState.activeAnomaly.id
+      solverState.resultAnomalyId === configState.activeAnomaly.id &&
+      solverState.resultPlanKey === configState.planKey
     ) {
       this.activeModal = "solve";
       return;
@@ -989,6 +1033,15 @@ class UIState {
    */
   openSolveModeInfo() {
     this.activeModal = "solveModes";
+  }
+
+  /**
+   * Opens the upgrade plan editor. A dialog rather than a section of Setup:
+   * each step wants an icon, a tier row and reordering, which would push the
+   * roster down the Buildings tab on every visit for a thing set once.
+   */
+  openUpgradePlan() {
+    this.activeModal = "upgradePlan";
   }
 
   closeModal() {

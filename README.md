@@ -19,6 +19,12 @@ Workers so the board stays interactive while it thinks.
   it back.
 - **An unlock roster.** The solver only places what you have unlocked, at the
   tier you own, so its answer is a layout you can actually build.
+- **Plan ahead for upgrades.** List up to three tiers you are about to buy, in
+  the order you will buy them, and a run solves for the last one while keeping
+  the layout running at today's tiers and after every step — so a purchase does
+  not overheat what you built, and you do not rebuild after each one. The
+  readout says what any board becomes once the plan is bought, and which step
+  would overheat it if one does.
 - **A solve is a shortlist, not a layout.** A search almost never finds a single
   best arrangement, so it keeps up to ten boards that tie on power and lets you
   cycle them and apply the one you like. Which tie is nicest to build is the one

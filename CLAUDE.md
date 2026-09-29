@@ -121,6 +121,18 @@ id. Both must reach `planSolve` through `SolveRunOptions`, or a run silently
 optimises for a roster the player does not have. The details are in
 `packages/solver/CLAUDE.md` (engine) and `src/lib/state/CLAUDE.md` (app).
 
+### The upgrade plan
+
+Beside it sits the **upgrade plan** — on the Buildings tab, not this one,
+since it is a statement about buildings: up to three tiers the player is about
+to buy, in buying order. A run solves for the tiers at the end of it
+while every layout it keeps also runs at today's tiers and after each step, and
+comes back at today's tiers. It is not a game screen and not a rule change —
+the roster is still the roster. The search side and the measurements behind
+"ordered, at most three" are in `docs/SOLVER.md`; the app side in
+`src/lib/state/CLAUDE.md`; the readout's plan line in
+`src/lib/components/inspector/CLAUDE.md`.
+
 ## Architecture
 
 ### Folder map

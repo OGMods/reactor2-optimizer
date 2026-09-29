@@ -75,6 +75,13 @@ export interface SolveRunOptions {
    * already carries it.
    */
   prestige?: PrestigeScales;
+  /**
+   * The upgrade plan's rosters before its target, today's first — see
+   * `SolveOptions.upgradePlan`. When set, `unlockedUpgrades` is the plan's
+   * target rather than the player's roster: the search scores there and keeps
+   * only layouts that also run at every one of these.
+   */
+  upgradePlan?: Record<string, number>[];
 }
 
 export interface SolveTaskHandle {
@@ -140,6 +147,7 @@ export class SolverWorkerClient {
         attempts: run?.attempts,
         anomalyId: run?.anomalyId,
         prestige: run?.prestige,
+        upgradePlan: run?.upgradePlan,
         reportIntervalMs: this.options.reportIntervalMs,
         onProgress: (result) => {
           if (!entry.stopped) entry.onProgress?.(result);

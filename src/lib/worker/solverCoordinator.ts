@@ -103,6 +103,7 @@ export class SolverCoordinator {
       rngSeed,
       options?.anomalyId,
       options?.prestige,
+      options?.upgradePlan,
     );
     if (!plan)
       return [createEmptyResult(grid?.[0]?.length ? countGrassTiles(grid) : 0)];
@@ -285,6 +286,10 @@ export class SolverCoordinator {
           // it again on the far side, which keeps the message a plain string
           // rather than a table entry that has to survive structured cloning.
           anomalyId: plan.anomaly.id,
+          // Resolved once, like the roster beside it; absent without a plan.
+          upgradeSteps: plan.upgradeSteps?.length
+            ? plan.upgradeSteps
+            : undefined,
           // Every attempt needs its own random stream — running the same walk
           // ten times over would only cost ten times as much. An unseeded run
           // gets a fresh stream per task already; a seeded one is offset so it
