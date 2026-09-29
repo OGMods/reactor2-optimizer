@@ -58,6 +58,12 @@
   let building = $derived(uiState.inspectedBuilding);
   let elapsed = $derived(formatDuration(solverState.elapsedMs));
 
+  let runMode = $derived(solverState.runMode);
+  let remaining = $derived(solverState.remainingMs);
+  let countdown = $derived(
+    remaining === null ? "finishing" : `${formatDuration(remaining)} left`,
+  );
+
   /*
    * What a finished run says out loud.
    *
@@ -552,22 +558,17 @@
 
         <span class="head-actions">
           {#if solverState.isOptimizing}
-            <!--
-              Stop lives here as well as in the config panel: on a phone that
-              panel is a sheet the user has probably pushed back down, and a
-              running solve must always be stoppable from what is on screen.
-            -->
-            <span class="live">
+            <span
+              class="live"
+              title={runMode
+                ? `${runMode.label} run (${runMode.shape}), ${elapsed} in`
+                : undefined}
+            >
               <Loader2 size={11} class="spinner" />
-              <span class="clock">{elapsed}</span>
-              {#if !solverState.isStopping}
-                <button
-                  class="stop"
-                  onclick={() => solverState.stopOptimizer()}
-                >
-                  Stop
-                </button>
-              {/if}
+              {#if runMode}<span class="mode">{runMode.label}</span>{/if}
+              <span class="clock"
+                >{solverState.isStopping ? "stopping" : countdown}</span
+              >
             </span>
           {:else if panel === "solver" && !layoutState.isPreview}
             <!--
@@ -701,6 +702,11 @@
                 </span>
                 <span class="row-value">
                   {elapsed}
+                  {#if solverState.isOptimizing && solverState.runEstimateMs > 0}
+                    <span class="ago"
+                      >of ~{formatDuration(solverState.runEstimateMs)}</span
+                    >
+                  {/if}
                   {#if !solverState.isOptimizing && solverState.finishedAt !== null}
                     <!--
                   A restored solve is the one case where the duration alone
@@ -712,6 +718,16 @@
                   {/if}
                 </span>
               </div>
+
+              {#if solverState.isOptimizing && runMode}
+                <div class="row">
+                  <span class="row-label">Mode</span>
+                  <span class="row-value"
+                    >{runMode.label} <span class="ago">· {runMode.shape}</span
+                    ></span
+                  >
+                </div>
+              {/if}
 
               {#if showAnomalyRow}
                 <!--
@@ -1093,21 +1109,11 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .stop {
-    background: rgba(255, 71, 87, 0.15);
-    border: 1px solid var(--danger-line);
-    color: var(--danger-soft);
-    font-size: var(--fs-2xs);
-    font-weight: 700;
-    letter-spacing: 0.5px;
+  .mode {
     text-transform: uppercase;
-    padding: 0.1rem 0.3rem;
-    border-radius: var(--radius-xs);
-    cursor: pointer;
+    letter-spacing: 0.5px;
   }
-  .stop:hover {
-    background: rgba(255, 71, 87, 0.3);
-  }
+
 
   /* ── The two figures ───────────────────────────────────────────── */
   .figures {

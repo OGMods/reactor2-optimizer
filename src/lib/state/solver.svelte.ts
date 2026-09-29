@@ -36,32 +36,6 @@ import { configState } from "./config.svelte";
 import { layoutState } from "./layout.svelte";
 
 /**
- * Everything about running the optimizer: the run status, the streaming result,
- * and the handle that can stop it.
- *
- * It lives apart from `ui.svelte.ts` so the UI singleton does not own a Web
- * Worker pool: this is a separate concern with a separate lifecycle, since a
- * solve outlives any particular panel.
- *
- * This is the *only* place in the app that drives `SolverWorkerClient`. The
- * solver itself never runs on the main thread.
- */
-/**
- * How long a solve is allowed to run before it stops itself, in ms.
- *
- * The search has no natural end — it improves a layout until told to stop — so
- * this is the whole shape of a run: the coordinator divides it across islands
- * and every stage's deadline is carved out of it. Short enough that re-running
- * is cheap, which is what makes "run again and keep the better one" a sensible
- * move rather than a five-minute commitment.
- *
- * It is now the budget of **one attempt** rather than of the whole run, and
- * which shape a run takes is the player's choice — see `SOLVE_MODES`. A quick
- * run is one attempt of 30s, exactly as before; a deep run is ten of 10s, and
- * pays for them in wall-clock only where the worker pool is already full.
- */
-
-/**
  * Grace before the client stops a run itself.
  *
  * The workers honour the budget on their own; this is the backstop for an
@@ -163,6 +137,17 @@ function restorePlacements(stored: StoredPlacement[]): PlacedBuilding[] {
   );
 }
 
+/**
+ * Everything about running the optimizer: the run status, the streaming result,
+ * and the handle that can stop it.
+ *
+ * It lives apart from `ui.svelte.ts` so the UI singleton does not own a Web
+ * Worker pool: this is a separate concern with a separate lifecycle, since a
+ * solve outlives any particular panel.
+ *
+ * This is the *only* place in the app that drives `SolverWorkerClient`. The
+ * solver itself never runs on the main thread.
+ */
 class SolverState {
   isOptimizing = $state(false);
 
@@ -214,9 +199,7 @@ class SolverState {
 
   /**
    * How long the current run has been going, in ms — or how long the last one
-   * took, once it is over. A solve has a five-minute ceiling and no progress
-   * bar, so the elapsed clock is the only thing telling the user whether it
-   * has been going for four seconds or four minutes.
+   * took, once it is over.
    */
   elapsedMs = $state(0);
 
@@ -255,6 +238,23 @@ class SolverState {
    */
   solveModeId = $state<SolveModeId>(uiStorage.loadPrefs().solveMode);
 
+  /**
+   * The run in flight's mode and estimate, captured at launch because the mode
+   * and board can change mid-run. Null / 0 while nothing is running.
+   */
+  runMode = $state<SolveMode | null>(null);
+  runEstimateMs = $state(0);
+
+  /**
+   * Time left in the run, ms. Null once a run outlasts its estimate, which a
+   * machine that reports more cores than it gives can do.
+   */
+  get remainingMs(): number | null {
+    if (!this.isOptimizing || this.runEstimateMs <= 0) return null;
+    const left = this.runEstimateMs - this.elapsedMs;
+    return left > 0 ? left : null;
+  }
+
   #startedAt = 0;
   #ticker: ReturnType<typeof setInterval> | null = null;
 
@@ -275,7 +275,7 @@ class SolverState {
   #runAnomalyId: AnomalyId = DEFAULT_ANOMALY_ID;
 
   #client = new SolverWorkerClient({
-    reportIntervalMs: 1000, // 1 second
+    reportIntervalMs: 1000,
   });
 
   #watchdog: ReturnType<typeof setTimeout> | null = null;
@@ -765,6 +765,8 @@ class SolverState {
     this.optimizationError = null;
     this.isRestored = false;
     this.lastRunDurationMs = null;
+    this.runMode = this.solveMode;
+    this.runEstimateMs = this.estimatedRunMs;
     this.#startClock();
 
     // `pool` as well as `cores`, because the pool is capped at eight and the
@@ -861,6 +863,8 @@ class SolverState {
       this.isOptimizing = false;
       this.isStopping = false;
       this.activeTask = null;
+      this.runMode = null;
+      this.runEstimateMs = 0;
 
       if (
         finalVariants &&
