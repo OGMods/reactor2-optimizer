@@ -161,6 +161,28 @@ describe("what a finished run does to the shortlist", () => {
     expect(chosen.defended).toBe(true);
   });
 
+  it("ranks by the figure it is handed, so a plan is judged after the plan", () => {
+    // Under an upgrade plan the search maximises the power once the plan is
+    // bought; today's figure is a side effect. A run lower today but higher
+    // after the plan has to win, and one higher today but lower after has to
+    // lose, or "keep the better one" defends against the wrong number.
+    const after = new Map<OptimizationResult, number>();
+    const held = result(100, 0);
+    const fresh = result(80, 9);
+    after.set(held, 150);
+    after.set(fresh, 200);
+    const rank = (r: OptimizationResult) => after.get(r) ?? 0;
+
+    const won = chooseSolveVariants([held], 0, [fresh], 10, rank);
+    expect(won.defended).toBe(false);
+    expect(won.variants).toEqual([fresh]);
+
+    after.set(fresh, 120);
+    const lost = chooseSolveVariants([held], 0, [fresh], 10, rank);
+    expect(lost.defended).toBe(true);
+    expect(lost.variants).toEqual([held]);
+  });
+
   it("never grows past the limit", () => {
     const held = Array.from({ length: 8 }, (_, i) => spread(500, i));
     const fresh = Array.from({ length: 8 }, (_, i) => spread(500, i + 8));

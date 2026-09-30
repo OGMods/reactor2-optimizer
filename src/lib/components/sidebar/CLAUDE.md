@@ -138,3 +138,28 @@ top of the board visible at a cost of 340px of list — but the HUD and every to
 unmount for as long as the sheet is open at _any_ detent, so what that bought was
 a view of a board nothing could touch. Setup is a task you finish and leave; the
 grabber still drags it back down.
+
+**The upgrade plan is a row at the top of the Buildings tab that opens a
+dialog** (`UpgradePlanSummary` → `modals/UpgradePlanModal`). On that tab because a
+plan is a statement about buildings — the tiers the roster below will hold next —
+which is where a player looks for it; behind a dialog because each step wants a
+sprite, a tier row and reordering, and inline that would push the roster down on
+every visit for a thing set once. The row scrolls away with the cards, like
+Unlock/Lock, and lists the steps so the plan is legible without opening it.
+
+Four things about the dialog:
+
+- **The picker offers only buildings with a tier left to buy** once the steps
+  already in the plan are counted (`configState.canPlan`), strongest-first like
+  the HUD palette, since the building a player upgrades next is almost always
+  their best. A step is born one tier up and its tier row raises it; its
+  building is fixed, and changing it is remove-and-add.
+- **Order is editable** (up/down), because it is the buying order and it
+  decides what the layout has to survive.
+- **It says up front that only the last step is optimal.** Today's power under
+  a plan measured 57-98% of a plain solve's, and a player who did not expect
+  that reads the lower figure as the solver getting worse. A neutral note, not
+  `--warn`: nothing is wrong, it is what the plan buys.
+- **The roster's cards mark the planned tier** with a dashed `--accent` border
+  (`plannedUpgrade`, from `configState.plannedLevel`), so the plan is visible
+  where tiers are chosen without making the cards a second place to edit it.

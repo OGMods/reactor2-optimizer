@@ -624,6 +624,12 @@ _through_ unstable layouts but records only stable ones as best, and **"pruning
 never reduces power" is not a valid invariant**. The valid ones are "the returned
 layout is stable" and "pruning a _stable_ layout never reduces power".
 
+**Under an upgrade plan (`SolveOptions.upgradePlan`) "stable" means stable at
+every step.** Every gate that admits a layout also asks `planHolds`, and the
+first plan roster must be today's, because the search seeds from it too — see
+`docs/SOLVER.md`. Without a plan the check returns at once and the fixtures do
+not move.
+
 ### Verifying a solver change
 
 Start with `npm test`. Four parts of it are what actually catch a regression:

@@ -47,6 +47,12 @@ export interface IslandPlan {
   originalWidth: number;
   totalGrassTiles: number;
   theoreticalMaxPower: number;
+  /**
+   * The upgrade plan's rosters, resolved like `effectiveBuildings` and in the
+   * same order as `SolveOptions.upgradePlan` — today's first. Empty without a
+   * plan.
+   */
+  upgradeSteps?: EffectiveBuilding[][];
 }
 
 /**
@@ -65,6 +71,7 @@ export function planSolve(
   rngSeed?: number,
   anomalyId?: string,
   prestige?: PrestigeScales,
+  upgradePlan?: Record<string, number>[],
 ): IslandPlan | null {
   if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0)
     return null;
@@ -118,6 +125,9 @@ export function planSolve(
       islands,
       effectiveBuildings,
       anomaly,
+    ),
+    upgradeSteps: (upgradePlan ?? []).map((unlocks) =>
+      getEffectiveBuildings(buildings, unlocks, prestige),
     ),
   };
 }
@@ -225,6 +235,7 @@ export async function solve(
     rngSeed,
     options?.anomalyId,
     options?.prestige,
+    options?.upgradePlan,
   );
   if (!plan)
     return createEmptyResult(grid?.[0]?.length ? countGrassTiles(grid) : 0);
@@ -249,6 +260,7 @@ export async function solve(
       },
       plan.seeds[i],
       plan.anomaly,
+      plan.upgradeSteps,
     );
     options?.onProgress?.(buildOptimizationResult(plan, islandResults));
   }

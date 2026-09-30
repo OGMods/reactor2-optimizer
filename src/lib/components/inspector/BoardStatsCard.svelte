@@ -213,8 +213,34 @@
       : board.power,
   );
 
+  /*
+   * What the board on screen becomes as the upgrade plan is bought: the power
+   * once every step is in, and the first step that overheats a building. See
+   * `uiState.planReport`, which is null without a plan.
+   *
+   * The failing step is named — building and level — rather than numbered,
+   * because the list it would index is behind a closed panel on a phone.
+   */
+  let planReport = $derived(uiState.planReport);
+  let planFailure = $derived.by(() => {
+    const index = planReport?.failedStep;
+    if (index === null || index === undefined) return null;
+    const step = configState.upgradePlan[index];
+    if (!step) return null;
+    const name = findBuilding(step.buildingId)?.name ?? step.buildingId;
+    return `${name} Lv. ${step.level + 1}`;
+  });
+
+  /*
+   * Idle buildings the plan is keeping for later are not a fault, so they come
+   * out of the Idle count and get a line of their own. The pad under each one
+   * still says idle, which is true today.
+   */
+  let reserved = $derived(Math.min(planReport?.reserved ?? 0, board.idle));
+  let idle = $derived(board.idle - reserved);
+
   /** Folded, the card has room for one number about what is wrong, not two. */
-  let troubled = $derived(board.idle + board.overheating);
+  let troubled = $derived(idle + board.overheating);
 
   /*
    * The anomaly currently selected in Setup, against the one the solve on
@@ -806,6 +832,35 @@
               {/if}
             {/if}
 
+            {#if planReport}
+              <!--
+                The plan's line: what this board puts out once the planned
+                upgrades are bought. `--warn` when a step would overheat it —
+                a warning about a board that does not exist yet, so not the
+                red the colour law reserves to what a building is doing now.
+              -->
+              <div class="row plan-row" class:rule-warn={planFailure !== null}>
+                <span class="row-label">
+                  {#if planFailure !== null}<AlertTriangle size={11} />{/if}
+                  After upgrades
+                </span>
+                <span class="row-value plan-value">
+                  <span class="plan-power">
+                    {formatNumber(planReport.power)}
+                    <img class="unit" src={ENERGY} alt="energy" />
+                  </span>
+                  {#if planFailure !== null}
+                    <span class="stale">
+                      {planReport.overheating}
+                      {plural(planReport.overheating)}
+                      {planReport.overheating === 1 ? "overheats" : "overheat"}
+                      at {planFailure}
+                    </span>
+                  {/if}
+                </span>
+              </div>
+            {/if}
+
             <!--
           What is not working, and why. Two rows rather than one total: the
           fixes differ, so a player who cannot see which kind they have cannot
@@ -822,12 +877,19 @@
           only wasted money, while an overheating one is shut down and dragging
           a whole cluster's output with it.
         -->
-            {#if board.idle > 0}
+            {#if idle > 0}
               <div class="row warn">
                 <span class="row-label">
                   <AlertTriangle size={11} /> Idle
                 </span>
-                <span class="row-value">{board.idle} {plural(board.idle)}</span>
+                <span class="row-value">{idle} {plural(idle)}</span>
+              </div>
+            {/if}
+            {#if reserved > 0}
+              <!-- Uncoloured: nothing is wrong with these, they are waiting. -->
+              <div class="row">
+                <span class="row-label">Kept for upgrades</span>
+                <span class="row-value">{reserved} {plural(reserved)}</span>
               </div>
             {/if}
             {#if board.overheating > 0}
@@ -1242,6 +1304,28 @@
   .ago {
     color: var(--text-dim);
     font-weight: 500;
+  }
+
+  /* The label holds its line; the value side is what wraps. */
+  .plan-row {
+    align-items: flex-start;
+  }
+  .plan-row .row-label {
+    white-space: nowrap;
+  }
+
+  /* The figure, then — when a step fails — which one, under it. */
+  .plan-value {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+  }
+
+  .plan-power {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
   }
 
   /* ── The shortlist of tied layouts ─────────────────────────────── */

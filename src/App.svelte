@@ -19,6 +19,7 @@
     ShareModal,
     SolveModal,
     SolveModeInfoModal,
+    UpgradePlanModal,
   } from "./lib/components";
   import { Eye } from "lucide-svelte";
 
@@ -320,6 +321,7 @@
   <SettingsModal />
   <SolveModal />
   <SolveModeInfoModal />
+  <UpgradePlanModal />
 
   <!--
     The app's one-line message, wherever it comes from — see

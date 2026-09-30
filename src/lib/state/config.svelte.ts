@@ -3,15 +3,20 @@ import {
   DEFAULT_ANOMALY_ID,
   getAnomaly,
   getEffectiveBuildings,
+  MAX_UPGRADE_STEPS,
   prestigeScales,
+  resolveUpgradePlan,
   rosterCanProducePower,
   type AnomalyDefinition,
   type PrestigeScales,
+  type ResolvedUpgradePlan,
+  type UpgradeStep,
 } from "@reactor2/solver";
 import {
   anomalyStorage,
   buildingStorage,
   prestigeStorage,
+  upgradePlanStorage,
 } from "../storage/storage";
 import { trackEvent } from "../utils/analytics";
 
@@ -71,10 +76,120 @@ class ConfigState {
    */
   prestige: PrestigeScales = $derived(prestigeScales(this.prestigeLevels));
 
+  /**
+   * The upgrade plan: up to `MAX_UPGRADE_STEPS` tiers the player means to buy,
+   * **in buying order**. Persisted.
+   *
+   * The order is the whole point rather than a detail. A layout that survives
+   * "cooler, then reactor" can overheat if the reactor comes first, and a plan
+   * that had to survive every order was measured at 31-59% of the power a
+   * fixed order keeps — so the player states the order they will buy in, and
+   * the solve holds for that one.
+   *
+   * Stored as the player wrote it, not as it resolves: a step the roster has
+   * since caught up with (the upgrade was bought) stays in the list and simply
+   * stops counting, so the plan is carried out rather than edited away.
+   */
+  upgradePlan = $state<UpgradeStep[]>([]);
+
+  /**
+   * The plan against the current roster: the rosters a run is held to, and
+   * which steps still upgrade anything. `$derived` so the Setup list, the run
+   * and the readout all read one resolution.
+   */
+  resolvedPlan: ResolvedUpgradePlan = $derived(
+    resolveUpgradePlan(BUILDINGS, this.buildingUpgrades, this.upgradePlan),
+  );
+
   constructor() {
     this.loadCatalog();
     this.anomalyId = anomalyStorage.loadAnomaly();
     this.prestigeLevels = prestigeStorage.loadPrestige();
+    this.upgradePlan = upgradePlanStorage.loadPlan();
+  }
+
+  /** Whether any step of the plan still upgrades something. */
+  get hasPlan(): boolean {
+    return this.resolvedPlan.along.length > 0;
+  }
+
+  /**
+   * The plan's effective steps as one string — empty with no plan — so a
+   * result can record which plan it was searched under and be compared with
+   * the current one. Only steps that still count go in, so buying a planned
+   * upgrade changes the key exactly as it changes what a run would do.
+   */
+  get planKey(): string {
+    return this.upgradePlan
+      .filter((_, i) => this.resolvedPlan.effective[i])
+      .map((s) => `${s.buildingId}:${s.level}`)
+      .join(">");
+  }
+
+  /**
+   * Where `id` stands once the whole plan is bought, if the plan takes it
+   * higher than the roster does — what a building's card marks as planned.
+   * Null when the plan leaves it alone.
+   */
+  plannedLevel(id: string): number | null {
+    const planned = this.resolvedPlan.target[id];
+    const held = this.buildingUpgrades[id];
+    return planned !== undefined && planned !== held ? planned : null;
+  }
+
+  /**
+   * Whether `id` can take another step: unlocked, and below its top tier even
+   * after what the plan already buys. Maxed buildings are not offered, since a
+   * step for one would upgrade nothing.
+   */
+  canPlan(id: string): boolean {
+    const def = BUILDINGS.find((b) => b.id === id);
+    const at = this.resolvedPlan.target[id];
+    return def !== undefined && at !== undefined && at < def.levels.length - 1;
+  }
+
+  /**
+   * Appends a step for `id`, one tier above where the plan leaves it — the
+   * smallest purchase, which the step's tier row can raise. Does nothing at
+   * the limit or for a building with no tier left to buy.
+   */
+  addPlanStep(id: string) {
+    if (this.upgradePlan.length >= MAX_UPGRADE_STEPS) return;
+    if (!this.canPlan(id)) return;
+    this.upgradePlan.push({
+      buildingId: id,
+      level: this.resolvedPlan.target[id] + 1,
+    });
+    this.#savePlan();
+  }
+
+  /**
+   * Moves a step one place earlier (`-1`) or later (`+1`). The order is the
+   * buying order, and it decides what the layout has to survive, so it is
+   * editable rather than fixed by the order steps happened to be added in.
+   */
+  movePlanStep(index: number, delta: -1 | 1) {
+    const to = index + delta;
+    if (index < 0 || to < 0 || to >= this.upgradePlan.length) return;
+    const [step] = this.upgradePlan.splice(index, 1);
+    this.upgradePlan.splice(to, 0, step);
+    this.#savePlan();
+  }
+
+  setPlanStep(index: number, step: UpgradeStep) {
+    if (index < 0 || index >= this.upgradePlan.length) return;
+    this.upgradePlan[index] = { ...step };
+    this.#savePlan();
+  }
+
+  removePlanStep(index: number) {
+    if (index < 0 || index >= this.upgradePlan.length) return;
+    this.upgradePlan.splice(index, 1);
+    this.#savePlan();
+  }
+
+  #savePlan() {
+    upgradePlanStorage.savePlan($state.snapshot(this.upgradePlan));
   }
 
   loadCatalog() {

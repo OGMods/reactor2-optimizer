@@ -446,6 +446,23 @@ export interface SolveOptions {
    * board, has to be sent instead of folded in.
    */
   prestige?: PrestigeScales;
+  /**
+   * An upgrade plan: the rosters a layout must also *run* under, besides the
+   * one it is scored at. `unlockedUpgrades` is then the plan's target — the
+   * tiers after the last upgrade — and these are the player's tiers today
+   * followed by each step on the way there, in buying order.
+   * `resolveUpgradePlan` produces exactly this pair.
+   *
+   * **The first entry has to be today's roster**, because the search seeds
+   * from it as well as from the target: a seed sized for tiers nobody holds
+   * yet is short of today's cooling, and nothing later in the search adds a
+   * cooler that only today needs, since it never raises target power.
+   *
+   * Every layout the search keeps runs at every entry; power is still measured
+   * at the target alone. Omitted or empty means no plan, and then nothing about
+   * the search changes.
+   */
+  upgradePlan?: Record<string, number>[];
 }
 
 // ============================================================================
@@ -464,6 +481,12 @@ export type IslandWorkerRequest =
       anomalyId?: AnomalyId;
       /** Pins the annealing walk's random stream; omitted means a fresh seed. */
       rngSeed?: number;
+      /**
+       * The upgrade plan's rosters, already resolved — see
+       * `SolveOptions.upgradePlan`. Sent resolved, like `effectiveBuildings`,
+       * so the research folded into them crosses with them.
+       */
+      upgradeSteps?: EffectiveBuilding[][];
     }
   | { id: string; type: "STOP" };
 

@@ -594,6 +594,49 @@ after them), the app's `worker/islandBest.ts` across attempts, and `chooseSolveV
 runs. A layout that _beats_ the shortlist is exempt, because it empties it first: the bar is on
 being a second answer, never on being an answer.
 
+### Upgrade plans — a layout that survives the next few purchases
+
+`SolveOptions.upgradePlan` holds a layout to rosters besides the one it is scored at: the tiers
+the player has today and each step on the way to the ones it is solved for, in buying order.
+`resolveUpgradePlan` (`data/upgradePlan.ts`) turns an ordered list of `{ buildingId, level }`
+purchases into exactly that pair — a `target` to pass as `unlockedUpgrades` and an `along` to
+pass as the plan — skipping steps the roster has already caught up with, so a plan gets shorter
+as it is carried out.
+
+**Why it exists** is that an upgrade can break a standing layout, and which way depends on the
+role. Measured over the eight maps at 8s, two seeds and four progression stages:
+
+| Upgrade   | Layout solved for today, after it              | Layout solved for the target, today |
+| --------- | ---------------------------------------------- | ----------------------------------- |
+| Reactor   | overheats every time (0–66% of its power left) | runs                                |
+| Generator | often overheats                                | often overheats                     |
+| Cooler    | runs, 49–72% of a fresh target solve           | overheats every time                |
+
+A plan-held solve never overheated at any step in any run, and landed at 97–100% of the best
+target power for generator upgrades and ~100% for reactor ones, at 57–98% of today's best —
+the price of carrying cooling for heat that has not arrived. A cooler upgrade gains nothing:
+the best layout that also runs today is today's.
+
+**The order is a path, not a set.** A layout that survives cooler-then-reactor can overheat if
+the reactor comes first. Holding a layout to every order of three +1 upgrades (7 states) kept
+31–59% of the best target power; a fixed order kept 59–99%. So the plan is ordered and the
+player states the order.
+
+**How the search honours it.** `planHolds` simulates the layout at each plan roster, re-reading
+every placement by building id, and every gate that admits a layout asks it beside the ordinary
+stability test: the best record, repair, the composition swaps, pruning, right-sizing, the tie
+shortlist and `stabilize`. Power is still measured at the target alone. Without a plan the call
+returns at once, which is why the fixtures do not move. `upgradeSteps` rides the context in a
+`WeakMap` rather than on `IslandContext`, so no stage's signature changed for it.
+
+**The first plan roster must be today's**, because the search seeds from it as well. Scored at
+the target alone, the walk never adds a cooler only today needs — it never raises target power
+— so a target-sized seed stripped by `stabilize` stays short of cooling for the whole run. On
+cooler plans that took the result from 49% to 63–68% of the best target power; seeding from
+both and keeping whichever runs better across the plan costs one extra seed construction.
+Splitting the budget between a target-scored and a today-scored search was measured too: a few
+points better on cooler plans, a few worse on reactor ones, so it was not kept.
+
 ---
 
 ## The RNG contract

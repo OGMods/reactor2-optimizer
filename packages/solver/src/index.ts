@@ -33,6 +33,7 @@ export * from "./data/buildings";
 export * from "./data/effectiveBuildings";
 export * from "./data/maps";
 export * from "./data/prestige";
+export * from "./data/upgradePlan";
 
 export * from "./encoding/blueprint";
 export * from "./utils/formatters";

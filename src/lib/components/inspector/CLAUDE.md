@@ -71,6 +71,20 @@ construction" holds only for a layout the solver has _just_ returned, and
 behind a standing solve can leave it unstable, and the card has to say so rather
 than printing a power figure whose buildings have quietly shut down.
 
+**Under an upgrade plan the card adds an "After upgrades" line**
+(`uiState.planReport`): the power once the plan is bought, and — when a step
+would overheat something — how many buildings and at which step, named by
+building and level because the list it would index is behind a closed panel on
+a phone. It is `--warn` rather than the board's red: it describes a board that
+does not exist yet. It shows for any board on screen, so a solve found before
+the plan existed is told the upgrade will shut part of it down.
+
+The same report counts **`reserved`** — buildings idle today that work once the
+plan is bought, mostly coolers held for heat still to come. They come out of the
+amber Idle row (and the folded pill's count) and are listed uncoloured as "Kept
+for upgrades", because printed as idle they are exactly what a tidy player would
+remove. The pads on the board still say idle, which is true today.
+
 **Amber is idle, red is overheating, and that is the whole app's language rather
 than this card's.** The status pad under every building says the same in the same
 colours (`STATUS_FRAME` in `pixi/gridPainter.ts`), the building above it breathes

@@ -25,6 +25,7 @@ import {
 } from "@reactor2/solver";
 import { rebaseToUnlocks, unscoredPlacement } from "../data/placements";
 import { simulatePlacedBuildings } from "../simulation/simulator";
+import { evaluatePlan } from "../simulation/upgradePlan";
 import { blueprintKey } from "@reactor2/solver";
 import { trackEvent } from "../utils/analytics";
 import {
@@ -86,6 +87,7 @@ export function chooseSolveVariants(
   heldIndex: number,
   fresh: OptimizationResult[],
   limit: number = MAX_SOLVE_VARIANTS,
+  rank: (result: OptimizationResult) => number = (r) => r.totalPower,
 ): { variants: OptimizationResult[]; selected: number; defended: boolean } {
   if (fresh.length === 0)
     return { variants: held, selected: heldIndex, defended: true };
@@ -95,11 +97,12 @@ export function chooseSolveVariants(
   // A stored index can outrun a shortlist that has since been rebuilt; the
   // first entry is the layout the search settled on, so it is the safe home.
   const selected = Math.min(Math.max(heldIndex, 0), held.length - 1);
-  const bestHeld = held.reduce((best, v) =>
-    v.totalPower > best.totalPower ? v : best,
-  );
+  // Under an upgrade plan `rank` is the power *after* the plan, which is what
+  // the search maximised; `totalPower` is today's, which it did not.
+  const bestHeldPower = Math.max(...held.map(rank));
+  const freshPower = rank(fresh[0]);
 
-  if (powerTies(fresh[0].totalPower, bestHeld.totalPower)) {
+  if (powerTies(freshPower, bestHeldPower)) {
     const variants = held.slice();
     for (const variant of fresh) {
       if (variants.length >= limit) break;
@@ -115,7 +118,7 @@ export function chooseSolveVariants(
     return { variants, selected, defended: false };
   }
 
-  if (bestHeld.totalPower > fresh[0].totalPower) {
+  if (bestHeldPower > freshPower) {
     return { variants: held, selected, defended: true };
   }
   return { variants: fresh.slice(0, limit), selected: 0, defended: false };
@@ -226,6 +229,22 @@ class SolverState {
    * Null until a result exists at all.
    */
   resultAnomalyId = $state<AnomalyId | null>(null);
+
+  /**
+   * The upgrade plan the on-screen shortlist was searched under, as
+   * `configState.planKey` spells it — empty for no plan, null with no result.
+   *
+   * The plan's counterpart to `resultAnomalyId`, and deliberately **not** part
+   * of `solveSignature()`. The signature says whether a layout is still an
+   * answer for this board at all; a plan does not change that — a layout
+   * searched without one runs today exactly as it did — it changes what the
+   * layout was optimised *for*. Folded into the signature, editing the plan
+   * would have discarded every other island's stored solve on its next
+   * restore, for layouts that are still perfectly good. What the plan does
+   * decide is whether a held layout is a fair bar for the next run
+   * (`uiState.requestSolve`), and that is what this is for.
+   */
+  resultPlanKey = $state<string | null>(null);
 
   /**
    * How the next run spends its time: one long search, or several short ones.
@@ -494,6 +513,7 @@ class SolverState {
     // was already folded into `signature` by then, and the signature matched
     // to get here, so the current selection is what it was found under.
     this.resultAnomalyId = saved.anomalyId ?? configState.activeAnomaly.id;
+    this.resultPlanKey = saved.planKey ?? "";
   }
 
   /**
@@ -554,6 +574,7 @@ class SolverState {
     this.elapsedMs = 0;
     this.isRestored = false;
     this.resultAnomalyId = null;
+    this.resultPlanKey = null;
   }
 
   /**
@@ -657,6 +678,7 @@ class SolverState {
     templateId: string,
     signature: string,
     anomalyId: AnomalyId,
+    planKey: string,
   ) {
     const applied = variants[selectedVariant];
     if (!applied) return;
@@ -672,6 +694,7 @@ class SolverState {
       ),
       selectedVariant,
       anomalyId,
+      planKey,
       durationMs,
       finishedAt,
     });
@@ -701,6 +724,7 @@ class SolverState {
       layoutState.activeTemplateId,
       this.solveSignature(),
       this.resultAnomalyId ?? configState.activeAnomaly.id,
+      this.resultPlanKey ?? "",
     );
   }
 
@@ -731,6 +755,38 @@ class SolverState {
     const previousVariants =
       options.keepBest && this.variants.length > 0 ? this.variants : [];
     const previousIndex = this.variantIndex;
+
+    /*
+     * The upgrade plan, resolved once at launch like the rules beside it.
+     *
+     * Under a plan the search is handed the plan's *target* tiers and scores
+     * there, while every layout it keeps also has to run at today's tiers and
+     * at each step between. What comes back is therefore rated for tiers the
+     * player does not hold yet, and `toToday` puts it back on the tiers they
+     * do: the board, the readout and a share code all describe what can be
+     * built now, and the readout's plan line says what it becomes.
+     *
+     * "Better" changes with it. The search maximised the power at the end of
+     * the plan, so that is the figure a held layout is defended on and a fresh
+     * one judged by — today's power is a consequence of the plan, not its aim.
+     */
+    const runPlan = configState.hasPlan
+      ? $state.snapshot(configState.resolvedPlan)
+      : null;
+    const runPlanKey = configState.planKey;
+    const runGrid = $state.snapshot(layoutState.grid);
+    const runPrestige = configState.prestige;
+    const runAnomaly = configState.activeAnomaly;
+    const rank = (result: OptimizationResult): number =>
+      runPlan
+        ? (evaluatePlan(
+            runGrid,
+            result.placements,
+            runPlan,
+            runPrestige,
+            runAnomaly,
+          )?.power ?? 0)
+        : result.totalPower;
     /*
      * The bar a streaming snapshot has to clear to be worth putting on screen,
      * and it is the same bar `chooseSolveVariants` will judge the finished run
@@ -741,11 +797,12 @@ class SolverState {
      */
     const defendedPower =
       previousVariants.length > 0
-        ? previousVariants.reduce((best, v) => Math.max(best, v.totalPower), 0)
+        ? previousVariants.reduce((best, v) => Math.max(best, rank(v)), 0)
         : null;
     const previousDurationMs = this.lastRunDurationMs;
     const previousFinishedAt = this.finishedAt;
     const previousAnomalyId = this.resultAnomalyId;
+    const previousPlanKey = this.resultPlanKey;
 
     // Captured before anything can await: this is the island being solved, the
     // board it is being solved against, and the rules it is solved under.
@@ -759,6 +816,7 @@ class SolverState {
     // anomaly launched with, which the player may move off before either
     // lands — see `resultAnomalyId`.
     this.resultAnomalyId = this.#runAnomalyId;
+    this.resultPlanKey = runPlanKey;
 
     this.isOptimizing = true;
     this.isStopping = false;
@@ -776,6 +834,7 @@ class SolverState {
       island: this.#runTemplateId,
       tiles: countGrassTiles(layoutState.grid),
       roster: Object.keys(configState.buildingUpgrades).length,
+      plan_steps: runPlan?.along.length ?? 0,
       ...runRules,
       cores:
         typeof navigator !== "undefined"
@@ -795,20 +854,31 @@ class SolverState {
     try {
       // $state.snapshot is required before anything crosses postMessage:
       // reactive proxies are not structured-cloneable.
-      const grid = $state.snapshot(layoutState.grid);
+      const grid = runGrid;
       // BUILDINGS is static, so it needs no snapshot — only a mutable
       // copy, because solveProgressive hands it to postMessage.
       const buildings = [...BUILDINGS];
       const upgrades = $state.snapshot(configState.buildingUpgrades);
+      // Only needed under a plan, where every result is re-scored on the way
+      // in; computing it re-splits the grid.
+      const todayBound = runPlan ? this.estimatedMaxPower : 0;
+      const toToday = (result: OptimizationResult): OptimizationResult =>
+        runPlan
+          ? this.#scoreLayout(
+              rebaseToUnlocks(result.placements, upgrades) ?? result.placements,
+              todayBound,
+            )
+          : result;
 
       const mode = this.solveMode;
       const handle = this.#client.solveProgressive(
         grid,
         buildings,
-        upgrades,
-        (progressResult) => {
+        runPlan ? runPlan.target : upgrades,
+        (streamed) => {
           // A run outlives a template switch; its progress must not.
           if (!onScreen()) return;
+          const progressResult = toToday(streamed);
           /*
            * A progress report is a search still moving, and for most of a run
            * it is well below what that search will finish at. Streamed over a
@@ -825,8 +895,8 @@ class SolverState {
            */
           if (
             defendedPower !== null &&
-            (progressResult.totalPower <= defendedPower ||
-              powerTies(progressResult.totalPower, defendedPower))
+            (rank(progressResult) <= defendedPower ||
+              powerTies(rank(progressResult), defendedPower))
           )
             return;
           this.optimizationResult = progressResult;
@@ -842,12 +912,13 @@ class SolverState {
           // layout, or in how the board is split.
           anomalyId: this.#runAnomalyId,
           prestige: configState.prestige,
+          upgradePlan: runPlan?.along,
         },
       );
       this.activeTask = handle;
       this.#startWatchdog(mode);
 
-      finalVariants = await handle.promise;
+      finalVariants = (await handle.promise).map(toToday);
       if (onScreen()) this.optimizationResult = finalVariants[0] ?? null;
     } catch (err: any) {
       runError = err?.message || "Optimization failed.";
@@ -877,6 +948,8 @@ class SolverState {
           previousVariants,
           previousIndex,
           finalVariants,
+          MAX_SOLVE_VARIANTS,
+          rank,
         );
 
         // A defended layout keeps its own run's clock: it is still that solve,
@@ -894,6 +967,9 @@ class SolverState {
         const winningAnomalyId = defended
           ? (previousAnomalyId ?? this.#runAnomalyId)
           : this.#runAnomalyId;
+        const winningPlanKey = defended
+          ? (previousPlanKey ?? runPlanKey)
+          : runPlanKey;
 
         // Filed under the island it was started on, whether or not that is
         // still the one being looked at.
@@ -905,6 +981,7 @@ class SolverState {
           this.#runTemplateId,
           this.#runSignature,
           winningAnomalyId,
+          winningPlanKey,
         );
         if (onScreen()) {
           this.variants = variants;
@@ -915,6 +992,7 @@ class SolverState {
           this.lastRunDurationMs = winningDurationMs;
           this.finishedAt = finishedAt;
           this.resultAnomalyId = winningAnomalyId;
+          this.resultPlanKey = winningPlanKey;
         }
         donePower = variants[selected]?.totalPower ?? 0;
       } else if (onScreen()) {
@@ -935,6 +1013,7 @@ class SolverState {
         this.finishedAt = previousFinishedAt;
         this.elapsedMs = previousDurationMs ?? 0;
         this.resultAnomalyId = previousAnomalyId;
+        this.resultPlanKey = previousPlanKey;
       }
 
       // Every `solve_run` gets one of these, so a status other than `ok` is
@@ -950,6 +1029,7 @@ class SolverState {
         bound: Math.round(bound),
         bound_pct: bound > 0 ? Math.round((donePower / bound) * 100) : 0,
         variants: this.variants.length,
+        plan_steps: runPlan?.along.length ?? 0,
         ...runRules,
       });
     }

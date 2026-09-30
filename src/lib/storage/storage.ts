@@ -3,8 +3,10 @@ import type { ImageScale, PlacementView } from "../types/ui";
 import { DEFAULT_SOLVE_MODE, type SolveModeId } from "../worker/solveModes";
 import {
   DEFAULT_ANOMALY_ID,
+  MAX_UPGRADE_STEPS,
   type AnomalyId,
   type OptimizationResult,
+  type UpgradeStep,
 } from "@reactor2/solver";
 
 export interface SavedTemplateData {
@@ -24,6 +26,7 @@ const KEYS = {
   BUILDINGS: "buildings",
   ANOMALY: "anomaly",
   PRESTIGE: "prestige",
+  UPGRADE_PLAN: "upgrade_plan",
   UI: "ui_prefs",
   SOLVE: "solver_result",
 } as const;
@@ -140,6 +143,13 @@ export interface SavedSolveData {
    * signature already settles it — see `solverState.restore`.
    */
   anomalyId?: AnomalyId;
+  /**
+   * The upgrade plan the shapes were searched under, as `configState.planKey`
+   * spells it — empty for a solve found with no plan. Kept beside the record
+   * rather than inside `signature` for the reason `anomalyId` is: see
+   * `solverState.resultPlanKey`. Absent on older records, which had no plan.
+   */
+  planKey?: string;
   /** Wall-clock length of the run, in ms. */
   durationMs: number;
   /** When it finished, epoch ms. Shown as "solved N ago". */
@@ -235,6 +245,34 @@ export const prestigeStorage = {
   loadPrestige: (): Record<string, number> => getItem(KEYS.PRESTIGE, {}),
   savePrestige: (data: Record<string, number>): void =>
     setItem(KEYS.PRESTIGE, data),
+};
+
+/**
+ * The upgrade plan: the next few tiers the player means to buy, in buying
+ * order.
+ *
+ * Its own key, like the research beside it, because it is a solve input set
+ * from its own control. Read defensively — it comes off `localStorage`, so
+ * anything that is not a list of `{ buildingId, level }` pairs is dropped
+ * rather than handed to the resolver, and a list longer than the plan allows
+ * is cut to length.
+ */
+export const upgradePlanStorage = {
+  loadPlan: (): UpgradeStep[] => {
+    const raw = getItem<unknown>(KEYS.UPGRADE_PLAN, []);
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter(
+        (s): s is UpgradeStep =>
+          typeof s === "object" &&
+          s !== null &&
+          typeof s.buildingId === "string" &&
+          Number.isInteger(s.level),
+      )
+      .slice(0, MAX_UPGRADE_STEPS)
+      .map(({ buildingId, level }) => ({ buildingId, level }));
+  },
+  savePlan: (steps: UpgradeStep[]): void => setItem(KEYS.UPGRADE_PLAN, steps),
 };
 
 export const uiStorage = {
