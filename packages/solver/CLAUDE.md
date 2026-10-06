@@ -157,6 +157,18 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   a hub's best-connected tiles on coolers and never filled a scrap. The seed
   goes from ~76% of the bound to ~99% on maps 3, 7 and 8 and map 7 now returns
   its bound at 5s; `docs/SOLVER.md` has the tables.
+
+  **The finished layout gathers its coolers** (`gatherPooledCoolers`, after
+  right-sizing, on the primary and on its alternates). Power cannot see where a
+  pooled cooler stands, so the walk leaves them in whatever gap a hub had. The
+  pass moves each one nearer the densest patch of coolers. Empty scraps on
+  landmasses with no producer count as nearest of all. A move onto an empty
+  tile is exact. A swap with a producer is re-simulated and kept only if power,
+  every producer and the upgrade plan all hold, so the pass cannot cost a watt.
+  It is capped at 150ms for the primary and 150ms shared across the
+  alternates; on the shipped maps one layout takes 15-110ms. Map 1 goes from
+  five cooler clusters to one. Coolers on a second working landmass stay there
+  when no empty tile near the anchor is free to take them.
 - **Off the board counts as water**, which is a fact about our data rather than
   about the game: the game has one global map with open water between islands,
   and our eight boards are rectangles cut out of it, so the water past an edge is

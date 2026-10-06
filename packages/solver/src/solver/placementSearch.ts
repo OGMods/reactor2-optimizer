@@ -2178,6 +2178,168 @@ export function downgradeOversized(
 }
 
 /**
+ * How long `gatherPooledCoolers` may spend, per solve on the primary layout and
+ * once more shared across its alternates. It runs after the search's deadline,
+ * so this is time added to a run. Moving a cooler onto an empty tile costs
+ * nothing. The cap is for the cooler-to-producer swaps, which mostly fail and
+ * cost a simulation each. On the shipped maps one layout finishes in 15-110ms.
+ */
+const GATHER_BUDGET_MS = 150;
+
+/** Chebyshev radius of the patch `gatherPooledCoolers` anchors on. */
+const GATHER_ANCHOR_RADIUS = 2;
+
+/**
+ * Under a shared cooling pool, pulls the coolers into one area of the board
+ * and onto the small islands no producer is using.
+ *
+ * Under the pool a cooler's tile does not matter. Every cooler pays into one
+ * figure (`simulateIsland`), so power cannot tell a cooler in the middle of the
+ * hubs from one at the edge. The walk leaves coolers wherever a hub left a gap,
+ * scattered across the landmass, and that board is harder to read and to build
+ * than the same layout with its coolers together.
+ *
+ * Like `downgradeOversized`, this cannot find a better layout. It only moves
+ * coolers, swapping each with a tile nearer the anchor. Moving onto an empty
+ * tile always holds, because the pool's total and every producer are
+ * untouched. A swap with a producer moves that producer into the cooler's old
+ * tile, so it is re-simulated and kept only if power holds, every producer
+ * stays online and the upgrade plan still runs.
+ *
+ * The anchor is the tile with the most coolers within `GATHER_ANCHOR_RADIUS`,
+ * so the coolers gather on the patch where most of them already stand. Anchoring
+ * on the coolers' centroid was measured too: it put the anchor among the hubs,
+ * where a swap rarely holds, and left more clusters on maps 1 and 8. A tile on a
+ * landmass with no producer is a scrap nothing else can use, and counts as
+ * nearer than any tile on a working landmass, so empty scraps fill first. Every
+ * accepted move strictly lowers the coolers' summed distance, so the sweep
+ * terminates; the deadline only bounds how far it gets.
+ */
+function gatherPooledCoolers(
+  rows: SimPlacedBuilding[],
+  power: number,
+  effectiveBuildings: EffectiveBuilding[],
+  ctx: IslandContext,
+  deadlineMs: number,
+): { rows: SimPlacedBuilding[]; power: number } {
+  if (ctx.anomaly.rule !== "shared_cooling" || rows.length === 0)
+    return { rows, power };
+
+  const byId = new Map(effectiveBuildings.map((b) => [b.id, b]));
+  const current = emptyPlacement(ctx.n);
+  for (const row of rows) {
+    const building = byId.get(row.buildingId);
+    if (building === undefined) return { rows, power };
+    put(current, ctx, row.idx, building);
+  }
+
+  // Landmasses, and which of them hold a producer, read once from the layout
+  // as handed over.
+  const component = new Int32Array(ctx.n).fill(-1);
+  const working: boolean[] = [];
+  for (let start = 0; start < ctx.n; start++) {
+    if (component[start] >= 0) continue;
+    const id = working.length;
+    let hasProducer = false;
+    const stack = [start];
+    component[start] = id;
+    while (stack.length > 0) {
+      const t = stack.pop()!;
+      const b = current[t];
+      if (b !== null && b.type !== "cooler") hasProducer = true;
+      const nb = ctx.neighbors[t];
+      for (let k = 0; k < nb.length; k++) {
+        if (component[nb[k]] < 0) {
+          component[nb[k]] = id;
+          stack.push(nb[k]);
+        }
+      }
+    }
+    working.push(hasProducer);
+  }
+
+  const movable = (t: number): boolean => {
+    const b = current[t];
+    return b !== null && b.type === "cooler" && working[component[t]];
+  };
+  const placed: number[] = [];
+  for (let t = 0; t < ctx.n; t++) if (movable(t)) placed.push(t);
+  if (placed.length === 0) return { rows, power };
+
+  let anchor = -1;
+  let densest = -1;
+  for (let t = 0; t < ctx.n; t++) {
+    if (!working[component[t]]) continue;
+    let near = 0;
+    for (const u of placed)
+      if (chebyshev(ctx, t, u) <= GATHER_ANCHOR_RADIUS) near++;
+    if (near > densest) {
+      densest = near;
+      anchor = t;
+    }
+  }
+
+  /** Squared distance to the anchor; a scrap tile is nearer than any. */
+  const distance = new Float64Array(ctx.n);
+  for (let t = 0; t < ctx.n; t++) {
+    distance[t] = working[component[t]]
+      ? (ctx.xs[t] - ctx.xs[anchor]) ** 2 + (ctx.ys[t] - ctx.ys[anchor]) ** 2
+      : -1;
+  }
+  // Nearest first, ascending index on a tie, so the result depends only on the
+  // board.
+  const byDistance = Array.from(ctx.tiles).sort(
+    (a, b) => distance[a] - distance[b] || a - b,
+  );
+
+  const floor = power;
+  let changed = true;
+  while (changed && performance.now() < deadlineMs) {
+    changed = false;
+    // Farthest cooler first: it has the most to gain from a move.
+    const coolers: number[] = [];
+    for (let t = 0; t < ctx.n; t++) if (movable(t)) coolers.push(t);
+    coolers.sort((a, b) => distance[b] - distance[a] || a - b);
+
+    for (const from of coolers) {
+      if (performance.now() >= deadlineMs) break;
+      const cooler = current[from]!;
+      for (const to of byDistance) {
+        if (distance[to] >= distance[from]) break;
+        const other = current[to];
+        if (other !== null && other.type === "cooler") continue;
+
+        put(current, ctx, to, cooler);
+        put(current, ctx, from, other);
+        if (other === null) {
+          // The pool's total and every producer are unchanged.
+          changed = true;
+          break;
+        }
+        const trial = simulateIsland(current, ctx);
+        if (
+          covers(trial.totalPower, floor) &&
+          !anyOfflineProducer(current, trial.placements) &&
+          planHolds(current, ctx)
+        ) {
+          changed = true;
+          break;
+        }
+        put(current, ctx, from, cooler);
+        put(current, ctx, to, other);
+        if (performance.now() >= deadlineMs) break;
+      }
+    }
+  }
+
+  const final = simulateIsland(current, ctx);
+  // A move to an empty tile is exact, and a swap had to hold the floor, so a
+  // shortfall here would be a bug rather than a trade. Give the input back.
+  if (!covers(final.totalPower, floor)) return { rows, power };
+  return { rows: final.placements, power: final.totalPower };
+}
+
+/**
  * Turns the walk's shortlist into finished alternates.
  *
  * Every collected layout goes through the same closing prune the primary does,
@@ -2208,14 +2370,25 @@ function finalizeAlternates(
 ): IslandLayout[] {
   const kept: PlacedBuilding[][] = [primaryRows];
   const out: IslandLayout[] = [];
+  // One gathering budget for the whole shortlist rather than one each, so a
+  // long shortlist cannot add a second to the run. An alternate the deadline
+  // cuts short is still valid, only less gathered.
+  const gatherDeadlineMs = performance.now() + GATHER_BUDGET_MS;
 
   for (const layout of collector.layouts()) {
     const pruned = pruneDeadWeight(layout, ctx);
-    const sized = downgradeOversized(
+    const downsized = downgradeOversized(
       pruned.rows,
       pruned.power,
       effectiveBuildings,
       ctx,
+    );
+    const sized = gatherPooledCoolers(
+      downsized.rows,
+      downsized.power,
+      effectiveBuildings,
+      ctx,
+      gatherDeadlineMs,
     );
     if (!powerTies(sized.power, primaryPower)) continue;
 
@@ -2601,11 +2774,20 @@ export async function solveIsland(
   // ...and then right-size what survived. The search had no reason to prefer
   // the tier a tile actually needs over the biggest one in the roster, because
   // both score the same.
-  const sized = downgradeOversized(
+  const downsized = downgradeOversized(
     pruned.rows,
     pruned.power,
     effectiveBuildings,
     ctx,
+  );
+  // Under a cooling pool, last of all, gather the coolers the search left
+  // wherever a hub had a gap. A no-op under every other rule.
+  const sized = gatherPooledCoolers(
+    downsized.rows,
+    downsized.power,
+    effectiveBuildings,
+    ctx,
+    performance.now() + GATHER_BUDGET_MS,
   );
   const placements = toPlacedBuildings(sized.rows);
   return {
@@ -2641,6 +2823,7 @@ export const internals = {
   DOWNGRADE_ROLES,
   constructMultiStartSeed,
   downgradeTiers,
+  gatherPooledCoolers,
   greedyPolish,
   hillClimb,
   generatorCapacityTable,

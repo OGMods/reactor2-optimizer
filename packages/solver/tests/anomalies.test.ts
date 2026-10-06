@@ -351,6 +351,72 @@ describe("the seed under a shared cooling pool", () => {
   });
 });
 
+describe("gathering the coolers under a shared cooling pool", () => {
+  /*
+   * Power cannot see where a pooled cooler stands, so the search leaves them
+   * wherever a hub had a gap. The closing pass moves them together and onto
+   * scraps, and must never cost a watt doing it.
+   *
+   * A 7x3 landmass with one hub on it and three coolers in three corners, and
+   * a one-tile scrap across the water.
+   */
+  const BOARD = ["GGGGGGG.G", "GGGGGGG..", "GGGGGGG.."];
+  const roster = basicRoster();
+  const [REACTOR, GENERATOR, COOLER] = roster;
+
+  const gather = (anomaly: AnomalyDefinition) => {
+    const ctx = buildIslandContext(makeGrid(BOARD), undefined, anomaly);
+    const at = (x: number, y: number) =>
+      Array.from(ctx.tiles).find((t) => ctx.xs[t] === x && ctx.ys[t] === y)!;
+    const placement: Placement = new Array(ctx.n).fill(null);
+    const spec: [number, number, EffectiveBuilding][] = [
+      [2, 1, REACTOR],
+      [3, 1, GENERATOR],
+      [0, 0, COOLER],
+      [6, 0, COOLER],
+      [6, 2, COOLER],
+    ];
+    for (const [x, y, b] of spec) placement[at(x, y)] = ctx.rate(at(x, y), b);
+    const before = simulateIsland(placement, ctx);
+    const out = internals.gatherPooledCoolers(
+      before.placements,
+      before.totalPower,
+      roster,
+      ctx,
+      performance.now() + 1000,
+    );
+    const where = (type: string) =>
+      out.rows
+        .filter((r) => roster.find((b) => b.id === r.buildingId)!.type === type)
+        .map((r) => `${ctx.xs[r.idx]},${ctx.ys[r.idx]}`)
+        .sort();
+    return { before, out, where };
+  };
+
+  it("moves coolers onto the scrap and together, at the same power", () => {
+    const { before, out, where } = gather(getAnomaly("cryo_nexus"));
+
+    expect(before.totalPower).toBeGreaterThan(EPS);
+    expect(out.power).toBe(before.totalPower);
+    // The hub has not moved.
+    expect(where("reactor")).toEqual(["2,1"]);
+    expect(where("generator")).toEqual(["3,1"]);
+
+    const coolers = where("cooler").map((s) => s.split(",").map(Number));
+    expect(coolers).toHaveLength(3);
+    expect(where("cooler")).toContain("8,0");
+    // The two left on the landmass stand side by side.
+    const [a, b] = coolers.filter(([x]) => x !== 8);
+    expect(Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]))).toBe(1);
+  });
+
+  it("leaves the layout alone under any other rule", () => {
+    const { before, out } = gather(getAnomaly("none"));
+    expect(out.rows).toBe(before.placements);
+    expect(out.power).toBe(before.totalPower);
+  });
+});
+
 describe("role isolation reaching the board", () => {
   /*
    * The one rule whose multiplier depends on the layout rather than on the
