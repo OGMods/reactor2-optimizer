@@ -137,7 +137,8 @@ describe("research reaching the roster", () => {
     const roster = getEffectiveBuildings(
       DEFS,
       ALL,
-      prestigeScales({ stellar_forge: 4 }),
+      // The top level, x1.5.
+      prestigeScales({ stellar_forge: 9 }),
     );
     expect(roster.find((b) => b.id === "r")!.effectiveValue).toBe(200 * 1.5);
   });

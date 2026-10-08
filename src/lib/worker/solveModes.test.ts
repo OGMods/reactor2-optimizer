@@ -10,9 +10,10 @@ import { describe, expect, it } from "vitest";
 import { SOLVE_MODES, estimateMakespanMs, taskDurationsMs } from "./solveModes";
 
 describe("taskDurationsMs", () => {
-  it("splits an attempt's budget across islands by tile count", () => {
+  it("splits an attempt's budget across islands by tile count squared", () => {
+    // 900 : 100, where a linear split would give 3 : 1. See `islandBudgetsS`.
     const durations = taskDurationsMs(SOLVE_MODES.quick, [30, 10]);
-    expect(durations).toEqual([22_500, 7_500]);
+    expect(durations).toEqual([27_000, 3_000]);
   });
 
   it("repeats the split once per attempt, attempt-major", () => {
@@ -64,9 +65,10 @@ describe("estimateMakespanMs", () => {
 
   it("never reports less than the longest single task", () => {
     // An island that owns most of the board gets most of every attempt's
-    // budget, and no amount of parallelism makes that one search shorter.
+    // budget, and no amount of parallelism makes that one search shorter. The
+    // two scraps are held at the quarter-second floor, so it gets the rest.
     const durations = taskDurationsMs(SOLVE_MODES.quick, [90, 5, 5]);
-    expect(estimateMakespanMs(durations, 8)).toBe(27_000);
+    expect(estimateMakespanMs(durations, 8)).toBe(29_500);
   });
 
   it("is zero when there is nothing to schedule", () => {

@@ -529,12 +529,12 @@ function estimateIslandMaxPower(
  * rule that scales everything uniformly (a terrain bonus, a research) can never
  * make it bite: the cap rises with the generator it caps. A rule that scales
  * **one role** breaks that, and `role_isolation` is the one that does —
- * Singularity Isolation rates a lone generator's intake x4 while leaving the
- * reactors that fill it and the coolers that clear it alone, so the LP bought
- * its extra heat by spending fewer tiles on generators than any arrangement of
- * eight neighbours can serve. Without the cap the shipped maps' bound sits 6-9%
- * above anything the board allows, and the efficiency figure reads 83-87% for
- * layouts that are not 83-87% of anything.
+ * Singularity Isolation rates a lone generator's intake by its `isolated` bonus
+ * while leaving the reactors that fill it and the coolers that clear it alone,
+ * so the LP bought its extra heat by spending fewer tiles on generators than
+ * any arrangement of eight neighbours can serve. Without the cap the shipped
+ * maps' bound sits 6-9% above anything the board allows, and the efficiency
+ * figure reads 83-87% for layouts that are not 83-87% of anything.
  *
  * Under a shared cooling pool the cooler term is gone, because adjacency is:
  * the pool reaches the whole island, so every neighbour may be a reactor.
@@ -890,13 +890,13 @@ function estimateMixedIslandMaxPower(
  * than scaled up afterwards.
  *
  * A role scale is uniform across the island — every cooler under a shared pool
- * is x0.88 wherever it stands, and a search free to keep generators apart rates
- * every one of them at the isolation bonus — so it is a property of the roster
- * and belongs in the roster. Running the LP on that roster is a tighter bound
+ * is worth its `coolerMultiplier` wherever it stands, and a search free to
+ * keep generators apart rates every one of them at the isolation bonus — so it
+ * is a property of the roster and belongs in the roster. Running the LP on that roster is a tighter bound
  * than scaling its result by the largest factor: `islandMaxScale` had to scale
  * the *whole* estimate by the isolation bonus under Singularity, which rated
- * reactors and coolers up as well — at x4 that is 3.8x the tight bound, so a
- * near-optimal layout reads as 25% layout efficiency. Scaling only the generator entries is
+ * reactors and coolers up as well — at the shipped `isolated` that was 3.8x
+ * the tight bound, so a near-optimal layout reads as 25% layout efficiency. Scaling only the generator entries is
  * sound for the same reason as before — any layout under the rule is feasible
  * in this roster with an objective no larger — and it is the roster the bound
  * is entitled to assume.

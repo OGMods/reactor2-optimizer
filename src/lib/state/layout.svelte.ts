@@ -730,10 +730,17 @@ class LayoutState {
    * slot is the only destination that is never destructive.
    *
    * Throws with a message meant to be shown as-is.
+   *
+   * `onAccepted` runs once the code has been read and a slot claimed — the
+   * last moment before the board on screen is replaced — so a caller can stop
+   * work tied to the old board (a run) without losing it to a bad paste. A
+   * callback rather than a call of our own, because this store references
+   * nothing and the solver is not its to stop.
    */
   async importBlueprint(
     code: string,
     unlockedUpgrades: Record<string, number>,
+    onAccepted?: () => void,
   ): Promise<IslandTemplate> {
     // `adoptPreview` clears the flag before calling this, which is what makes
     // taking a previewed board the one import that may run. Anything else
@@ -781,6 +788,7 @@ class LayoutState {
     // takes, which is why importing needs no special case in load/save.
     this.savedGrids[island.id] = { code: trimmed };
     this.#saveState();
+    onAccepted?.();
     await this.loadTemplate(island, unlockedUpgrades);
 
     return island;

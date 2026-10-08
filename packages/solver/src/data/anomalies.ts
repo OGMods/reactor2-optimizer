@@ -1,4 +1,8 @@
-import type { AnomalyDefinition, AnomalyId } from "../solver/types";
+import type {
+  AnomalyDefinition,
+  AnomalyId,
+  TerrainAffinityAnomaly,
+} from "../solver/types";
 
 /**
  * The anomalies a timeline can be run under.
@@ -31,54 +35,109 @@ export const ANOMALIES: readonly AnomalyDefinition[] = [
       "every building is worth exactly what its tier says, and heat and " +
       "cooling reach only the tiles beside them.",
   },
-  {
+  cryoNexus(0.88),
+  // Nerfed from the legacy entry's figure; typed in ahead of the next
+  // extraction.
+  tidalAscendancy(1.35),
+  singularityIsolation(4, 0.8),
+  preNerf(tidalAscendancy(1.67), "tidal_ascendancy_legacy"),
+];
+
+/*
+ * One builder per rule, taking only the figures. Each figure is written once,
+ * at the call above, and every string that quotes it is filled from the same
+ * argument — the game's own `{0}` templates, resolved here rather than by hand,
+ * so a rebalance is a one-number edit that cannot leave the card text behind.
+ */
+
+/** A figure as the game's cards print it: "×1.35", "×4". */
+function times(factor: number): string {
+  return `×${factor}`;
+}
+
+function cryoNexus(coolerMultiplier: number): AnomalyDefinition {
+  return {
     id: "cryo_nexus",
     rule: "shared_cooling",
     name: "Cryo Nexus",
     benefit: "Cooling is shared per island",
-    drawback: "Heat Sink cooling ×0.88",
+    drawback: `Heat Sink cooling ${times(coolerMultiplier)}`,
     description:
       "All Heat Sinks on an island add their Cooling to one shared pool. It " +
       "can cool every Power Source on that island, no matter how far away it " +
       "is. If there is not enough Cooling, every Power Source receives the " +
-      "same percentage of what it needs. Each Heat Sink contributes ×0.88 of " +
-      "its normal Cooling. Cooling does not carry over to other islands.",
-    coolerMultiplier: 0.88,
-  },
-  {
+      `same percentage of what it needs. Each Heat Sink contributes ` +
+      `${times(coolerMultiplier)} of its normal Cooling. Cooling does not ` +
+      "carry over to other islands.",
+    coolerMultiplier,
+  };
+}
+
+/** Typed by the shape it returns, so callers can spread it and re-id it. */
+function tidalAscendancy(multiplier: number) {
+  return {
     id: "tidal_ascendancy",
     rule: "terrain_affinity",
     name: "Tidal Ascendancy",
-    benefit: "Waterside buildings ×1.67",
+    benefit: `Waterside buildings ${times(multiplier)}`,
     drawback: "Inland buildings gain nothing",
     description:
-      "Production buildings next to water get a ×1.67 multiplier. Corners " +
-      "count too. The bonus affects Energy, Heat, Cooling, and overheat " +
-      "capacity. Buildings away from water work normally and get no bonus.",
+      `Production buildings next to water get a ${times(multiplier)} ` +
+      "multiplier. Corners count too. The bonus affects Energy, Heat, " +
+      "Cooling, and overheat capacity. Buildings away from water work " +
+      "normally and get no bonus.",
     // Water only. A pond looks wet and is not: the game files it with the rocks
     // and the trees as an obstacle, and it grants nothing. Between 36% and 44%
     // of the grass on every shipped map is water-adjacent, so this list decides
     // the rating of roughly half the board — it is the cheapest thing here to
     // get wrong.
     terrain: ["water"],
-    multiplier: 1.67,
-  },
-  {
+    multiplier,
+    variantLabel: times(multiplier),
+  } satisfies TerrainAffinityAnomaly;
+}
+
+/**
+ * An anomaly as it shipped before a rebalance. A save that jumped into it then
+ * keeps that figure until it jumps again, so it stays selectable — as a switch
+ * on the live card, not as a card of its own (see `variantOf`). Same name as
+ * the live one on purpose: in the game it *is* that anomaly.
+ */
+function preNerf(
+  entry: TerrainAffinityAnomaly,
+  id: AnomalyId,
+): AnomalyDefinition {
+  return {
+    ...entry,
+    id,
+    description:
+      entry.description +
+      " This is the pre-nerf figure, which a timeline keeps until its next jump.",
+    variantOf: entry.id,
+  };
+}
+
+function singularityIsolation(
+  isolated: number,
+  crowded: number,
+): AnomalyDefinition {
+  return {
     id: "singularity_isolation",
     rule: "role_isolation",
     name: "Singularity Isolation",
-    benefit: "Isolated generators ×4",
-    drawback: "Adjacent generators ×0.8",
+    benefit: `Isolated generators ${times(isolated)}`,
+    drawback: `Adjacent generators ${times(crowded)}`,
     description:
-      "A Generator with no other Generator next to it gets ×4 Energy " +
-      "output, Heat output, and overheat capacity. If another Generator " +
-      "touches it, including at a corner, those values drop to ×0.8. More " +
-      "neighbours do not make the penalty worse.",
+      "A Generator with no other Generator next to it gets " +
+      `${times(isolated)} Energy output, Heat output, and overheat ` +
+      "capacity. If another Generator touches it, including at a corner, " +
+      `those values drop to ${times(crowded)}. More neighbours do not make ` +
+      "the penalty worse.",
     role: "generator",
-    isolated: 4,
-    crowded: 0.8,
-  },
-];
+    isolated,
+    crowded,
+  };
+}
 
 /** The anomaly a timeline runs under until the player picks otherwise. */
 export const DEFAULT_ANOMALY_ID: AnomalyId = "none";

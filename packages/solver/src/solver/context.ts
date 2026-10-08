@@ -131,9 +131,10 @@ export interface IslandContext {
    * reads better — which is exactly why the flag has to promise `rate`'s whole
    * behaviour rather than only its per-tile half. It read `tileScale === null`
    * once, which was true under a shared cooling pool while every cooler was
-   * being scaled by 0.88: a stage taking the invitation above would have rated
-   * Cryo coolers at their unscaled figures and returned a layout over-cooled on
-   * paper that the game shuts down board-wide, with nothing failing anywhere.
+   * being scaled by its `coolerMultiplier`: a stage taking the invitation
+   * above would have rated Cryo coolers at their unscaled figures and returned
+   * a layout over-cooled on paper that the game shuts down board-wide, with
+   * nothing failing anywhere.
    *
    * So it is false under a terrain bonus (a per-tile scale) *and* under a role
    * scale, and true under the rules that leave the roster alone — including
@@ -166,10 +167,10 @@ export interface IslandContext {
    * For the stages that count rather than place — hub fits, composition
    * targets, the polish candidates — which have no tile to ask `rate` about and
    * yet must reason in the units the board will hold. Under a shared cooling
-   * pool every cooler is worth x0.88 wherever it stands, and a count made from
-   * the plain figure under-provisions cooling by exactly that: every target the
-   * retarget proposed was short by 8-14%, and under a pool a short board is an
-   * offline board.
+   * pool every cooler is worth its `coolerMultiplier` wherever it stands, and a
+   * count made from the plain figure under-provisions cooling by exactly that:
+   * every target the retarget proposed was short by 8-14%, and under a pool a
+   * short board is an offline board.
    */
   rateRole(building: EffectiveBuilding): EffectiveBuilding;
   /**
@@ -191,7 +192,10 @@ export interface IslandContext {
    * are only two variants of each roster entry, so they are built once per
    * island and handed back for the rest of the solve.
    */
-  rateIsolated(building: EffectiveBuilding, crowded: boolean): EffectiveBuilding;
+  rateIsolated(
+    building: EffectiveBuilding,
+    crowded: boolean,
+  ): EffectiveBuilding;
   /**
    * A whole-layout scratch buffer, reused by `simulateIsland` when a rule has
    * to resolve a layout before scoring it.
@@ -364,17 +368,10 @@ export function buildIslandContext(
     neighbors[i] = Int32Array.from(found);
   }
 
-  const tileScale = terrainScales(
-    localGrid,
-    anomaly,
-    xs,
-    ys,
-    n,
-    waterAdjacent,
-  );
+  const tileScale = terrainScales(localGrid, anomaly, xs, ys, n, waterAdjacent);
   // A uniform scale on one role, which is what Cryo Nexus does to coolers: the
-  // game applies its 0.88 to `CoolerBuilding.CoolingPerSec`, so it is what a
-  // cooler is worth rather than a charge levied at the pool.
+  // game applies its `coolerMultiplier` to `CoolerBuilding.CoolingPerSec`, so
+  // it is what a cooler is worth rather than a charge levied at the pool.
   //
   // Only ever one of these two is in force, because only one anomaly runs at a
   // time — so the product below is always a multiply by exactly 1.0 on one

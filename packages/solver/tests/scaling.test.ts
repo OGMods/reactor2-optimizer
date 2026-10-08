@@ -16,6 +16,16 @@ import { scaleEffectiveBuilding } from "../src/data/effectiveBuildings";
 import { snapToAuthoredPrecision } from "../src/solver/physics";
 import type { EffectiveBuilding } from "../src/solver/types";
 
+/*
+ * The two anomaly factors every case below scales by. Literals on purpose, not
+ * read off `data/anomalies.ts`: each test pins a double to the last bit, and
+ * those bits belong to these numbers alone, so a rebalance must not move them.
+ * They are pre-nerf Tidal's shore bonus and Singularity's crowding penalty as
+ * the two shipped when this was written.
+ */
+const SHORE = 1.67;
+const CROWDED = 0.8;
+
 /** The authored tiers of the roster's top generator, the sharpest case here. */
 const G7 = BUILDINGS.find((b) => b.id === "generator7")!;
 if (G7.type !== "generator") throw new Error("generator7 is not a generator");
@@ -35,21 +45,21 @@ const atTier = (tier: number): EffectiveBuilding => {
 
 describe("waste is derived from the scaled pair, not scaled itself", () => {
   it("differs from the scaled authored waste, and takes the derived value", () => {
-    // generator7 at tier 4 under Tidal Ascendancy. The game's runtime getter is
+    // generator7 at tier 4 on a `SHORE` tile. The game's runtime getter is
     // `(HeatPerTick - EnergyPerTick).SnapToAuthoredPrecision()` over the scaled
     // pair, so this is 3.6907e21 — carrying the authored 2.21e21 through the
     // same multiply gives 3.6906999999999996e21, half a million short.
-    const scaled = scaleEffectiveBuilding(atTier(3), 1.67);
+    const scaled = scaleEffectiveBuilding(atTier(3), SHORE);
 
     expect(scaled.waste).toBe(3.6907e21);
-    expect(scaled.waste).not.toBe(2.21e21 * 1.67);
+    expect(scaled.waste).not.toBe(2.21e21 * SHORE);
     expect(scaled.waste).toBe(
       snapToAuthoredPrecision(scaled.effectiveValue - scaled.energy),
     );
   });
 
   it("holds for a producer the other way up, at single-digit magnitudes", () => {
-    // The wind turbine's 3.75/3/0.75 goes the opposite way at x0.8: derived is
+    // The wind turbine's 3.75/3/0.75 goes the opposite way at `CROWDED`: derived is
     // exactly 0.6, scaled authored is 0.6000000000000001. Both directions have
     // to be wrong for the identity to be an accident.
     const turbine = BUILDINGS.find((b) => b.id === "wind_turbine")!;
@@ -65,11 +75,11 @@ describe("waste is derived from the scaled pair, not scaled itself", () => {
         waste: level.waste!,
         baseValue: level.heat,
       },
-      0.8,
+      CROWDED,
     );
 
     expect(scaled.waste).toBe(0.6);
-    expect(scaled.waste).not.toBe(0.75 * 0.8);
+    expect(scaled.waste).not.toBe(0.75 * CROWDED);
   });
 
   it("leaves a cooler's and a reactor's waste at zero", () => {
@@ -110,42 +120,42 @@ describe("two multipliers compose as two calls, not as one product", () => {
     // The game multiplies the authored figure by the Time Lab bonus in the SO
     // getter and by the anomaly in the runtime getter, so what a building is
     // rated at is `(authored x research) x anomaly`. That is not the same
-    // double as `authored x (research x anomaly)`: Infinite Grid at level 4
-    // (x1.7) and a crowded generator under Singularity Isolation (x0.8) over
+    // double as `authored x (research x anomaly)`: Infinite Grid at level 7
+    // (x1.7) and a `CROWDED` generator under Singularity Isolation over
     // generator7's fourth tier give 1.2036e22 one way and 1.2036000000000001e22
     // the other.
     const researched = scaleEffectiveBuilding(atTier(3), 1.7);
-    const both = scaleEffectiveBuilding(researched, 0.8);
+    const both = scaleEffectiveBuilding(researched, CROWDED);
 
-    expect(both.effectiveValue).toBe(8.85e21 * 1.7 * 0.8);
+    expect(both.effectiveValue).toBe(8.85e21 * 1.7 * CROWDED);
     expect(both.effectiveValue).toBe(1.2036e22);
-    expect(both.effectiveValue).not.toBe(8.85e21 * (1.7 * 0.8));
+    expect(both.effectiveValue).not.toBe(8.85e21 * (1.7 * CROWDED));
   });
 
   it("applies them in that order, research first, anomaly second", () => {
     // Which of the two calls comes first is itself observable, and the factors
-    // above cannot see it: 1.7 x 0.8 and 0.8 x 1.7 land on the same double. The
+    // above cannot see it: 1.7 x `CROWDED` and the reverse land on the same double. The
     // game's order is the Time Lab in the SO getter and the anomaly in the
     // runtime getter — research first — and on generator7's fourth tier under
-    // Infinite Grid at level 2 (x1.25) then a Tidal shore (x1.67) the two orders
-    // differ in the last bit: 1.8474375e22 against 1.8474374999999997e22.
+    // Infinite Grid at level 3 (x1.3) then a `SHORE` tile the two orders
+    // differ in the last bit: 1.921335e22 against 1.9213349999999996e22.
     //
     // Nothing above this line in the stack would notice: the roster resolves
     // research into its three figures and the context rates the result, so
     // reversing the two produces a board rated a few ULPs off — and the golden
     // fixtures pass no anomaly, so they cannot see it either.
     const researchFirst = scaleEffectiveBuilding(
-      scaleEffectiveBuilding(atTier(3), 1.25),
-      1.67,
+      scaleEffectiveBuilding(atTier(3), 1.3),
+      SHORE,
     );
     const anomalyFirst = scaleEffectiveBuilding(
-      scaleEffectiveBuilding(atTier(3), 1.67),
-      1.25,
+      scaleEffectiveBuilding(atTier(3), SHORE),
+      1.3,
     );
 
-    expect(researchFirst.effectiveValue).toBe(8.85e21 * 1.25 * 1.67);
-    expect(researchFirst.effectiveValue).toBe(1.8474375e22);
-    expect(anomalyFirst.effectiveValue).toBe(1.8474374999999997e22);
+    expect(researchFirst.effectiveValue).toBe(8.85e21 * 1.3 * SHORE);
+    expect(researchFirst.effectiveValue).toBe(1.921335e22);
+    expect(anomalyFirst.effectiveValue).toBe(1.9213349999999996e22);
     expect(researchFirst.effectiveValue).not.toBe(anomalyFirst.effectiveValue);
   });
 
@@ -157,23 +167,23 @@ describe("two multipliers compose as two calls, not as one product", () => {
      *
      * The tier and the factors are chosen so the three readings actually part
      * company, which most pairs do not: generator7's third tier (4.43e21 /
-     * 3.32e21) under Infinite Grid at level 1 (x1.1) and then a x0.8 penalty
+     * 3.32e21) under Infinite Grid at level 1 (x1.1) and then a `CROWDED` penalty
      * gives 9.76800000000001e20 derived against 9.768e20 either other way. The
      * assertion against the identity alone is how `scaleEffectiveBuilding`
      * computes waste, so it holds for any deriving implementation and cannot
      * fail on its own.
      */
     const once = scaleEffectiveBuilding(atTier(2), 1.1);
-    const both = scaleEffectiveBuilding(once, 0.8);
+    const both = scaleEffectiveBuilding(once, CROWDED);
 
     expect(both.waste).toBe(9.76800000000001e20);
     expect(both.waste).toBe(
       snapToAuthoredPrecision(both.effectiveValue - both.energy),
     );
     // The once-derived waste carried through the second multiply...
-    expect(both.waste).not.toBe(snapToAuthoredPrecision(once.waste * 0.8));
+    expect(both.waste).not.toBe(snapToAuthoredPrecision(once.waste * CROWDED));
     // ...and the authored waste scaled by both factors. Both are 9.768e20.
-    expect(both.waste).not.toBe(1.11e21 * 1.1 * 0.8);
+    expect(both.waste).not.toBe(1.11e21 * 1.1 * CROWDED);
   });
 });
 
@@ -182,7 +192,7 @@ describe("what a multiplier must not touch", () => {
     // It identifies the tier, and a tier does not change because something
     // scaled what it is worth. `effectiveAtValue` matches the catalogue on this
     // number, so a scaled one resolves to a higher tier and scales twice.
-    const scaled = scaleEffectiveBuilding(atTier(2), 1.67);
+    const scaled = scaleEffectiveBuilding(atTier(2), SHORE);
 
     expect(scaled.baseValue).toBe(4.43e21);
     expect(scaled.effectiveValue).not.toBe(scaled.baseValue);

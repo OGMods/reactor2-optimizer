@@ -29,6 +29,15 @@ rather than beside it because on one line the two competed for a phone's width
 and the name had to ellipsize; stacked as a column (`.tile-id`), neither yields —
 and that column is what pays for the sprite beside it being 40px rather than 30px.
 
+**Power and Est. Max open to every digit** through `inspector/FullNumber`:
+hover on a mouse, tap on a phone (a tap elsewhere or Esc closes it, and a click
+pins a hovered one open). It prints `formatNumberFull` from the solver package —
+comma-grouped digits with a trailing run of `000` groups folded into the
+suffix — taken from the double's shortest round-trip spelling, so it never
+prints binary noise past the ~17 digits a double holds. The popup is a native
+`popover` because the card's `backdrop-filter` makes `position: fixed` relative
+to the card, and the card's body scrolls; the top layer escapes both.
+
 Each figure row is **used / total** — `10.1AC / 13.3AC` — because the live figure
 alone cannot distinguish a building doing nothing from one with little to do. The
 ceiling is the tier the building was placed at, **rated for the tile it stands

@@ -28,8 +28,14 @@
   let closeEl = $state<HTMLButtonElement | null>(null);
 
   $effect(() => {
-    // Focus lands on Close, the one control that is always safe to activate.
-    closeEl?.focus();
+    // Focus lands on Close, the one control that is always safe to activate —
+    // unless the dialog marks the field it exists to fill (`data-autofocus`),
+    // as Import does its code box: a dialog that opens to one empty input
+    // should not make the user find it first. A disabled field falls back.
+    const wanted = panelEl?.querySelector<HTMLElement>(
+      "[data-autofocus]:not(:disabled)",
+    );
+    (wanted ?? closeEl)?.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {

@@ -19,6 +19,7 @@
   } from "@reactor2/solver";
   import { placementStatus } from "../../data/placements";
   import { ratedPlacementAt } from "../../simulation/simulator";
+  import FullNumber from "./FullNumber.svelte";
   import {
     asset,
     formatDuration,
@@ -690,16 +691,24 @@
               <div class="fig">
                 <span class="fig-label">Power</span>
                 <span class="fig-value">
-                  {formatNumber(power)}
-                  <img class="unit" src={ENERGY} alt="energy" />
+                  <FullNumber value={power} label="Power">
+                    {formatNumber(power)}
+                    <img class="unit" src={ENERGY} alt="energy" />
+                  </FullNumber>
                 </span>
               </div>
               {#if solverState.estimatedMaxPower > 0}
                 <div class="fig align-right">
                   <span class="fig-label">Est. Max</span>
                   <span class="fig-value muted">
-                    {formatNumber(solverState.estimatedMaxPower)}
-                    <img class="unit" src={ENERGY} alt="energy" />
+                    <FullNumber
+                      value={solverState.estimatedMaxPower}
+                      label="Est. Max"
+                      align="end"
+                    >
+                      {formatNumber(solverState.estimatedMaxPower)}
+                      <img class="unit" src={ENERGY} alt="energy" />
+                    </FullNumber>
                   </span>
                 </div>
               {/if}
@@ -749,8 +758,8 @@
                 <div class="row">
                   <span class="row-label">Mode</span>
                   <span class="row-value"
-                    >{runMode.label} <span class="ago">· {runMode.shape}</span
-                    ></span
+                    >{runMode.label}
+                    <span class="ago">· {runMode.shape}</span></span
                   >
                 </div>
               {/if}
@@ -1175,7 +1184,6 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
-
 
   /* ── The two figures ───────────────────────────────────────────── */
   .figures {

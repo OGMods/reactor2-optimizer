@@ -12,6 +12,7 @@ import {
   SUFFIXES,
   formatNumber,
   formatNumberForFilename,
+  formatNumberFull,
   parseHugeNumber,
 } from "../src/utils/formatters";
 import { expectClose } from "./helpers";
@@ -57,6 +58,43 @@ describe("a figure spelled for the screen", () => {
     expect(formatNumber(-Infinity)).toBe("-∞");
     // Not "-∞": NaN is unknown, not enormous and negative.
     expect(formatNumber(NaN)).toBe("NaN");
+  });
+});
+
+describe("a figure spelled in full", () => {
+  it("groups every digit and folds trailing zero groups into a suffix", () => {
+    expect(formatNumberFull(6.11210546e23)).toBe("611,210,546AA");
+    expect(formatNumberFull(1.5e15)).toBe("1,500T");
+    expect(formatNumberFull(2e6)).toBe("2M");
+  });
+
+  it("keeps a zero group that has digits after it", () => {
+    expect(formatNumberFull(1000001)).toBe("1,000,001");
+    expect(formatNumberFull(1234567)).toBe("1,234,567");
+  });
+
+  it("prints only the digits the double carries, never its binary noise", () => {
+    // BigInt(6.11210546e23) is 611210546000000006291456: digits nobody measured.
+    expect(formatNumberFull(6.11210546e23)).not.toContain("6291456");
+    // A full-precision figure keeps all seventeen digits it has.
+    expect(formatNumberFull(1.2345678901234567e30)).toBe(
+      "1,234,567,890,123,456,700T",
+    );
+  });
+
+  it("keeps a fraction to two places, and folds nothing beside one", () => {
+    expect(formatNumberFull(1234.5)).toBe("1,234.5");
+    expect(formatNumberFull(1000.25)).toBe("1,000.25");
+    expect(formatNumberFull(12.3456)).toBe("12.35");
+  });
+
+  it("matches formatNumber at the edges", () => {
+    expect(formatNumberFull(0)).toBe("0");
+    expect(formatNumberFull(0.001)).toBe("0");
+    expect(formatNumberFull(999)).toBe("999");
+    expect(formatNumberFull(-2500)).toBe("-2,500");
+    expect(formatNumberFull(Infinity)).toBe("∞");
+    expect(formatNumberFull(NaN)).toBe("NaN");
   });
 });
 

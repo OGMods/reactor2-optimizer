@@ -45,6 +45,7 @@
       autocomplete="off"
       {...{ autocorrect: "off" }}
       aria-label="Share code"
+      data-autofocus
       disabled={atCapacity}></textarea>
 
     {#if atCapacity}

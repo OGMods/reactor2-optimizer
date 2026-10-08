@@ -16,7 +16,7 @@ researches: Absolute Zero (cooler cooling), Infinite Grid (generator and wind
 turbine stats) and Stellar Forge (reactor heat). The other eight move research
 income, research time, chronons, obstacle-removal, energy sale price and
 building prices — all
-decided *before* the solver is handed a board, so none can change which layout
+decided _before_ the solver is handed a board, so none can change which layout
 is best. The file names them so it is clear they were read and dismissed.
 
 Three things bind:
@@ -27,7 +27,7 @@ Three things bind:
   is re-derived as `snap(heat - energy)` from the pair that was just scaled, so
   a generator rated ×2 makes ×2 the waste and needs ×2 the cooling to stay
   online. The overheat threshold Infinite Grid also names is **not** the reason
-  — it sizes a waste-heat *store* rather than the waste itself, and a
+  — it sizes a waste-heat _store_ rather than the waste itself, and a
   sustainable layout never fills it, so per `docs/game-logic.md` it is never the
   binding constraint and `EffectiveBuilding` does not model it at all.
 - **It folds into the roster, not into the solver.** `prestigeScales()` resolves
@@ -47,12 +47,13 @@ Three things bind:
   `effectiveAtValue` takes it too, and must: a placement stores the **authored**
   tier value, which identifies the tier and is deliberately never rewritten, so
   the research is applied on the way out every time.
+
 - **A multiplier breaks what `effectiveValue` used to mean, so
   `EffectiveBuilding` carries `baseValue` beside it** — the authored tier value,
   which every scaling helper passes through **untouched**. `simulateIsland`
   reports that, never `effectiveValue`, because a placement's tier is resolved
   back out of the reported number by matching the catalogue: report a scaled one
-  and it matches a *higher* tier and gets scaled a second time. A generator at
+  and it matches a _higher_ tier and gets scaled a second time. A generator at
   authored 320 under a x2 research reported 640, resolved as the authored 640
   tier, and came back 1280 at one level too high — in the readout's ceilings,
   the `Lv.` chip, `copySolveToBoard` and the tier table of every share code, with
@@ -71,7 +72,7 @@ Three things bind:
   button's tooltip.
 
 **Stellar Forge does not cover wind turbines.** The game's `heat_producer`
-category holds reactors *and* direct producers, so "all Heat Producers" read
+category holds reactors _and_ direct producers, so "all Heat Producers" read
 literally would take the turbine — but a turbine's SO inherits
 `PowerSourceBuildingSO` and reads Infinite Grid, while Stellar Forge is read only
 by `HeatProducerBuildingSO`. That is why Infinite Grid goes out of its way to
@@ -89,6 +90,14 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   **hand-owned** — unlike `BUILDING_TABLE` beside it, what the extractor can
   read is the text and the multipliers, never the rule shape those numbers plug
   into.
+- **The figures are written once**, as the arguments of one builder per rule
+  in `data/anomalies.ts`, and every card string is filled from them. Docs,
+  comments and tests name them by field — `coolerMultiplier`, `multiplier`,
+  `isolated`, `crowded` — and tests read them through `anomalyOfRule` in
+  `tests/helpers.ts`. A rebalance keeps the old build as a `variantOf` entry
+  (Tidal's pre-nerf figure is `tidal_ascendancy_legacy`), since a save keeps the
+  figure it jumped in under; every Tidal measurement in these docs, and every
+  test pinning an exact Tidal double, is of that frozen entry.
 - `"none"` is an entry, not an absence, and `getAnomaly` is total: an id it does
   not know resolves to the baseline, because the id arrives off `localStorage`
   and the worker boundary.
@@ -98,20 +107,21 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   `scaleEffectiveBuilding` recomputes `snapToAuthoredPrecision(heat - energy)`
   from the pair it just scaled, because that is the game's runtime getter and
   carrying the authored waste through the same multiply disagrees in the last
-  digit, where the fixtures assert exactly. Only the two roles that *have* waste
+  digit, where the fixtures assert exactly. Only the two roles that _have_ waste
   derive one — `heat - energy` over a cooler or a reactor would turn its whole
   output into waste.
 
   **Research and anomaly arrive as two successive calls, in that order**, which
   is how the game applies them (the Time Lab in the SO getter, the anomaly in
   the runtime getter) and is not the same double as one combined factor:
-  generator7's fourth tier under Infinite Grid level 4 (x1.7) then a crowded
-  x0.8 is 1.2036e22, against 1.2036000000000001e22 for x1.36, and the order
-  shows too — under x1.25 then a x1.67 shore it is 1.8474375e22, against
-  1.8474374999999997e22 the other way round. `scaling.test.ts` pins both,
-  against the shipped catalogue rather than round numbers — every divergence
+  generator7's fourth tier under Infinite Grid level 7 (x1.7) then a crowded
+  penalty differs in the last bit from one combined factor, and the order
+  shows too — level 3's x1.3 then a shore bonus differs from the reverse.
+  `scaling.test.ts` pins both, at two fixed factors of its own (`SHORE`,
+  `CROWDED`) and against the shipped catalogue rather than round numbers — every divergence
   here is in the last bit, so a test on tidy figures passes under either
   reading.
+
 - **Cryo Nexus pools across the whole board, so under it the board is one
   island.** The game's "island" is the map, so the components
   `splitGridIntoIslands` produces **do** interact — against the assumption the
@@ -137,17 +147,17 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
 
   **The pool itself is in `simulateIsland` and needs no second code path.** It
   serves every source the same fraction of what it is owed, so a short pool
-  leaves *all* of them under their waste and the ordinary per-producer online
+  leaves _all_ of them under their waste and the ordinary per-producer online
   test turns that into the board-wide all-or-nothing the rule describes. The
-  x0.88 is a uniform scale on the cooler role, applied through `ctx.rate` like
+  `coolerMultiplier` is a uniform scale on the cooler role, applied through `ctx.rate` like
   any other multiplier, because the game applies it to `CoolerBuilding.
-  CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
+CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
   not a charge levied at the pool.
 
   It is worth real power, and most on a fragmented board: map 7 at 25s goes
   271AC to 294AC, map 3 at 20s 139AC to 145AC, and map 1 — one landmass, already
-  at 98% of its bound — is unchanged. The x0.88 has to be earned back before any
-  of that shows.
+  at 98% of its bound — is unchanged. The `coolerMultiplier` has to be earned
+  back before any of that shows.
 
   **The seed is the one stage that branches on the rule.** Under a pool
   `constructSeed` builds every hub engine-first — a phantom cooler sizes the
@@ -167,8 +177,24 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   every producer and the upgrade plan all hold, so the pass cannot cost a watt.
   It is capped at 150ms for the primary and 150ms shared across the
   alternates; on the shipped maps one layout takes 15-110ms. Map 1 goes from
-  five cooler clusters to one. Coolers on a second working landmass stay there
-  when no empty tile near the anchor is free to take them.
+  five cooler clusters to one.
+
+  **Before the sweep, hubs leave the smaller landmasses**
+  (`evacuateMinorLandmasses`). One tile at a time cannot move a hub: a
+  generator taken from its reactors loses power at every step, so a hub on a
+  second landmass kept its coolers there. Each smaller landmass that holds
+  producers, smallest first, has all of them moved onto the landmass holding
+  the most. A greedy placement puts them on that landmass's cooler or empty
+  tiles, and each displaced cooler crosses to the tile its producer left, so
+  composition and pool are unchanged. A swap descent over the main landmass
+  then restores power. The move is kept only on the same three tests as a swap,
+  and the emptied landmass then fills with coolers like any scrap. It has its
+  own 1s cap on top of the sweep's (`EVACUATE_BUDGET_MS`), sized for a phone; a
+  15-producer hub takes about 170ms on a desktop. On the eight maps with
+  obstacles cleared it brings seven to a single producing landmass at the same
+  power. Shadowspire keeps two, because its 29-producer second landmass does
+  not fit in the main one's coolers.
+
 - **Off the board counts as water**, which is a fact about our data rather than
   about the game: the game has one global map with open water between islands,
   and our eight boards are rectangles cut out of it, so the water past an edge is
@@ -180,13 +206,14 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   tell an off-board neighbour from the window's own edge — which is why
   `computeWaterAdjacency` runs on the full grid before the split and each
   sub-grid carries a `waterAdjacent` mask indexed like `buildable`.
+
 - **`ANOMALIES` is transcribed by hand from the same extractor's output**, which
   emits an anomaly record alongside the roster and drops the icons into
   `public/icons/anomaly_<id>.webp`. Unlike `BUILDING_TABLE`, **nothing splices
   this table** — the extractor writes its record and stops — so a new anomaly is
-  brought across by hand. The game's `{0}`-templated strings land here with their
-  `values` resolved, so the wording and the numbers the solver runs on cannot
-  disagree.
+  brought across by hand. The game's `{0}`-templated strings land in a builder
+  per rule that fills them from the same arguments the rule fields take, so the
+  wording and the numbers the solver runs on cannot disagree.
 
   **What catches a half-finished job is the codec's byte maps.** They are keyed
   on the closed id unions — `Record<AnomalyId, number>` and `PrestigeUpgradeId`,
@@ -200,6 +227,7 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   is not an anomaly id at all, arriving off `localStorage` or the worker
   boundary — which is the same total reading `getAnomaly` makes. Decode stays
   tolerant: an unknown byte reads as no anomaly.
+
 - **All four entries are implemented**, `none` being the one with nothing to do
   — it is an entry rather than an absence. The anomaly is threaded the whole way
   — `SolveOptions.anomalyId` / `SolveRunOptions.anomalyId`, the worker request,
@@ -209,18 +237,18 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   decomposition, before there is an island at all.
 
   **Singularity is resolved per layout, in `simulateIsland`, and it has to be.**
-  A generator's rating is a function of what its neighbours *are*, so placing
+  A generator's rating is a function of what its neighbours _are_, so placing
   one re-rates up to eight other tiles — it cannot be folded into a tile like a
   terrain bonus, and it cannot be settled at the write. `simulateIsland` copies
   the layout into `ctx.ratedLayout` (held by the island, not allocated per
   call), re-rates the affected role's tiles, and reads its figures through that.
-  The neighbour scan reads the *original* placement, since the test is on what a
+  The neighbour scan reads the _original_ placement, since the test is on what a
   neighbour is and no rating changes that — so there is no order to get right.
 
   **The bonus is on a capacity, which is why the rule is close to power-neutral
-  at full unlocks.** x4 scales a generator's *intake*, and a generator fed by
-  the reactors it already had simply fills to 25% and produces exactly what it
-  did before; the bonus is worth something only alongside more adjacent reactor
+  at full unlocks.** `isolated` scales a generator's _intake_, and a generator
+  fed by the reactors it already had simply fills to `1/isolated` and produces
+  exactly what it did before; the bonus is worth something only alongside more adjacent reactor
   heat. The penalty is real and avoidable, so the search's job under this
   anomaly is mostly to keep generators apart. Map 3 at 15s over three seeds:
   1.420e23 at best under both, where the one baseline layout whose generators
@@ -229,7 +257,7 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   way.
 
   **On a generator-bound roster it is not neutral, and the count is what the
-  search gets wrong.** `targetCompositions` is the one stage that decides *what*
+  search gets wrong.** `targetCompositions` is the one stage that decides _what_
   to build, and how many generators are worth their tile depends on what a
   generator is worth — two numbers under this rule, neither of them in the pool
   the stage draws on (`rateRole` is the identity here, since which one a tile
@@ -255,7 +283,7 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   every building — so a stage may skip the call entirely, and it therefore has
   to promise the whole of `rate` rather than only its per-tile half: `rate`
   carries a per-role factor beside its per-tile one, so the flag is false under
-  a terrain bonus *and* under a cooling pool's ×0.88, and true under `none` and
+  a terrain bonus _and_ under a cooling pool's `coolerMultiplier`, and true under `none` and
   under Singularity, which `rate` does not answer at all.
 
   It is called where a building is **written onto a tile**, never where its
@@ -290,12 +318,12 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   from 1 of 3 targets attempted to 3 of 3 with the power difference inside
   run-to-run noise, so it buys back a stage rather than a number.
 
-  **A bonus is genuinely not free power here.** A shore generator makes x1.67
-  the waste while an inland cooler still covers x1, so a cluster straddling the
+  **A bonus is genuinely not free power here.** A shore generator makes
+  `multiplier` times the waste while an inland cooler still covers x1, so a cluster straddling the
   shoreline goes offline — a layout optimised under the base rules scores
-  *lower* re-rated under Tidal. The search has to keep a cluster on one side of
+  _lower_ re-rated under Tidal. The search has to keep a cluster on one side of
   the coast, which is a harder problem than the uniform one. On Magma Rift at
-  20s, `--anomaly tidal_ascendancy` returns 181AC against the baseline's 142AC.
+  20s, `--anomaly tidal_ascendancy_legacy` returns 181AC against the baseline's 142AC.
   The seeding heuristics pick candidates by unscaled roster figures. Two ways of
   making them tile-aware were measured and **neither paid for itself**: ranking
   a candidate hub by its fit times the tile's multiplier, and restricting a
@@ -312,11 +340,11 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   layout efficiency before the terrain case existed, and the generator-bound
   3x3 in `island.test.ts` reads 267% against a bound that ignores Singularity.
   A rule that scales a whole role goes **into the roster** the bound is run on
-  (`roleRatedRoster`: coolers ×0.88 under a pool, generators ×4 under
-  Singularity), where the bound is exact in it; scaling the LP's result by the
+  (`roleRatedRoster`: coolers by `coolerMultiplier` under a pool, generators
+  by `isolated` under Singularity), where the bound is exact in it; scaling the LP's result by the
   largest factor instead rates reactors and coolers up too and would leave the
   Singularity bound 3.8x the tight one, so a near-optimal layout reads 25%. A
-  rule that scales a *tile* splits the island's tile budget by class
+  rule that scales a _tile_ splits the island's tile budget by class
   (`estimateIslandBound`, `estimateMixedIslandMaxPower`): a shore building is
   worth the shore-scaled roster, an inland one the plain roster, and both pay
   into the one heat and the one cooling total, since the bound relaxes
@@ -339,10 +367,10 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   whatever the reactors beside it make, and the all-or-nothing cooling rule
   wants coolers beside it too — out of the same eight tiles. So
   `estimateIslandMaxPower` runs on `min(gVal, 8 / (1 / rVal + wasteRatio /
-  cVal))`, and the cooler term goes under a pool, where cooling reaches the
+cVal))`, and the cooler term goes under a pool, where cooling reaches the
   whole island. The cap is homogeneous like the LP, so a rule that scales
   everything at once can never make it bite; a rule that scales **one role**
-  is what it takes, and Singularity's ×4 puts the top generator at 290% of
+  is what it takes, and Singularity's shipped `isolated` puts the top generator at 290% of
   it — without the cap the bound sits 6-9% above anything the board allows,
   reading 83-87% efficiency for layouts that are not 83-87% of anything. With
   it the maps read 89.4-95.0%, and the base, Cryo and Tidal figures do not move
@@ -380,13 +408,15 @@ they are bought with Chronons, survive a Time Jump, and stack with whatever
 anomaly is running — **multiplicatively**, so a generator under Singularity
 Isolation with Infinite Grid maxed is rated x8. The extractor's record covers
 all eleven Time Lab upgrades; the three a layout can see are **Stellar Forge**
-(every heat producer, so reactors), **Infinite Grid** (generators *and* wind
-turbines), and **Absolute Zero** (every cooler), each five levels of
-`BonusPercentage`. Absolute Zero and Infinite Grid share one curve, 0.1 to 1.0;
-Stellar Forge a shallower one, 0.1 to 0.5. That field is a fraction rather than
+(every heat producer, so reactors), **Infinite Grid** (generators _and_ wind
+turbines), and **Absolute Zero** (every cooler), each ten levels of
+`BonusPercentage`. Absolute Zero and Infinite Grid share one curve, 0.1 to 1.0
+in steps of 0.1; Stellar Forge a shallower one, 0.05 to 0.5 in steps of 0.05.
+(Until the October 2026 game update each had five, on uneven steps to the same
+ceilings.) That field is a fraction rather than
 a percent -- the same field is 0.05 on Chronon Reactor, which the game shows as
 +5% -- so the levels are worth x1.1 to x2 (Absolute Zero, Infinite Grid) and
-x1.1 to x1.5 (Stellar Forge). Like an anomaly's, the scale is uniform, so the
+x1.05 to x1.5 (Stellar Forge). Like an anomaly's, the scale is uniform, so the
 cooling a boosted producer needs grows with it. Their badges ship as
 `public/icons/prestige_<id>.webp`.
 
@@ -405,7 +435,7 @@ grid is an awaited step rather than something a constructor can do.
   input. Use `blueprintKey()`, which compares the uncompressed payload.
 - **A code says which format it is, and an old one is recognised by its
   width.** `BLUEPRINT_VERSION` is byte 0 of every new code; codes written before
-  it began with the width instead, so the two are told apart by *value* — a
+  it began with the width instead, so the two are told apart by _value_ — a
   board is at least `MIN_GRID_DIM` (5) on a side, so a first byte below that
   cannot be a width. Which is why that constant now lives in the codec rather
   than in the size stepper that enforces it, and why lowering it would not
@@ -684,3 +714,18 @@ but stage deadlines are wall-clock, so seeding narrows run-to-run variance
 rather than eliminating it. For a whole-board check use the CLI
 (`npm run solve -- --map 1 --attempts 10 --time 20`): the search is stochastic
 and map 1 swings ~2% run to run, so compare several runs, not one.
+
+**For a change to what a real run finds, use the survey before and after.** It
+solves every map (obstacles cleared) under every anomaly, island by island:
+
+```bash
+npm run survey -- --runs 5 --json solves/base.json     # on the old code
+npm run survey -- --runs 5 --compare solves/base.json  # on the new
+```
+
+`--compare` judges each island on the mean of its runs, against a noise band
+the width of the wider side's run spread, and exits 1 if any island fell below
+it. Same `--time`, `--runs` and `--seed` on both sides, same machine, same load —
+it warns if the first three differ. Expect about ±0.8% per map at 15s × 5 runs,
+so a gain smaller than that needs more runs to show; "no island got worse" is
+the claim it can make at any size.

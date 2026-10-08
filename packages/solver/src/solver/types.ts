@@ -178,9 +178,7 @@ export interface EffectiveBuilding {
  * here, and naming it here means giving it a byte.
  */
 export type PrestigeUpgradeId =
-  | "absolute_zero"
-  | "infinite_grid"
-  | "stellar_forge";
+  "absolute_zero" | "infinite_grid" | "stellar_forge";
 
 export interface PrestigeUpgrade {
   id: PrestigeUpgradeId;
@@ -216,7 +214,8 @@ export type AnomalyId =
   | "none"
   | "cryo_nexus"
   | "tidal_ascendancy"
-  | "singularity_isolation";
+  | "singularity_isolation"
+  | "tidal_ascendancy_legacy";
 
 /**
  * Identity and the game's own wording, shared by every anomaly.
@@ -235,6 +234,15 @@ export interface AnomalyBase {
   drawback: string;
   /** The full rule, near enough verbatim. */
   description: string;
+  /**
+   * Set on an older build of another anomaly that a save can still be running
+   * under — the game re-rates a timeline only when it jumps again, so a nerf
+   * leaves the old figure live until then. A variant is not a card of its own:
+   * the selector folds it under the anomaly it names, as a switch on that card.
+   */
+  variantOf?: AnomalyId;
+  /** What that switch calls this build — its figure. Set on both sides of it. */
+  variantLabel?: string;
 }
 
 /** The base rules, unmodified. */

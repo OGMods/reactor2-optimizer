@@ -371,6 +371,21 @@ describe("the rules section", () => {
     expect(decoded.rules?.anomalyId).toBe("tidal_ascendancy");
   });
 
+  it("keeps the pre-nerf Tidal apart from the live one", async () => {
+    // Two builds of one anomaly under one name; a code that collapsed them
+    // would rate an old save's board at the new figure.
+    const code = await encodeBlueprint(
+      GRID,
+      [],
+      undefined,
+      blueprintRules("tidal_ascendancy_legacy", {}),
+    );
+    expect((await payloadOf(code)).slice(7)).toEqual([0, 4, 0]);
+    expect((await decodeBlueprint(code)).rules?.anomalyId).toBe(
+      "tidal_ascendancy_legacy",
+    );
+  });
+
   it("reads rules that sit after a real tier table", async () => {
     const placements: BlueprintPlacement[] = [
       { x: 0, y: 0, buildingId: "cooler1" },

@@ -89,10 +89,7 @@
   </div>
 {/snippet}
 
-<div
-  class="grid-controls"
-  class:stacked={variant === "stacked"}
->
+<div class="grid-controls" class:stacked={variant === "stacked"}>
   {@render stepper("Width", layoutState.width, setWidth)}
   {@render stepper("Height", layoutState.height, setHeight)}
 </div>

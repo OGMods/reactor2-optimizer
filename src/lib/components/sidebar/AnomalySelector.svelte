@@ -44,6 +44,20 @@
    * irrelevant.
    */
   let disabled = $derived(solverState.isOptimizing);
+
+  /*
+   * An older build of an anomaly (`variantOf`) is not a card: in the game it is
+   * the same anomaly, and a second Tidal card would read as a fifth rule. It is
+   * a switch on its parent's card instead, and the card shows whichever build
+   * is selected so the figures printed are the ones the solver runs on.
+   */
+  const CARDS = ANOMALIES.filter((a) => !a.variantOf);
+  const variantsOf = (id: string) => {
+    const older = ANOMALIES.filter((a) => a.variantOf === id);
+    return older.length ? [ANOMALIES.find((a) => a.id === id)!, ...older] : [];
+  };
+  const familyOf = (id: string) =>
+    ANOMALIES.find((a) => a.id === id)?.variantOf ?? id;
 </script>
 
 <div class="section-box" role="radiogroup" aria-label="Timeline anomaly">
@@ -61,52 +75,96 @@
     same rules the game does.
   </p>
 
-  {#each ANOMALIES as anomaly (anomaly.id)}
-    {@const active = configState.anomalyId === anomaly.id}
-    <button
-      type="button"
-      class="anomaly-card"
-      class:active
-      role="radio"
-      aria-checked={active}
-      {disabled}
-      onclick={() => configState.setAnomaly(anomaly.id)}
-    >
+  {#each CARDS as card (card.id)}
+    {@const active = familyOf(configState.anomalyId) === card.id}
+    {@const anomaly = active ? configState.activeAnomaly : card}
+    {@const variants = variantsOf(card.id)}
+    <!--
+      A box rather than one button, so the chosen card can hold the switch
+      between builds of its anomaly: a button cannot contain buttons. The
+      selecting half is `.card-hit`, which carries the radio semantics.
+    -->
+    <div class="anomaly-card" class:active class:disabled>
       <!-- Says the one thing this list is for: which timeline you are in. -->
       <span class="select-stripe" class:on={active}></span>
 
-      <span class="card-body">
-        <span class="main-row">
-          <span class="icon-frame" class:glyph={anomaly.rule === "baseline"}>
-            {#if anomaly.rule === "baseline"}
-              <!-- Tracks the frame, which grows when the card is the chosen one. -->
-              <CircleOff size={active ? 24 : 17} />
-            {:else}
-              <img src={iconFor(anomaly.id)} alt="" class="anomaly-icon" />
-            {/if}
+      <div class="card-body">
+        <button
+          type="button"
+          class="card-hit"
+          role="radio"
+          aria-checked={active}
+          {disabled}
+          onclick={() => {
+            if (!active) configState.setAnomaly(card.id);
+          }}
+        >
+          <span class="main-row">
+            <span class="icon-frame" class:glyph={anomaly.rule === "baseline"}>
+              {#if anomaly.rule === "baseline"}
+                <!-- Tracks the frame, which grows when the card is the chosen one. -->
+                <CircleOff size={active ? 24 : 17} />
+              {:else}
+                <img src={iconFor(card.id)} alt="" class="anomaly-icon" />
+              {/if}
+            </span>
+
+            <span class="info">
+              <span class="name">{anomaly.name}</span>
+            </span>
           </span>
 
-          <span class="info">
-            <span class="name">{anomaly.name}</span>
+          <!--
+            The game's own pairing, panel for panel: what it gives you over what
+            it costs, green over red, striped. See the `--benefit-*` /
+            `--drawback-*` note in `app.css` for why these are not the board's
+            two colours.
+          -->
+          <span class="effects">
+            <span class="effect benefit">{anomaly.benefit}</span>
+            <span class="effect drawback">{anomaly.drawback}</span>
           </span>
-        </span>
+        </button>
 
         <!--
-          The game's own pairing, panel for panel: what it gives you over what
-          it costs, green over red, striped. See the `--benefit-*` /
-          `--drawback-*` note in `app.css` for why these are not the board's
-          two colours.
+          Only on the chosen card: it is a detail of the timeline the player is
+          in, not something to pick between anomalies by. Under the benefit line
+          because that is the figure it changes.
         -->
-        <span class="effects">
-          <span class="effect benefit">{anomaly.benefit}</span>
-          <span class="effect drawback">{anomaly.drawback}</span>
-        </span>
+        {#if active && variants.length}
+          <div class="variant-row">
+            <span class="lbl">Bonus</span>
+            <div
+              class="variants"
+              role="radiogroup"
+              aria-label="{card.name} bonus"
+            >
+              {#each variants as v (v.id)}
+                {@const on = configState.anomalyId === v.id}
+                <button
+                  type="button"
+                  class="variant"
+                  class:on
+                  role="radio"
+                  aria-checked={on}
+                  title={v.variantOf
+                    ? "Pre-nerf figure: an old save keeps it until its next jump"
+                    : undefined}
+                  {disabled}
+                  onclick={() => configState.setAnomaly(v.id)}
+                >
+                  {v.variantLabel}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
 
         {#if active}
           <span class="description">{anomaly.description}</span>
         {/if}
-      </span>
-    </button>
+      </div>
+    </div>
   {/each}
 </div>
 
@@ -150,19 +208,17 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     overflow: hidden;
-    cursor: pointer;
     transition:
       border-color var(--dur-fast) var(--ease),
       background var(--dur-fast) var(--ease);
   }
 
-  .anomaly-card:hover:not(:disabled) {
+  .anomaly-card:hover:not(.disabled) {
     border-color: var(--anomaly-selected-glow);
   }
 
-  .anomaly-card:disabled {
+  .anomaly-card.disabled {
     opacity: 0.5;
-    cursor: default;
   }
 
   /*
@@ -210,6 +266,31 @@
   .anomaly-card.active .card-body {
     gap: 0.5rem;
     padding: 0.6rem 0.7rem;
+  }
+
+  /* The selecting half of the card: a bare button laid out as the column it
+     replaced, so the card reads exactly as it did when it was one button. */
+  .card-hit {
+    display: flex;
+    flex-direction: column;
+    gap: inherit;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    background: none;
+    border: 0;
+    cursor: pointer;
+  }
+
+  .card-hit:disabled {
+    cursor: default;
+  }
+
+  .anomaly-card.active .card-hit {
+    cursor: default;
   }
 
   .main-row {
@@ -333,8 +414,64 @@
     padding-top: 0.5rem;
   }
 
+  /*
+   * The research cards' level chips (`PrestigeUpgrades`' `.tier-btn`), copied
+   * rather than shared: they sit one section up on this same tab and make the
+   * same kind of choice — which build of this thing your timeline holds.
+   * Wider than a level chip only because the label is a figure, not a digit.
+   */
+  .variant-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .lbl {
+    font-size: var(--fs-2xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .variants {
+    display: flex;
+    gap: 3px;
+  }
+
+  .variant {
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    color: var(--text-dim);
+    font-size: var(--fs-2xs);
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    transition: all var(--dur-fast) var(--ease);
+  }
+
+  .variant:disabled {
+    cursor: default;
+  }
+
+  .variant:not(:disabled):hover {
+    color: var(--text);
+    border-color: var(--accent-dim);
+  }
+
+  .variant.on {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
   @media (pointer: coarse) {
-    .anomaly-card {
+    .card-hit {
       min-height: var(--tap);
     }
   }

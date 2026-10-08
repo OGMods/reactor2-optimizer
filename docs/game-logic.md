@@ -401,11 +401,11 @@ other eight move research income, research time, Chronons, obstacle-removal
 cost, energy sale price and building prices — all decided before a board is
 laid out, so none can change which layout is best.
 
-| research           | scales                                        | levels (×)  |
-| ------------------ | --------------------------------------------- | ----------- |
-| **Stellar Forge**  | every heat producer's heat output              | ×1.1 – ×1.5 |
-| **Infinite Grid**  | every generator's and wind turbine's heat intake, energy and overheat capacity | ×1.1 – ×2.0 |
-| **Absolute Zero**  | every cooler's cooling                         | ×1.1 – ×2.0 |
+| research          | scales                                                                         | levels (×)  |
+| ----------------- | ------------------------------------------------------------------------------ | ----------- |
+| **Stellar Forge** | every heat producer's heat output                                              | ×1.1 – ×1.5 |
+| **Infinite Grid** | every generator's and wind turbine's heat intake, energy and overheat capacity | ×1.1 – ×2.0 |
+| **Absolute Zero** | every cooler's cooling                                                         | ×1.1 – ×2.0 |
 
 Absolute Zero and Infinite Grid share one bonus curve — 0.1, 0.25, 0.45, 0.7,
 1.0 — and Stellar Forge a shallower one — 0.1, 0.2, 0.3, 0.4, 0.5. The game
@@ -415,7 +415,7 @@ authors them as a bonus fraction and shows them as "+10%" through "+100%" (or
 **The roles do not overlap, and the boundary is the class of building rather
 than the catalogue's grouping.** The game's catalogue files reactors and wind
 turbines together under one "heat producer" category, but a wind turbine is a
-*power source* in the code, so Stellar Forge does not touch it — Infinite Grid
+_power source_ in the code, so Stellar Forge does not touch it — Infinite Grid
 does, which is why that one goes out of its way to name wind turbines. A reactor
 is the only heat producer the shipped roster has, so in practice Stellar Forge
 is "reactors"; it would cover any other heat producer the game added.
@@ -436,6 +436,14 @@ An anomaly never adds a building, removes one, or changes the grid. It changes
 either **what a placed building's figures are** or **how a supply gets shared
 out**, and the three that exist so far divide cleanly along that line.
 
+**This document does not restate the figures.** Each anomaly's numbers are
+written once, in `packages/solver/src/data/anomalies.ts`, and named here by the
+field that holds them: Cryo Nexus's `coolerMultiplier`, Tidal Ascendancy's
+`multiplier`, Singularity Isolation's `isolated` and `crowded`. The game's own
+text is quoted below with those names in place of its `{0}` placeholders, which
+is how the table fills them. The game rebalances these; a copy here is a copy
+that goes stale.
+
 ### What a multiplier actually multiplies
 
 This applies to Time Lab research just as much as to an anomaly — the two enter
@@ -449,13 +457,13 @@ four roles:
 
 | the game says     | the figure                                                                      |
 | ----------------- | ------------------------------------------------------------------------------- |
-| Heat              | a reactor's output, a generator's intake capacity, a direct producer's own heat  |
-| Energy            | what a generator or direct producer puts out at full                             |
-| Cooling           | what a cooler absorbs                                                            |
-| overheat capacity | the size of a power source's waste-heat store — not the waste it makes           |
+| Heat              | a reactor's output, a generator's intake capacity, a direct producer's own heat |
+| Energy            | what a generator or direct producer puts out at full                            |
+| Cooling           | what a cooler absorbs                                                           |
+| overheat capacity | the size of a power source's waste-heat store — not the waste it makes          |
 
-So a building with a ×1.67 bonus is simply a building whose whole tier is worth
-1.67× as much: it absorbs more, produces more, and needs proportionally more
+So a building with a ×k bonus is simply a building whose whole tier is worth k
+times as much: it absorbs more, produces more, and needs proportionally more
 cooling. A bonus is **not** free power on its own — it moves the whole balance of
 a layout, and a scaled producer that outruns its coolers stops running like any
 other.
@@ -485,7 +493,7 @@ waste    = snapToAuthoredPrecision(heat − energy)     ← again, from the new 
 
 Scaling the authored waste directly instead — `authoredWaste × timeLab ×
 anomaly` — is wrong. It agrees to about fifteen digits and disagrees in the
-last, because the snap is a decimal rounding and it is applied to the *scaled*
+last, because the snap is a decimal rounding and it is applied to the _scaled_
 difference, not carried along from the table. The same is true of carrying a
 once-derived waste through the second multiply: the last derivation wins.
 
@@ -494,20 +502,20 @@ as raw products, because a multiplier is a runtime multiply rather than an
 authored table entry; the derived waste is the only exception, and it is
 re-derived wherever the pair it comes from is scaled again.
 
-**Anomaly and research compose multiplicatively.** A generator under Singularity
-Isolation (×4) with Infinite Grid maxed (×2) is rated ×8. That is a
-*rating*, not a promise of 8× the power: what it actually produces still
-depends on how much heat reaches it.
+**Anomaly and research compose multiplicatively.** An isolated generator under
+Singularity Isolation with Infinite Grid maxed (×2) is rated `isolated` × 2.
+That is a _rating_, not a promise of that much more power: what it actually
+produces still depends on how much heat reaches it.
 
 It is also not always the same double as one combined multiply, and the
-difference is real rather than pedantic — though not at this pair, since ×2 and
-×4 are powers of two and scale exactly. Infinite Grid at level 4 (×1.7) on a
-crowded generator (×0.8) rates generator7's fourth tier at 1.2036e22 as two
-successive scalings and 1.2036000000000001e22 as one ×1.36. The **order**
-matters for the same reason — the same tier under Infinite Grid at level 2
-(×1.25) then a ×1.67 shore bonus is 1.8474375e22 where the reverse is
-1.8474374999999997e22 — so research first, anomaly second, exactly as the two
-getters run.
+difference is real rather than pedantic. `tests/scaling.test.ts` pins it with two
+fixed factors of its own, `SHORE` and `CROWDED` — literals there, because the
+bits belong to those numbers: Infinite Grid at level 7 (×1.7) on a `CROWDED`
+generator rates generator7's fourth tier one way as two successive scalings and
+one ULP off as a single combined multiply. The **order** matters for the same
+reason — the same tier under Infinite Grid at level 3 (×1.3) then a `SHORE`
+tile differs in the last bit from the reverse — so research first, anomaly
+second, exactly as the two getters run.
 
 And **overheat capacity scaling changes nothing for a sustainable layout**,
 since the store it sizes never fills. It is listed because the game lists it.
@@ -517,8 +525,8 @@ since the store it sizes never fills. It is listed because the game lists it.
 > All Heat Sinks on an island add their Cooling to one shared pool. It can cool
 > every Power Source on that island, no matter how far away it is. If there is
 > not enough Cooling, every Power Source receives the same percentage of what it
-> needs. Each Heat Sink contributes ×0.88 of its normal Cooling. Cooling does
-> not carry over to other islands.
+> needs. Each Heat Sink contributes ×`coolerMultiplier` of its normal Cooling.
+> Cooling does not carry over to other islands.
 
 This replaces the cooling half of the distribution wholesale. Adjacency stops
 mattering for cooling, and so do the fair split and the cleanup pass — there is
@@ -532,7 +540,7 @@ stored; and if the pool falls short, everyone is served the same fraction of
 what they asked for. **Wind turbines draw from it too** — they are power sources
 like any other, even though they take no part in heat delivery.
 
-The ×0.88 applies to each cooler's own cooling rating, so it is what the game
+The `coolerMultiplier` applies to each cooler's own cooling rating, so it is what the game
 shows on that cooler, not a separate charge levied at the pool.
 
 Two consequences fall straight out of it, and both matter more than the rule
@@ -558,7 +566,7 @@ itself:
 **"An island" here means the whole map.** Gale Hills is an island; so is Ash
 Bay. The rule is board-wide: every cooler anywhere on the map pays into one
 pool, and every power source anywhere on the map draws from it. "Cooling does
-not carry over to other islands" means it does not carry to a *different map* —
+not carry over to other islands" means it does not carry to a _different map_ —
 there is nothing finer than the board for this pool to respect.
 
 This is the one rule in the game that reaches across the whole board, and every
@@ -566,7 +574,7 @@ other rule in this document is the opposite: adjacency-bound, which is why a
 board splits into independent patches of connected grass and each can be solved
 on its own. Under this anomaly they are not independent.
 
-They are still *nearly* independent, and the shape of what survives is worth
+They are still _nearly_ independent, and the shape of what survives is worth
 being precise about, because it is what decides how hard this is to solve:
 
 - **Heat is untouched.** Reactors still only reach adjacent generators, so which
@@ -574,7 +582,7 @@ being precise about, because it is what decides how hard this is to solve:
   question about that patch alone.
 - **The patches are coupled by exactly two numbers.** A layout on a patch makes
   some power, generates some waste, and contributes some cooling; the board runs
-  on whether the cooling *summed over every patch* covers the waste summed over
+  on whether the cooling _summed over every patch_ covers the waste summed over
   every patch. Nothing else crosses.
 
 So a patch is no longer described by "the most power it can make" but by a
@@ -607,9 +615,16 @@ they are unbuildable ground.
 
 ### Tidal Ascendancy — a bonus for building on the shore
 
-> Production buildings next to water get a ×1.67 multiplier. Corners count too.
-> The bonus affects Energy, Heat, Cooling, and overheat capacity. Buildings away
-> from water work normally and get no bonus.
+> Production buildings next to water get a ×`multiplier` multiplier. Corners
+> count too. The bonus affects Energy, Heat, Cooling, and overheat capacity.
+> Buildings away from water work normally and get no bonus.
+
+**The game has nerfed the multiplier once.** A timeline keeps the figure it
+jumped in under until it jumps again, so a save from before the nerf still runs
+at the old one: the table carries both, `tidal_ascendancy` at the live figure
+and `tidal_ascendancy_legacy` at the pre-nerf one, and the Tidal card switches
+between them. Tests that pin an exact double use the legacy entry, whose figure
+can no longer change.
 
 A per-tile uniform scale, decided by terrain alone: a building is scaled if any
 of the eight tiles around it is water. Nothing about the layout can change which
@@ -619,9 +634,10 @@ per island and then treat as part of the board.
 It is the first rule in the game where a non-buildable tile does anything at all.
 
 It covers **every** role, not only the ones "production building" sounds like: a
-cooler beside water absorbs ×1.67, a reactor beside water puts out ×1.67, and a
-generator or wind turbine beside water has all three of its figures scaled. And
-one water neighbour is worth the same as eight — the bonus does not stack.
+cooler beside water absorbs ×`multiplier`, a reactor beside water puts out
+×`multiplier`, and a generator or wind turbine beside water has all three of its
+figures scaled. And one water neighbour is worth the same as eight — the bonus
+does not stack.
 
 **A pond is not water.** It is an obstacle — scenery you cannot build on, like a
 rock or a tree — and it grants no shore bonus. Only the water tile proper does.
@@ -640,17 +656,17 @@ perimeter is shore and its 64-tile interior is not.
 
 The bonus is not a rare one: between 36% and 45% of the grass on every shipped
 map is water-adjacent, so on any of them something close to half the buildable
-board is worth ×1.67. That makes the shoreline the most valuable ground on the
+board is worth ×`multiplier`. That makes the shoreline the most valuable ground on the
 map and this anomaly a genuine change of shape rather than a modifier, since the
 best layout under it wants its producers on a coastline whose length is fixed by
 the terrain.
 
 ### Singularity Isolation — generators want elbow room
 
-> A Generator with no other Generator next to it gets ×4 Energy output, Heat
-> output, and overheat capacity. If another Generator touches it, including at a
-> corner, those values drop to ×0.8. More neighbours do not make the penalty
-> worse.
+> A Generator with no other Generator next to it gets ×`isolated` Energy
+> output, Heat output, and overheat capacity. If another Generator touches it,
+> including at a corner, those values drop to ×`crowded`. More neighbours do not
+> make the penalty worse.
 
 Unlike the other two, this one depends on **the layout itself**: a generator's
 figures are a function of what its neighbours are, so they change as the search

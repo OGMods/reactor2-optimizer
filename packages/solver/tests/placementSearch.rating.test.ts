@@ -29,7 +29,13 @@ import {
 import { Pacer } from "../src/solver/pacer";
 import { downgradeOversized, internals } from "../src/solver/placementSearch";
 import { simulateIsland } from "../src/solver/simulate";
-import { generator, reactor, cooler, basicRoster } from "./helpers";
+import {
+  anomalyOfRule,
+  generator,
+  reactor,
+  cooler,
+  basicRoster,
+} from "./helpers";
 import type { EffectiveBuilding, Placement } from "../src/solver/types";
 
 vi.mock("../src/solver/simulate", async (importOriginal) => {
@@ -37,8 +43,10 @@ vi.mock("../src/solver/simulate", async (importOriginal) => {
   return { ...real, simulateIsland: vi.fn(real.simulateIsland) };
 });
 
-const tidal = getAnomaly("tidal_ascendancy");
-const singularity = getAnomaly("singularity_isolation");
+// The pre-nerf build, whose figure is frozen: the worked numbers below (a shore
+// reactor at 167) are 100 at its multiplier.
+const tidal = anomalyOfRule("tidal_ascendancy_legacy", "terrain_affinity");
+const singularity = anomalyOfRule("singularity_isolation", "role_isolation");
 
 /**
  * Two hubs' worth of grass, one on the board's edge and one walled in by rock,
@@ -133,10 +141,10 @@ describe("what to build, counted in the layout's units", () => {
    * The same mistake as the rest of this file, made by the one stage that
    * decides *what* to build rather than where to put it. `targetCompositions`
    * counts, and counting needs to know what a generator is worth — which under
-   * `role_isolation` is two numbers, x4 with no generator beside it and x0.8
-   * with. Which a tile gets is the layout's business, so neither is in the pool
-   * the stage draws on, and the count it produced was the one for a roster
-   * nobody is playing.
+   * `role_isolation` is two numbers, `isolated` with no generator beside it and
+   * `crowded` with. Which a tile gets is the layout's business, so neither is in
+   * the pool the stage draws on, and the count it produced was the one for a
+   * roster nobody is playing.
    *
    * Sizing at the bonus alone is not the fix either: it asks Gale Hills at
    * generator7 tier 1 for 20 generators on an island that can keep 15 apart,
@@ -184,7 +192,7 @@ describe("what to build, counted in the layout's units", () => {
     const table = generatorCapacityTable(island, ctx, G)!;
 
     // Four generators on a 4x4 can all stand clear of each other...
-    expect(table[4]).toBe(4 * 40 * 4);
+    expect(table[4]).toBe(4 * 40 * singularity.isolated);
     // ...and a fifth cannot be put anywhere that is not beside one of them, so
     // it costs one of the four its bonus rather than adding to them.
     expect(table[5]).toBeLessThan(table[4]);
@@ -222,7 +230,7 @@ describe("the island's rating ceiling", () => {
   it("is exactly one under the rules that leave the roster alone", () => {
     for (const anomaly of [getAnomaly("none"), getAnomaly("cryo_nexus")]) {
       const ctx = buildIslandContext(makeGrid(["GGG"]), undefined, anomaly);
-      // Cryo's 0.88 only ever costs cooling, so it cannot lift a ceiling.
+      // Cryo's `coolerMultiplier` only ever costs cooling, so it cannot lift a ceiling.
       expect(islandRatingCeiling(ctx, probes, false), anomaly.id).toBe(1);
     }
   });
@@ -234,7 +242,7 @@ describe("the island's rating ceiling", () => {
         probes,
         false,
       ),
-    ).toBeCloseTo(1.67, 9);
+    ).toBeCloseTo(tidal.multiplier, 9);
     // ...and one where none of it does: walled in, well away from the board.
     expect(
       islandRatingCeiling(
@@ -393,12 +401,13 @@ describe("right-sizing a layout whose ratings come from its own shape", () => {
 
   it("hands back the capacity an isolated generator never uses", () => {
     /*
-     * A lone generator is rated x4, so the authored 320 tile is running at 1280
-     * and absorbing 300 of it. The smallest tier that covers that load is the
-     * authored 120 — rated 480 — and at the same power, because a generator's
-     * energy scales with how full it is: 0.75 x 1280 x 300/1280 is 0.75 x 480 x
-     * 300/480. Compared in the roster's units instead, 120 does not cover 300 and
-     * the pass leaves 980 of intake the player paid for and nothing uses.
+     * A lone generator is rated by `isolated` — 1280 for the authored 320 tile
+     * at the shipped figure — and absorbing 300 of it. The smallest tier that
+     * covers that load is the authored 120 — rated 480 — and at the same power,
+     * because a generator's energy scales with how full it is: 0.75 x 1280 x
+     * 300/1280 is 0.75 x 480 x 300/480. Compared in the roster's units instead,
+     * 120 does not cover 300 and the pass leaves 980 of intake the player paid
+     * for and nothing uses.
      *
      * The worked example one step up is NOT a downgrade and must not become one:
      * the same tile absorbing 700 keeps the 320, since 120 rated 480 cannot carry
@@ -435,11 +444,12 @@ describe("right-sizing a layout whose ratings come from its own shape", () => {
 
   it("leaves a crowded generator a tier that carries its penalised load", () => {
     /*
-     * The other direction. Two generators touching are rated x0.8, so a candidate
-     * that covers the load in the roster's units may not cover it at all once
-     * rated — and this pass is not allowed to cost power. The guard is the
-     * re-simulation, which is why nothing was ever WRONG here; the assertion is
-     * the property the pass sells, stated in the units the layout is rated in.
+     * The other direction. Two generators touching are rated by `crowded`, so a
+     * candidate that covers the load in the roster's units may not cover it at
+     * all once rated — and this pass is not allowed to cost power. The guard is
+     * the re-simulation, which is why nothing was ever WRONG here; the
+     * assertion is the property the pass sells, stated in the units the layout
+     * is rated in.
      */
     const ctx = buildIslandContext(
       makeGrid(["GGGG", "GGGG"]),

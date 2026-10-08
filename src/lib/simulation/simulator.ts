@@ -56,10 +56,7 @@ function terrainSignature(grid: Tile[][]): number {
   return h;
 }
 
-function contextFor(
-  grid: Tile[][],
-  anomaly: AnomalyDefinition,
-): IslandContext {
+function contextFor(grid: Tile[][], anomaly: AnomalyDefinition): IslandContext {
   const signature = terrainSignature(grid);
   if (
     cached &&

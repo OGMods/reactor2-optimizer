@@ -266,10 +266,11 @@ function offlineProducers(
  * Against `ratedValue`, never `baseValue`: `heatProduced` is what the
  * distribution actually sent, capped by the tile's RATING, so measuring it
  * against the authored tier compares a scaled delivery with an unscaled ceiling
- * and only calls a reactor under-fed below 1/k fill — 60% on a Tidal shore,
- * 66.7% under a maxed Stellar Forge. The move then stops firing on much of what
- * it exists for, with no number anywhere disagreeing. It is a named function so
- * that the reading can be pinned by a test rather than only stated here.
+ * and only calls a reactor under-fed below 1/k fill for a tile rated k — on a
+ * Tidal shore k is its `multiplier`, under a maxed Stellar Forge the
+ * research's. The move then stops firing on much of what it exists for, with
+ * no number anywhere disagreeing. It is a named function so that the reading
+ * can be pinned by a test rather than only stated here.
  */
 function isUnderFed(row: SimPlacedBuilding): boolean {
   return row.heatProduced > EPS && row.heatProduced < row.ratedValue - EPS;
@@ -1185,10 +1186,12 @@ async function hillClimb(
   // the layout were being accepted, and the walk never climbed back.
   //
   // It is read off the PLAIN roster, so under a rule that rates a tile above it
-  // the walk runs colder than this calibration intends — a move on a x1.67 shore
-  // is worth x1.67 of one here. Scaling it by `islandRatingCeiling` was measured:
-  // Tidal on map 3 at 15s over three seeds went 176/178/179AC to 179/181/178AC,
-  // and Singularity (x4) at 30s over five seeds on map 3 142/140/142/142/140AC to
+  // the walk runs colder than this calibration intends — a move on a Tidal
+  // shore is worth its `multiplier` times one here. Scaling it by
+  // `islandRatingCeiling` was measured: Tidal (the pre-nerf
+  // `tidal_ascendancy_legacy`) on map 3 at 15s over three seeds went
+  // 176/178/179AC to 179/181/178AC, and Singularity at 30s over five seeds on
+  // map 3 142/140/142/142/140AC to
   // 140/139/140/142/142AC and on map 7 274/271/271/271/274AC to
   // 267/271/271/271/274AC — inside run-to-run noise, so the plain figure is kept.
   // Anyone re-measuring should use a longer budget and more seeds than that.
@@ -2022,10 +2025,11 @@ function tileLoad(building: EffectiveBuilding, row: SimPlacedBuilding): number {
  * `ctx.rate` answers this for every rule but one: a role isolation multiplier is
  * a function of what a tile's NEIGHBOURS are, so `rate` is the identity under it
  * and `simulateIsland` resolves it per layout through `rateIsolated` instead.
- * That leaves right-sizing measuring a x4 load against a x1 capacity: an
- * isolated generator authored 320, rated 1280 and absorbing 300, was never
- * offered the authored 120 tier that covers it at its own rating of 480, so the
- * pass left 980 of intake nobody pays it to have — which is exactly the money it
+ * That leaves right-sizing measuring a load rated by `isolated` against an
+ * unrated capacity: an isolated generator authored 320, rated 1280 (at the
+ * `isolated` the rule shipped with) and absorbing 300, was never offered the
+ * authored 120 tier that covers it at its own rating of 480, so the pass left
+ * 980 of intake nobody pays it to have — which is exactly the money it
  * exists to hand back. In the other direction the plain figure is over-generous,
  * and there the re-simulation below catches it, so only the waste escaped.
  *
@@ -2186,8 +2190,233 @@ export function downgradeOversized(
  */
 const GATHER_BUDGET_MS = 150;
 
+/**
+ * How long `evacuateMinorLandmasses` may spend, on top of `GATHER_BUDGET_MS`
+ * and taken first. Spent only on a board with producers on more than one
+ * landmass, and the pass stops as soon as a hub is placed — moving a
+ * 15-producer hub costs about 170ms on a desktop. The cap is sized for a phone,
+ * several times slower, where a tight one would make the pass silently do
+ * nothing; a second is small beside a 10-30s attempt. Out of time, the layout
+ * stays as it was.
+ */
+const EVACUATE_BUDGET_MS = 1000;
+
 /** Chebyshev radius of the patch `gatherPooledCoolers` anchors on. */
 const GATHER_ANCHOR_RADIUS = 2;
+
+/** Each tile's landmass, numbered from 0, and how many there are. */
+function landmasses(ctx: IslandContext): {
+  component: Int32Array;
+  count: number;
+} {
+  const component = new Int32Array(ctx.n).fill(-1);
+  let count = 0;
+  for (let start = 0; start < ctx.n; start++) {
+    if (component[start] >= 0) continue;
+    const id = count++;
+    const stack = [start];
+    component[start] = id;
+    while (stack.length > 0) {
+      const nb = ctx.neighbors[stack.pop()!];
+      for (let k = 0; k < nb.length; k++) {
+        if (component[nb[k]] < 0) {
+          component[nb[k]] = id;
+          stack.push(nb[k]);
+        }
+      }
+    }
+  }
+  return { component, count };
+}
+
+/**
+ * Under a shared cooling pool, moves the hubs off every landmass but the main
+ * one, so that landmass can be given to the coolers.
+ *
+ * `gatherPooledCoolers` moves one tile at a time, and that cannot move a hub:
+ * a generator taken from its reactors loses power at every step of the way, so
+ * the hub on a small second landmass stays there and its coolers stay with it.
+ * This moves a landmass's producers all at once instead. Each takes a tile on
+ * the main landmass, the one holding the most producers, and the cooler it
+ * displaces goes to one of the tiles the producers left — so the pool's total
+ * and the board's composition never change, and the landmass comes out
+ * producer-free for the sweep to fill.
+ *
+ * The producers are placed greedily, whichever of them is worth the most power
+ * on whichever free tile goes next, and then the main landmass is swapped
+ * into shape until power is back (`relocateHub`). A landmass is evacuated only if the result
+ * holds the power floor, keeps every producer online and passes the upgrade
+ * plan; otherwise the layout is left exactly as it was. Smallest first, since a
+ * hub of a few producers is the likeliest to fit.
+ */
+function evacuateMinorLandmasses(
+  current: Placement,
+  ctx: IslandContext,
+  component: Int32Array,
+  count: number,
+  floor: number,
+  deadlineMs: number,
+): void {
+  const producersOn = new Array<number>(count).fill(0);
+  for (let t = 0; t < ctx.n; t++) {
+    const b = current[t];
+    if (b !== null && b.type !== "cooler") producersOn[component[t]]++;
+  }
+  let main = 0;
+  for (let c = 1; c < count; c++)
+    if (producersOn[c] > producersOn[main]) main = c;
+
+  const minors: number[] = [];
+  for (let c = 0; c < count; c++)
+    if (c !== main && producersOn[c] > 0) minors.push(c);
+  minors.sort((a, b) => producersOn[a] - producersOn[b] || a - b);
+
+  const trial = current.slice();
+  for (const minor of minors) {
+    if (performance.now() >= deadlineMs) return;
+    copyInto(trial, current);
+    if (relocateHub(trial, ctx, component, minor, main, floor, deadlineMs))
+      copyInto(current, trial);
+  }
+}
+
+/**
+ * Moves every producer on `minor` onto `main`, in place. True when the result
+ * is a layout `evacuateMinorLandmasses` may keep; `trial` is junk otherwise.
+ */
+function relocateHub(
+  trial: Placement,
+  ctx: IslandContext,
+  component: Int32Array,
+  minor: number,
+  main: number,
+  floor: number,
+  deadlineMs: number,
+): boolean {
+  const movers: EffectiveBuilding[] = [];
+  const vacated: number[] = [];
+  for (let t = 0; t < ctx.n; t++) {
+    const b = trial[t];
+    if (component[t] !== minor || b === null || b.type === "cooler") continue;
+    movers.push(b);
+    vacated.push(t);
+    trial[t] = null;
+  }
+
+  // A tile on the main landmass a producer may take: empty, or a cooler that
+  // can step across to the landmass being emptied.
+  const free = (t: number): boolean =>
+    component[t] === main && (trial[t] === null || trial[t]!.type === "cooler");
+  const freeAround = (t: number): number => {
+    let n = 0;
+    for (const u of ctx.neighbors[t]) if (free(u)) n++;
+    return n;
+  };
+  // A reactor makes power only through a generator beside it, so a tile with
+  // none is not worth simulating.
+  const besideGenerator = (t: number): boolean => {
+    for (const u of ctx.neighbors[t])
+      if (trial[u] !== null && trial[u]!.type === "generator") return true;
+    return false;
+  };
+
+  let nextVacated = 0;
+  while (movers.length > 0) {
+    if (performance.now() >= deadlineMs) return false;
+
+    let bestPower = -Infinity;
+    let bestRoom = -1;
+    let bestTile = -1;
+    let bestMover = -1;
+    // A reactor beside no generator is still placed when nothing better is
+    // left — a generator that took the strongest tile may have taken the last
+    // free one beside it too — and the swap descent below moves it into place.
+    for (const anywhere of [false, true]) {
+      const tried = new Set<string>();
+      for (let m = 0; m < movers.length; m++) {
+        const b = movers[m];
+        if (tried.has(b.id)) continue;
+        tried.add(b.id);
+        for (const t of ctx.tiles) {
+          if (!free(t)) continue;
+          if (!anywhere && isReactor(b) && !besideGenerator(t)) continue;
+          const held = trial[t];
+          put(trial, ctx, t, b);
+          const power = simulateIsland(trial, ctx).totalPower;
+          trial[t] = held;
+          // On a tie, the tile with the most room left around it, so a
+          // generator lands where its reactors can follow.
+          const room = freeAround(t);
+          if (power > bestPower || (power === bestPower && room > bestRoom)) {
+            bestPower = power;
+            bestRoom = room;
+            bestTile = t;
+            bestMover = m;
+          }
+        }
+      }
+      if (bestTile >= 0) break;
+    }
+    if (bestTile < 0) return false;
+
+    const displaced = trial[bestTile];
+    put(trial, ctx, bestTile, movers[bestMover]);
+    // The displaced cooler crosses over at once, so the pool is whole while
+    // the rest of the hub is placed.
+    if (displaced !== null) put(trial, ctx, vacated[nextVacated++], displaced);
+    movers.splice(bestMover, 1);
+  }
+
+  // The greedy order cannot see that a reactor placed early sits on the tile a
+  // later generator wanted, and the hubs already on the main landmass were
+  // built around a board that had no room for these. So: a swap descent over
+  // the whole landmass, nearby pairs only (as `arrangeComposition` does), first
+  // gain taken, until the floor is met. Swaps never change what is on the
+  // board, and the emptied landmass is not in the pairs, so nothing returns to
+  // it. On a cleared Entropy Isles under Cryo the greedy reaches 98.5% of the
+  // floor and one pass of this closes the rest.
+  const onMain: number[] = [];
+  for (const t of ctx.tiles) if (component[t] === main) onMain.push(t);
+  const pairs: [number, number][] = [];
+  for (let i = 0; i < onMain.length; i++)
+    for (let j = i + 1; j < onMain.length; j++)
+      if (chebyshev(ctx, onMain[i], onMain[j]) <= SWAP_RADIUS)
+        pairs.push([onMain[i], onMain[j]]);
+
+  const producer = (b: EffectiveBuilding | null): boolean =>
+    b !== null && b.type !== "cooler";
+  let power = simulateIsland(trial, ctx).totalPower;
+  let improved = true;
+  while (improved && !covers(power, floor)) {
+    improved = false;
+    for (const [a, b] of pairs) {
+      if (performance.now() >= deadlineMs) return false;
+      const va = trial[a];
+      const vb = trial[b];
+      // Coolers and empty tiles are interchangeable under the pool.
+      if (!producer(va) && !producer(vb)) continue;
+      if (ratedFor(ctx, a, vb) === va) continue;
+      put(trial, ctx, a, vb);
+      put(trial, ctx, b, va);
+      const swapped = simulateIsland(trial, ctx).totalPower;
+      if (swapped > power) {
+        power = swapped;
+        improved = true;
+        if (covers(power, floor)) break;
+        continue;
+      }
+      put(trial, ctx, a, va);
+      put(trial, ctx, b, vb);
+    }
+  }
+
+  const final = simulateIsland(trial, ctx);
+  return (
+    covers(final.totalPower, floor) &&
+    !anyOfflineProducer(trial, final.placements) &&
+    planHolds(trial, ctx)
+  );
+}
 
 /**
  * Under a shared cooling pool, pulls the coolers into one area of the board
@@ -2221,6 +2450,10 @@ function gatherPooledCoolers(
   effectiveBuildings: EffectiveBuilding[],
   ctx: IslandContext,
   deadlineMs: number,
+  evacuateDeadlineMs = Math.min(
+    deadlineMs,
+    performance.now() + EVACUATE_BUDGET_MS,
+  ),
 ): { rows: SimPlacedBuilding[]; power: number } {
   if (ctx.anomaly.rule !== "shared_cooling" || rows.length === 0)
     return { rows, power };
@@ -2233,29 +2466,24 @@ function gatherPooledCoolers(
     put(current, ctx, row.idx, building);
   }
 
-  // Landmasses, and which of them hold a producer, read once from the layout
-  // as handed over.
-  const component = new Int32Array(ctx.n).fill(-1);
-  const working: boolean[] = [];
-  for (let start = 0; start < ctx.n; start++) {
-    if (component[start] >= 0) continue;
-    const id = working.length;
-    let hasProducer = false;
-    const stack = [start];
-    component[start] = id;
-    while (stack.length > 0) {
-      const t = stack.pop()!;
-      const b = current[t];
-      if (b !== null && b.type !== "cooler") hasProducer = true;
-      const nb = ctx.neighbors[t];
-      for (let k = 0; k < nb.length; k++) {
-        if (component[nb[k]] < 0) {
-          component[nb[k]] = id;
-          stack.push(nb[k]);
-        }
-      }
-    }
-    working.push(hasProducer);
+  const { component, count } = landmasses(ctx);
+  // The callers' deadline covers both budgets; capping the evacuation at its
+  // own (the default) leaves the sweep at least `GATHER_BUDGET_MS`.
+  evacuateMinorLandmasses(
+    current,
+    ctx,
+    component,
+    count,
+    power,
+    evacuateDeadlineMs,
+  );
+
+  // Which landmasses hold a producer, read after the evacuation so a landmass
+  // it emptied fills with coolers first, like any other scrap.
+  const working = new Array<boolean>(count).fill(false);
+  for (let t = 0; t < ctx.n; t++) {
+    const b = current[t];
+    if (b !== null && b.type !== "cooler") working[component[t]] = true;
   }
 
   const movable = (t: number): boolean => {
@@ -2373,7 +2601,8 @@ function finalizeAlternates(
   // One gathering budget for the whole shortlist rather than one each, so a
   // long shortlist cannot add a second to the run. An alternate the deadline
   // cuts short is still valid, only less gathered.
-  const gatherDeadlineMs = performance.now() + GATHER_BUDGET_MS;
+  const gatherDeadlineMs =
+    performance.now() + EVACUATE_BUDGET_MS + GATHER_BUDGET_MS;
 
   for (const layout of collector.layouts()) {
     const pruned = pruneDeadWeight(layout, ctx);
@@ -2538,7 +2767,7 @@ export async function solveIsland(
   }
 
   // The pools every stage draws on, in the units the board will hold: a rule
-  // that scales a whole role (a cooling pool's x0.88) is folded in here, so the
+  // that scales a whole role (a cooling pool's `coolerMultiplier`) is folded in here, so the
   // stages that count from the roster rather than place on a tile count the
   // right figure. `rate` is idempotent, so a pool entry that already carries
   // its role's rating is handed straight back at the write.
@@ -2787,7 +3016,7 @@ export async function solveIsland(
     downsized.power,
     effectiveBuildings,
     ctx,
-    performance.now() + GATHER_BUDGET_MS,
+    performance.now() + EVACUATE_BUDGET_MS + GATHER_BUDGET_MS,
   );
   const placements = toPlacedBuildings(sized.rows);
   return {

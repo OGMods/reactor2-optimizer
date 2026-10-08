@@ -24,7 +24,12 @@
  */
 import { describe, it, expect } from "vitest";
 import { ratedPlacementAt, simulatePlacedBuildings } from "./simulator";
-import { getAnomaly } from "@reactor2/solver";
+import {
+  getAnomaly,
+  type RoleIsolationAnomaly,
+  type SharedCoolingAnomaly,
+  type TerrainAffinityAnomaly,
+} from "@reactor2/solver";
 import { buildIslandContext } from "@reactor2/solver";
 import { splitGridIntoIslands } from "@reactor2/solver";
 import { simulateIsland } from "@reactor2/solver";
@@ -360,7 +365,7 @@ describe("the readout rates a board under the same rules the search does", () =>
    * solver's identical layout printed bonused ones — the two disagreeing about
    * the same board, which is the one thing this arrangement exists to prevent.
    */
-  const tidal = getAnomaly("tidal_ascendancy");
+  const tidal = getAnomaly("tidal_ascendancy_legacy") as TerrainAffinityAnomaly;
 
   /** A reactor, generator and cooler in a row, with their tiles. */
   const chain = (x: number, y: number): Spec => [
@@ -403,7 +408,7 @@ describe("the readout rates a board under the same rules the search does", () =>
     );
 
     expect(powerOf(inland)).toBeGreaterThan(0);
-    expect(powerOf(shore)).toBeCloseTo(powerOf(inland) * 1.67, 6);
+    expect(powerOf(shore)).toBeCloseTo(powerOf(inland) * tidal.multiplier, 6);
   });
 
   it("changes nothing when no anomaly is passed", () => {
@@ -426,9 +431,11 @@ describe("the readout rates a board under the same rules the search does", () =>
 });
 
 describe("a rated ceiling is what the row beside it was measured against", () => {
-  const TIDAL = getAnomaly("tidal_ascendancy");
-  const CRYO = getAnomaly("cryo_nexus");
-  const SINGULARITY = getAnomaly("singularity_isolation");
+  const TIDAL = getAnomaly("tidal_ascendancy_legacy") as TerrainAffinityAnomaly;
+  const CRYO = getAnomaly("cryo_nexus") as SharedCoolingAnomaly;
+  const SINGULARITY = getAnomaly(
+    "singularity_isolation",
+  ) as RoleIsolationAnomaly;
 
   /** A board walled in by rock, so no tile of it is on the board's edge. */
   const inlandGrid = (w: number, h: number): Tile[][] =>
@@ -451,7 +458,7 @@ describe("a rated ceiling is what the row beside it was measured against", () =>
    * with nothing failing anywhere. A shore cooler under Tidal Ascendancy cooled
    * 8.35 against a printed total of 8 — a used figure past the ceiling it was
    * measured against — while a Cryo Nexus cooler at full tilt reported 7.04 of
-   * a total of 8 it could never reach, because the 0.88 is in what the cooler
+   * a total of 8 it could never reach, because the pool's `coolerMultiplier` is in what the cooler
    * *is* and not in what the pool charges it.
    *
    * So every case here asserts the same two things: the ceiling carries the
@@ -487,8 +494,14 @@ describe("a rated ceiling is what the row beside it was measured against", () =>
     const cooler = scoreAndRate(grid, chain(0, 0), 2, 0, TIDAL);
     const reactor = scoreAndRate(grid, chain(0, 0), 0, 0, TIDAL);
 
-    expect(cooler.max.effectiveValue).toBeCloseTo(VALUES.cooler * 1.67, 6);
-    expect(reactor.max.effectiveValue).toBeCloseTo(VALUES.reactor * 1.67, 6);
+    expect(cooler.max.effectiveValue).toBeCloseTo(
+      VALUES.cooler * TIDAL.multiplier,
+      6,
+    );
+    expect(reactor.max.effectiveValue).toBeCloseTo(
+      VALUES.reactor * TIDAL.multiplier,
+      6,
+    );
 
     // The bug: measured against the plain roster, both of these were above 1.
     expect(
@@ -511,8 +524,14 @@ describe("a rated ceiling is what the row beside it was measured against", () =>
     const { rows, max } = scoreAndRate(grid, chain(0, 0), 1, 0, TIDAL);
     const generator = rowAt(rows, 1, 0);
 
-    expect(max.effectiveValue).toBeCloseTo(VALUES.generator * 1.67, 6);
-    expect(max.energy).toBeCloseTo(VALUES.generator * 0.75 * 1.67, 6);
+    expect(max.effectiveValue).toBeCloseTo(
+      VALUES.generator * TIDAL.multiplier,
+      6,
+    );
+    expect(max.energy).toBeCloseTo(
+      VALUES.generator * 0.75 * TIDAL.multiplier,
+      6,
+    );
     expect(generator.heatConsumed).toBeLessThanOrEqual(max.effectiveValue);
     expect(generator.powerGenerated).toBeLessThanOrEqual(max.energy);
   });
@@ -528,7 +547,10 @@ describe("a rated ceiling is what the row beside it was measured against", () =>
     ];
     const { rows, max } = scoreAndRate(grid, spec, 2, 0, CRYO);
 
-    expect(max.effectiveValue).toBeCloseTo(VALUES.cooler * 0.88, 6);
+    expect(max.effectiveValue).toBeCloseTo(
+      VALUES.cooler * CRYO.coolerMultiplier,
+      6,
+    );
     expect(rowAt(rows, 2, 0).coolingProvided).toBeCloseTo(
       max.effectiveValue,
       6,
@@ -540,7 +562,8 @@ describe("a rated ceiling is what the row beside it was measured against", () =>
      * The one rule that cannot be answered by a tile: a generator's rating is a
      * function of what its neighbours *are*, so the ceiling for one tile is a
      * function of every other placement on the board. Two boards identical
-     * except for a second generator beside the first rate it x4 and x0.8.
+     * except for a second generator beside the first rate it at the rule's
+     * `isolated` and `crowded` respectively.
      */
     const grid = inlandGrid(9, 3);
     const alone = scoreAndRate(grid, chain(2, 1), 3, 1, SINGULARITY);
@@ -552,8 +575,14 @@ describe("a rated ceiling is what the row beside it was measured against", () =>
       SINGULARITY,
     );
 
-    expect(alone.max.effectiveValue).toBeCloseTo(VALUES.generator * 4, 6);
-    expect(crowded.max.effectiveValue).toBeCloseTo(VALUES.generator * 0.8, 6);
+    expect(alone.max.effectiveValue).toBeCloseTo(
+      VALUES.generator * SINGULARITY.isolated,
+      6,
+    );
+    expect(crowded.max.effectiveValue).toBeCloseTo(
+      VALUES.generator * SINGULARITY.crowded,
+      6,
+    );
     expect(rowAt(crowded.rows, 3, 1).heatConsumed).toBeLessThanOrEqual(
       crowded.max.effectiveValue,
     );
