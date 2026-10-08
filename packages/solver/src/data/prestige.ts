@@ -42,7 +42,7 @@ export const PRESTIGE_UPGRADES: readonly PrestigeUpgrade[] = [
     effect: "Cooling Output",
     description: "Boosts the Cooling output of all cooling systems.",
     roles: ["cooler"],
-    bonuses: [0.1, 0.25, 0.45, 0.7, 1.0],
+    bonuses: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
   },
   {
     id: "infinite_grid",
@@ -62,7 +62,7 @@ export const PRESTIGE_UPGRADES: readonly PrestigeUpgrade[] = [
     // makes, and a sustainable layout never fills it, so per
     // `docs/game-logic.md` it is never the binding constraint.
     roles: ["generator", "direct_producer"],
-    bonuses: [0.1, 0.25, 0.45, 0.7, 1.0],
+    bonuses: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
   },
   {
     id: "stellar_forge",
@@ -87,7 +87,7 @@ export const PRESTIGE_UPGRADES: readonly PrestigeUpgrade[] = [
      * as `["reactor"]` is that rule, not an approximation of it.
      */
     roles: ["reactor"],
-    bonuses: [0.1, 0.2, 0.3, 0.4, 0.5],
+    bonuses: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5],
   },
 ];
 

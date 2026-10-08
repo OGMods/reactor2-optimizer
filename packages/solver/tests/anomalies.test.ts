@@ -1222,7 +1222,8 @@ describe("the search running under each rule", () => {
     const roster = getEffectiveBuildings(
       buildings,
       unlocks,
-      prestigeScales({ infinite_grid: 4, absolute_zero: 4 }),
+      // The top level of each, x2.
+      prestigeScales({ infinite_grid: 9, absolute_zero: 9 }),
     );
     expect(
       roster.map((b) => b.effectiveValue),
@@ -1253,8 +1254,10 @@ describe("the search running under each rule", () => {
      * runtime getter, which is the order these two layers happen to be in —
      * `getEffectiveBuildings` folds research into the roster and `ctx.rate`
      * scales what comes out — and it is not the same double as the other way
-     * round: generator7's fourth tier under Infinite Grid at level 2 and then a
-     * Tidal shore is 1.8474375e22, against 1.8474374999999997e22 reversed.
+     * round: generator7's fourth tier under Infinite Grid at level 3 (x1.3) and
+     * then a Tidal shore is 1.921335e22, against 1.9213349999999996e22
+     * reversed. Level 3 because it is the lowest whose factor rounds apart
+     * from x1.67 in the two orders; levels 1 and 2 agree to the last bit.
      *
      * `scaling.test.ts` pins the arithmetic; this pins that the production path
      * is that way round, which no test reached — `prestige.test.ts` never builds
@@ -1264,9 +1267,9 @@ describe("the search running under each rule", () => {
     const [researched] = getEffectiveBuildings(
       BUILDINGS,
       { generator7: 3 },
-      prestigeScales({ infinite_grid: 1 }),
+      prestigeScales({ infinite_grid: 2 }),
     );
-    expect(researched.effectiveValue).toBe(8.85e21 * 1.25);
+    expect(researched.effectiveValue).toBe(8.85e21 * 1.3);
     expect(researched.baseValue, "the tier it identifies as").toBe(8.85e21);
 
     // Bare grass, so every tile of it is on the board's edge and therefore
@@ -1274,11 +1277,11 @@ describe("the search running under each rule", () => {
     const ctx = buildIslandContext(makeGrid(["GGG"]), undefined, tidal);
     const onShore = ctx.rate(ctx.tiles[0], researched);
 
-    expect(onShore.effectiveValue).toBe(8.85e21 * 1.25 * tidal.multiplier);
+    expect(onShore.effectiveValue).toBe(8.85e21 * 1.3 * tidal.multiplier);
     // Pinned to the last bit, which is why this uses the frozen pre-nerf build.
-    expect(onShore.effectiveValue).toBe(1.8474375e22);
+    expect(onShore.effectiveValue).toBe(1.921335e22);
     // The anomaly first and the research second, which is the wrong way round.
-    expect(onShore.effectiveValue).not.toBe(8.85e21 * tidal.multiplier * 1.25);
+    expect(onShore.effectiveValue).not.toBe(8.85e21 * tidal.multiplier * 1.3);
     expect(onShore.baseValue).toBe(8.85e21);
   });
 });

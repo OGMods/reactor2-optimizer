@@ -510,10 +510,10 @@ produces still depends on how much heat reaches it.
 It is also not always the same double as one combined multiply, and the
 difference is real rather than pedantic. `tests/scaling.test.ts` pins it with two
 fixed factors of its own, `SHORE` and `CROWDED` — literals there, because the
-bits belong to those numbers: Infinite Grid at level 4 (×1.7) on a `CROWDED`
+bits belong to those numbers: Infinite Grid at level 7 (×1.7) on a `CROWDED`
 generator rates generator7's fourth tier one way as two successive scalings and
 one ULP off as a single combined multiply. The **order** matters for the same
-reason — the same tier under Infinite Grid at level 2 (×1.25) then a `SHORE`
+reason — the same tier under Infinite Grid at level 3 (×1.3) then a `SHORE`
 tile differs in the last bit from the reverse — so research first, anomaly
 second, exactly as the two getters run.
 

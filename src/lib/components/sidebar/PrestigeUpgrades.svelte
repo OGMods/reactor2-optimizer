@@ -276,8 +276,11 @@
     color: var(--text-dim);
   }
 
+  /* Ten levels since the October 2026 update; on a narrow card they wrap
+     rather than pushing the card wider than the sheet. */
   .tiers {
     display: flex;
+    flex-wrap: wrap;
     gap: 3px;
   }
 

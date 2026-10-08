@@ -114,9 +114,9 @@ timeline. `docs/game-logic.md` is the authority on what each one does and
   **Research and anomaly arrive as two successive calls, in that order**, which
   is how the game applies them (the Time Lab in the SO getter, the anomaly in
   the runtime getter) and is not the same double as one combined factor:
-  generator7's fourth tier under Infinite Grid level 4 (x1.7) then a crowded
+  generator7's fourth tier under Infinite Grid level 7 (x1.7) then a crowded
   penalty differs in the last bit from one combined factor, and the order
-  shows too — x1.25 then a shore bonus differs from the reverse.
+  shows too — level 3's x1.3 then a shore bonus differs from the reverse.
   `scaling.test.ts` pins both, at two fixed factors of its own (`SHORE`,
   `CROWDED`) and against the shipped catalogue rather than round numbers — every divergence
   here is in the last bit, so a test on tidy figures passes under either
@@ -409,12 +409,14 @@ anomaly is running — **multiplicatively**, so a generator under Singularity
 Isolation with Infinite Grid maxed is rated x8. The extractor's record covers
 all eleven Time Lab upgrades; the three a layout can see are **Stellar Forge**
 (every heat producer, so reactors), **Infinite Grid** (generators _and_ wind
-turbines), and **Absolute Zero** (every cooler), each five levels of
-`BonusPercentage`. Absolute Zero and Infinite Grid share one curve, 0.1 to 1.0;
-Stellar Forge a shallower one, 0.1 to 0.5. That field is a fraction rather than
+turbines), and **Absolute Zero** (every cooler), each ten levels of
+`BonusPercentage`. Absolute Zero and Infinite Grid share one curve, 0.1 to 1.0
+in steps of 0.1; Stellar Forge a shallower one, 0.05 to 0.5 in steps of 0.05.
+(Until the October 2026 game update each had five, on uneven steps to the same
+ceilings.) That field is a fraction rather than
 a percent -- the same field is 0.05 on Chronon Reactor, which the game shows as
 +5% -- so the levels are worth x1.1 to x2 (Absolute Zero, Infinite Grid) and
-x1.1 to x1.5 (Stellar Forge). Like an anomaly's, the scale is uniform, so the
+x1.05 to x1.5 (Stellar Forge). Like an anomaly's, the scale is uniform, so the
 cooling a boosted producer needs grows with it. Their badges ship as
 `public/icons/prestige_<id>.webp`.
 

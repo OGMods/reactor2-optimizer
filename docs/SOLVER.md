@@ -118,9 +118,9 @@ Two things about the shapes are load-bearing:
   and the anomaly in the runtime getter, so what a building is rated at is
   `(authored × research) × anomaly` — `scaleEffectiveBuilding` called once by
   `getEffectiveBuildings` as it resolves the roster, and again by whatever applies the anomaly.
-  Generator7's fourth tier under Infinite Grid level 4 (×1.7) then a crowded generator differs in
+  Generator7's fourth tier under Infinite Grid level 7 (×1.7) then a crowded generator differs in
   the last bit from one combined multiply, and the _order_ is observable too: the same tier under
-  ×1.25 then a shore bonus differs from the reverse. Each call re-derives the waste, so the last one
+  level 3's ×1.3 then a shore bonus differs from the reverse. Each call re-derives the waste, so the last one
   wins. `tests/scaling.test.ts` pins both readings, at two fixed factors of its own (`SHORE`,
   `CROWDED`), against the shipped catalogue rather
   than round numbers — every divergence here is in the last bit, where a test on tidy figures

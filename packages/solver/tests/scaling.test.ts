@@ -120,7 +120,7 @@ describe("two multipliers compose as two calls, not as one product", () => {
     // The game multiplies the authored figure by the Time Lab bonus in the SO
     // getter and by the anomaly in the runtime getter, so what a building is
     // rated at is `(authored x research) x anomaly`. That is not the same
-    // double as `authored x (research x anomaly)`: Infinite Grid at level 4
+    // double as `authored x (research x anomaly)`: Infinite Grid at level 7
     // (x1.7) and a `CROWDED` generator under Singularity Isolation over
     // generator7's fourth tier give 1.2036e22 one way and 1.2036000000000001e22
     // the other.
@@ -137,25 +137,25 @@ describe("two multipliers compose as two calls, not as one product", () => {
     // above cannot see it: 1.7 x `CROWDED` and the reverse land on the same double. The
     // game's order is the Time Lab in the SO getter and the anomaly in the
     // runtime getter — research first — and on generator7's fourth tier under
-    // Infinite Grid at level 2 (x1.25) then a `SHORE` tile the two orders
-    // differ in the last bit: 1.8474375e22 against 1.8474374999999997e22.
+    // Infinite Grid at level 3 (x1.3) then a `SHORE` tile the two orders
+    // differ in the last bit: 1.921335e22 against 1.9213349999999996e22.
     //
     // Nothing above this line in the stack would notice: the roster resolves
     // research into its three figures and the context rates the result, so
     // reversing the two produces a board rated a few ULPs off — and the golden
     // fixtures pass no anomaly, so they cannot see it either.
     const researchFirst = scaleEffectiveBuilding(
-      scaleEffectiveBuilding(atTier(3), 1.25),
+      scaleEffectiveBuilding(atTier(3), 1.3),
       SHORE,
     );
     const anomalyFirst = scaleEffectiveBuilding(
       scaleEffectiveBuilding(atTier(3), SHORE),
-      1.25,
+      1.3,
     );
 
-    expect(researchFirst.effectiveValue).toBe(8.85e21 * 1.25 * SHORE);
-    expect(researchFirst.effectiveValue).toBe(1.8474375e22);
-    expect(anomalyFirst.effectiveValue).toBe(1.8474374999999997e22);
+    expect(researchFirst.effectiveValue).toBe(8.85e21 * 1.3 * SHORE);
+    expect(researchFirst.effectiveValue).toBe(1.921335e22);
+    expect(anomalyFirst.effectiveValue).toBe(1.9213349999999996e22);
     expect(researchFirst.effectiveValue).not.toBe(anomalyFirst.effectiveValue);
   });
 
