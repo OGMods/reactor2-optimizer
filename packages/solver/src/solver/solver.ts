@@ -31,6 +31,84 @@ import type {
 
 export const DEFAULT_TIME_BUDGET_S = 10.0;
 
+/**
+ * How steeply an island's share of the budget grows with its size: a share is
+ * weighted by tile count to this power, not by tile count.
+ *
+ * Measured, not reasoned (`scripts/gapSurvey.ts` is the instrument). Solving
+ * every island of the eight cleared maps at a quarter, half, one and two times
+ * its old proportional share: an island of 20 tiles or fewer reached the same
+ * figure at a quarter as at double — most hit their bound or the same loose
+ * figure in a few hundredths of a second — while every landmass of 67 tiles
+ * and up was still climbing at double. Under a linear split those scraps held
+ * up to 19% of a run (Entropy Isles); squared, they hold under 2% and the main
+ * landmass gets the rest. Shadowspire, the one map with two large landmasses,
+ * also gained more per second on its 165-tile one than on its 79-tile one, which
+ * is the same direction.
+ */
+const BUDGET_EXPONENT = 2;
+
+/**
+ * The least an island is cut down to, in seconds — or its old proportional
+ * share, if that was less. Enough for a scrap's seed and repair to finish on a
+ * phone several times slower than the desktop the measurements above ran on;
+ * on that desktop they need about a quarter of this.
+ */
+const MIN_ISLAND_BUDGET_S = 0.25;
+
+/**
+ * Each island's slice of `totalS`, by buildable-tile count. The slices sum to
+ * `totalS`.
+ *
+ * Shares grow with tile count to `BUDGET_EXPONENT`, so time goes where it still
+ * buys power, but no island drops below the smaller of `MIN_ISLAND_BUDGET_S`
+ * and its proportional share. Those floors are filled first and the rest is
+ * split by weight, re-pinning any island the split would put under its floor
+ * until none would.
+ *
+ * Exported because the app's run estimate (`taskDurationsMs`) has to model
+ * exactly the budgets the coordinator will send; a second copy of this rule is
+ * an estimate that quietly describes a different run.
+ */
+export function islandBudgetsS(
+  tileCounts: readonly number[],
+  totalS: number,
+): number[] {
+  const n = tileCounts.length;
+  const tiles = tileCounts.reduce((a, b) => a + b, 0);
+  if (n === 0) return [];
+  // Nothing to search anywhere, so nothing to spend.
+  if (tiles === 0) return tileCounts.map(() => 0);
+
+  const floors = tileCounts.map((c) =>
+    Math.min(MIN_ISLAND_BUDGET_S, (totalS * c) / tiles),
+  );
+  const weights = tileCounts.map((c) => c ** BUDGET_EXPONENT);
+  const pinned = new Array<boolean>(n).fill(false);
+  const budgets = new Array<number>(n).fill(0);
+
+  for (;;) {
+    let free = totalS;
+    let weight = 0;
+    for (let i = 0; i < n; i++) {
+      if (pinned[i]) free -= floors[i];
+      else weight += weights[i];
+    }
+    let repinned = false;
+    for (let i = 0; i < n; i++) {
+      if (pinned[i]) continue;
+      budgets[i] = weight > 0 ? (free * weights[i]) / weight : 0;
+      if (budgets[i] < floors[i]) {
+        pinned[i] = true;
+        repinned = true;
+      }
+    }
+    if (!repinned) break;
+  }
+  for (let i = 0; i < n; i++) if (pinned[i]) budgets[i] = floors[i];
+  return budgets;
+}
+
 export interface IslandPlan {
   islands: IslandSubGrid[];
   effectiveBuildings: EffectiveBuilding[];
@@ -40,7 +118,7 @@ export interface IslandPlan {
    * "no anomaly" is one of them.
    */
   anomaly: AnomalyDefinition;
-  /** Per-island time budget, proportional to buildable-tile count. */
+  /** Per-island time budget — see `islandBudgetsS`. */
   budgetsS: number[];
   /** Per-island RNG seed, or undefined for a fresh stochastic stream. */
   seeds: (number | undefined)[];
@@ -60,8 +138,8 @@ export interface IslandPlan {
  * decomposition, the roster, and how the time budget is divided.
  *
  * Islands never interact — nothing that happens on one can affect another — so
- * each gets its full proportional share of the budget and they may run in any
- * order, or concurrently.
+ * each gets its full share of the budget (`islandBudgetsS`) and they may run
+ * in any order, or concurrently.
  */
 export function planSolve(
   grid: Tile[][],
@@ -104,15 +182,13 @@ export function planSolve(
   );
   if (islands.length === 0) return null;
 
-  const grassCounts = islands.map((island) => island.tileCount);
-  const totalIslandGrass = grassCounts.reduce((a, b) => a + b, 0) || 1;
-
   return {
     islands,
     effectiveBuildings,
     anomaly,
-    budgetsS: grassCounts.map(
-      (count) => timeBudgetS * (count / totalIslandGrass),
+    budgetsS: islandBudgetsS(
+      islands.map((island) => island.tileCount),
+      timeBudgetS,
     ),
     // Each island gets its own random stream, offset from the base seed so a
     // seeded solve is reproducible per island rather than coupled across them.

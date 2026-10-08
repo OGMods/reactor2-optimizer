@@ -18,7 +18,7 @@
  * Cores are spent on two axes, and which one depends on the flags:
  *
  * - **A run** (`--runs`, or no flags) farms its islands out to a worker pool.
- *   Each island still gets its own proportional slice of the budget, so this
+ *   Each island still gets its own slice of the budget, so this
  *   changes wall clock and not the search. On the shipped maps it buys little —
  *   most are one large landmass plus a few 2-3 tile scraps, so one island holds
  *   ~95% of the budget.
@@ -143,7 +143,7 @@ function offsetSeed(
  * One solve, with the islands farmed out to `pool` when there is more than one.
  *
  * Islands never interact, so this is the same search either way — each island
- * still gets its own proportional slice of the budget. Only the wall clock
+ * still gets its own slice of the budget (`islandBudgetsS`). Only the wall clock
  * changes: concurrently it is ~max(slice) instead of the whole budget.
  */
 async function solveWithPool(

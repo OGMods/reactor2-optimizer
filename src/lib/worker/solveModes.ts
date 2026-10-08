@@ -18,6 +18,8 @@
  * the button is pressed rather than after.
  */
 
+import { islandBudgetsS } from "@reactor2/solver";
+
 export type SolveModeId = "quick" | "deep" | "max";
 
 export interface SolveMode {
@@ -118,18 +120,21 @@ export function estimateMakespanMs(
  * once before any of them is solved twice.
  *
  * Shared by the estimate and by the coordinator's own ordering, so the figure
- * on the button cannot describe a schedule the run does not use.
+ * on the button cannot describe a schedule the run does not use. The split
+ * within an attempt is `islandBudgetsS`, the one `planSolve` hands the
+ * coordinator, for the same reason.
  */
 export function taskDurationsMs(
   mode: SolveMode,
   islandTileCounts: readonly number[],
 ): number[] {
-  const total = islandTileCounts.reduce((a, b) => a + b, 0) || 1;
+  const perAttempt = islandBudgetsS(
+    islandTileCounts,
+    mode.attemptBudgetMs / 1000,
+  ).map((s) => s * 1000);
   const durations: number[] = [];
   for (let attempt = 0; attempt < mode.attempts; attempt++) {
-    for (const count of islandTileCounts) {
-      durations.push(mode.attemptBudgetMs * (count / total));
-    }
+    durations.push(...perAttempt);
   }
   return durations;
 }

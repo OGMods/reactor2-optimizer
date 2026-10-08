@@ -815,8 +815,8 @@ could not see would restart numbering at 1 and overwrite an untagged run.
 distinct layouts at the end. Ctrl-C stops it and still prints the report.
 
 Cores are spent on two axes and the flags pick which. A **run** farms its islands out to the pool
-— the same search either way, since each island still gets its own proportional slice of the
-budget, so only wall clock changes. A **session** runs whole attempts in the pool with islands
+— the same search either way, since each island still gets its own slice (`islandBudgetsS`) of
+the budget, so only wall clock changes. A **session** runs whole attempts in the pool with islands
 serial inside each; the pool already owns the cores, and a nested pool per island would
 oversubscribe the machine.
 

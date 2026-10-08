@@ -137,7 +137,7 @@ export class SolverWorkerClient {
     this.pending.set(id, entry);
 
     // The budget passed down is what *one attempt* gets: the coordinator hands
-    // each attempt the same proportional split across islands, so a run's total
+    // each attempt the same split across islands (`islandBudgetsS`), so a run's total
     // is attempts × this.
     const budgetMs = run?.attemptBudgetMs ?? this.options.maxDurationMs;
     const timeBudgetS = budgetMs ? budgetMs / 1000 : undefined;

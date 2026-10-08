@@ -66,7 +66,7 @@ export function defaultPoolSize(): number {
  * Runs one island-search per worker, mirroring the process pool the reference
  * pipeline uses: islands cannot influence each other, so wall-clock time
  * becomes ~max(island budget) instead of the sum of them, and every island
- * still gets its full proportional share of the budget.
+ * still gets its full share of the budget (`islandBudgetsS`).
  *
  * A multi-attempt run rides the same queue. Nothing about a second search of
  * an island differs from a first, so `attempts × islands` tasks go into the

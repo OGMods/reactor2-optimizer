@@ -30,7 +30,7 @@ import {
   splitGridIntoIslands,
 } from "../src/solver/island";
 import { simulateIsland } from "../src/solver/simulate";
-import { solve } from "../src/solver/solver";
+import { islandBudgetsS, solve } from "../src/solver/solver";
 import type { Placement, Tile } from "../src/solver/types";
 import { basicCatalogue, basicRoster, expectClose } from "./helpers";
 
@@ -258,4 +258,42 @@ describe("solve quality", () => {
       "a longer search came back materially worse than a short one",
     ).toBeGreaterThanOrEqual(quick * 0.9);
   }, 20_000);
+});
+
+describe("splitting the budget between islands", () => {
+  /*
+   * A scrap stops gaining long before its proportional share runs out and a
+   * main landmass is still climbing at double its share, so shares grow with
+   * tile count squared — with a floor that keeps a scrap's search finishing.
+   */
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+
+  it("always spends exactly the budget", () => {
+    for (const counts of [[180, 20, 6, 9, 4, 4], [165, 2, 79, 5], [1], [3, 3]])
+      expectClose(sum(islandBudgetsS(counts, 15)), 15, 1e-12);
+  });
+
+  it("weights by tile count squared", () => {
+    expect(islandBudgetsS([30, 10], 30)).toEqual([27, 3]);
+    expect(islandBudgetsS([4, 4], 10)).toEqual([5, 5]);
+  });
+
+  it("holds a scrap at a quarter of a second rather than starving it", () => {
+    const [main, a, b] = islandBudgetsS([180, 4, 4], 15);
+    expect(a).toBe(0.25);
+    expect(b).toBe(0.25);
+    expect(main).toBe(14.5);
+  });
+
+  it("never raises a scrap above its proportional share to meet the floor", () => {
+    // 1s over 100 tiles: a 2-tile scrap's linear share is 0.02s, under the
+    // floor, and that share is what it keeps.
+    const [, scrap] = islandBudgetsS([98, 2], 1);
+    expectClose(scrap, 0.02, 1e-12);
+  });
+
+  it("spends nothing on a board with nothing to search", () => {
+    expect(islandBudgetsS([0], 30)).toEqual([0]);
+    expect(islandBudgetsS([], 30)).toEqual([]);
+  });
 });
