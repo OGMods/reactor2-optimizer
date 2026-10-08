@@ -78,6 +78,71 @@ export function formatNumber(n: number): string {
 }
 
 /**
+ * The whole figure, for a reader who wants every digit `formatNumber` rounded
+ * away: digits in comma-grouped threes, with any trailing run of `000` groups
+ * folded into the suffix that names it.
+ *
+ *   6.11210546e23 → "611,210,546AA"
+ *   1234567       → "1,234,567"
+ *   2e6           → "2M"
+ *   1234.5        → "1,234.5"
+ *
+ * The digits are the double's **shortest round-trip** spelling (`toString`),
+ * not its exact binary value: past 2^53 a double carries no more than ~17
+ * significant digits, and printing what `BigInt` would make of the rest is
+ * printing noise as if it were measured. So a large figure always ends in
+ * zeros, and those are exactly what the suffix folds. A fraction is kept to
+ * the two places `formatNumber` shows below 1000, and a figure with one has no
+ * trailing zero groups to fold.
+ */
+export function formatNumberFull(n: number): string {
+  if (Number.isNaN(n)) return "NaN";
+  if (!isFinite(n)) return n > 0 ? "∞" : "-∞";
+
+  const abs = Math.round(Math.abs(n) * 100) / 100;
+  if (abs === 0) return "0";
+  const sign = n < 0 ? "-" : "";
+
+  const [intDigits, fracDigits] = plainDigits(abs);
+  const groups: string[] = [];
+  for (let end = intDigits.length; end > 0; end -= 3) {
+    groups.unshift(intDigits.slice(Math.max(0, end - 3), end));
+  }
+
+  let tier = 0;
+  if (!fracDigits) {
+    while (
+      groups.length > 1 &&
+      groups[groups.length - 1] === "000" &&
+      tier < SUFFIXES.length - 1
+    ) {
+      groups.pop();
+      tier++;
+    }
+  }
+
+  const frac = fracDigits ? `.${fracDigits}` : "";
+  return sign + groups.join(",") + frac + SUFFIXES[tier];
+}
+
+/**
+ * A positive double's shortest spelling as integer and fraction digits, with
+ * e-notation expanded — `toString` switches to it at 1e21, which is where the
+ * figures this exists for live.
+ */
+function plainDigits(x: number): [string, string] {
+  const [mantissa, exp] = x.toString().split("e");
+  const [whole, frac = ""] = mantissa.split(".");
+  if (exp === undefined) return [whole, frac];
+
+  // Callers have rounded to hundredths, so only a positive exponent reaches
+  // here; the digits are then all integer, padded out with zeros.
+  const digits = whole + frac;
+  const intLength = whole.length + Number(exp);
+  return [digits.padEnd(intLength, "0"), ""];
+}
+
+/**
  * The same figure, spelled for a filename. Both writers of one use it — the
  * app naming a saved picture, and the CLI naming the blueprint it writes into
  * `solves/` — so the same board saved from either sorts beside itself.
