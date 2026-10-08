@@ -16,12 +16,33 @@ import {
 } from "../src/solver/constants";
 import type { IslandContext } from "../src/solver/context";
 import { makeGrid } from "../src/grid";
+import { getAnomaly } from "../src/data/anomalies";
 import type {
+  AnomalyDefinition,
+  AnomalyId,
   BuildingDefinition,
   EffectiveBuilding,
   Placement,
   Tile,
 } from "../src/solver/types";
+
+// --- Anomalies -------------------------------------------------------------
+
+/**
+ * An anomaly narrowed to its rule's shape, so a test can read its figures —
+ * `multiplier`, `coolerMultiplier`, `isolated`, `crowded` — off the table
+ * rather than restating them. Restated, a rebalance in `data/anomalies.ts`
+ * leaves a test asserting the old number. Throws on a mismatched rule rather
+ * than trusting a cast.
+ */
+export function anomalyOfRule<R extends AnomalyDefinition["rule"]>(
+  id: AnomalyId,
+  rule: R,
+): Extract<AnomalyDefinition, { rule: R }> {
+  const anomaly = getAnomaly(id);
+  if (anomaly.rule !== rule) throw new Error(`${id} is not a ${rule} rule`);
+  return anomaly as Extract<AnomalyDefinition, { rule: R }>;
+}
 
 // --- Building factories ---------------------------------------------------
 // Ids default to something descriptive so failures name the building.

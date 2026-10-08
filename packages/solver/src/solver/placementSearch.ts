@@ -266,10 +266,11 @@ function offlineProducers(
  * Against `ratedValue`, never `baseValue`: `heatProduced` is what the
  * distribution actually sent, capped by the tile's RATING, so measuring it
  * against the authored tier compares a scaled delivery with an unscaled ceiling
- * and only calls a reactor under-fed below 1/k fill — 60% on a Tidal shore,
- * 66.7% under a maxed Stellar Forge. The move then stops firing on much of what
- * it exists for, with no number anywhere disagreeing. It is a named function so
- * that the reading can be pinned by a test rather than only stated here.
+ * and only calls a reactor under-fed below 1/k fill for a tile rated k — on a
+ * Tidal shore k is its `multiplier`, under a maxed Stellar Forge the
+ * research's. The move then stops firing on much of what it exists for, with
+ * no number anywhere disagreeing. It is a named function so that the reading
+ * can be pinned by a test rather than only stated here.
  */
 function isUnderFed(row: SimPlacedBuilding): boolean {
   return row.heatProduced > EPS && row.heatProduced < row.ratedValue - EPS;
@@ -1185,10 +1186,12 @@ async function hillClimb(
   // the layout were being accepted, and the walk never climbed back.
   //
   // It is read off the PLAIN roster, so under a rule that rates a tile above it
-  // the walk runs colder than this calibration intends — a move on a x1.67 shore
-  // is worth x1.67 of one here. Scaling it by `islandRatingCeiling` was measured:
-  // Tidal on map 3 at 15s over three seeds went 176/178/179AC to 179/181/178AC,
-  // and Singularity (x4) at 30s over five seeds on map 3 142/140/142/142/140AC to
+  // the walk runs colder than this calibration intends — a move on a Tidal
+  // shore is worth its `multiplier` times one here. Scaling it by
+  // `islandRatingCeiling` was measured: Tidal (the pre-nerf
+  // `tidal_ascendancy_legacy`) on map 3 at 15s over three seeds went
+  // 176/178/179AC to 179/181/178AC, and Singularity at 30s over five seeds on
+  // map 3 142/140/142/142/140AC to
   // 140/139/140/142/142AC and on map 7 274/271/271/271/274AC to
   // 267/271/271/271/274AC — inside run-to-run noise, so the plain figure is kept.
   // Anyone re-measuring should use a longer budget and more seeds than that.
@@ -2022,10 +2025,11 @@ function tileLoad(building: EffectiveBuilding, row: SimPlacedBuilding): number {
  * `ctx.rate` answers this for every rule but one: a role isolation multiplier is
  * a function of what a tile's NEIGHBOURS are, so `rate` is the identity under it
  * and `simulateIsland` resolves it per layout through `rateIsolated` instead.
- * That leaves right-sizing measuring a x4 load against a x1 capacity: an
- * isolated generator authored 320, rated 1280 and absorbing 300, was never
- * offered the authored 120 tier that covers it at its own rating of 480, so the
- * pass left 980 of intake nobody pays it to have — which is exactly the money it
+ * That leaves right-sizing measuring a load rated by `isolated` against an
+ * unrated capacity: an isolated generator authored 320, rated 1280 (at the
+ * `isolated` the rule shipped with) and absorbing 300, was never offered the
+ * authored 120 tier that covers it at its own rating of 480, so the pass left
+ * 980 of intake nobody pays it to have — which is exactly the money it
  * exists to hand back. In the other direction the plain figure is over-generous,
  * and there the re-simulation below catches it, so only the waste escaped.
  *
@@ -2538,7 +2542,7 @@ export async function solveIsland(
   }
 
   // The pools every stage draws on, in the units the board will hold: a rule
-  // that scales a whole role (a cooling pool's x0.88) is folded in here, so the
+  // that scales a whole role (a cooling pool's `coolerMultiplier`) is folded in here, so the
   // stages that count from the roster rather than place on a tile count the
   // right figure. `rate` is idempotent, so a pool entry that already carries
   // its role's rating is handed straight back at the write.

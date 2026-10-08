@@ -33,7 +33,13 @@ import {
   splitGridIntoIslands,
 } from "../src/solver/island";
 import { internals, solveIsland } from "../src/solver/placementSearch";
-import { basicCatalogue, basicRoster, cooler, reactor } from "./helpers";
+import {
+  anomalyOfRule,
+  basicCatalogue,
+  basicRoster,
+  cooler,
+  reactor,
+} from "./helpers";
 import type {
   AnomalyDefinition,
   EffectiveBuilding,
@@ -43,9 +49,16 @@ import type {
 } from "../src/solver/types";
 
 /*
- * A generator whose figures part company under the shipped x1.67: the pair
- * scales to 167 and 100 x 1.67 is 167.00000000000003, so a test on it can tell
- * a derived waste from a scaled one. `scaleEffectiveBuilding`'s own file pins
+ * The factor the scaling cases below use: pre-nerf Tidal's shore bonus. A
+ * literal on purpose, not read off `data/anomalies.ts` — the exact doubles
+ * those cases pin belong to this number alone, so a rebalance must not move it.
+ */
+const SHORE = 1.67;
+
+/*
+ * A generator whose figures part company under `SHORE`: the pair scales to
+ * 167, and 100 x `SHORE` is 167.00000000000003, so a test on it can tell a
+ * derived waste from a scaled one. `scaleEffectiveBuilding`'s own file pins
  * that against the real catalogue; this fixture is here so the cases below,
  * which are about the other three figures, cannot pass under the rule this one
  * replaced.
@@ -105,13 +118,13 @@ describe("scaling a resolved building", () => {
      * satisfy `waste === snap(heat - energy)` at its chosen factor, so it read
      * as a statement about scaling and could not fail if scaling came back.
      */
-    const scaled = scaleEffectiveBuilding(generator, 1.67);
+    const scaled = scaleEffectiveBuilding(generator, SHORE);
 
     expect(scaled.effectiveValue).toBe(167);
     expect(scaled.energy).toBeCloseTo(116.9, 9);
     expect(scaled.waste).toBe(50.1);
     // Scaling the authored waste instead gives 50.099999999999994.
-    expect(scaled.waste).not.toBe(generator.waste * 1.67);
+    expect(scaled.waste).not.toBe(generator.waste * SHORE);
     // And the authored tier value never moves, whatever the factor.
     expect(scaled.baseValue).toBe(100);
   });
@@ -120,7 +133,7 @@ describe("scaling a resolved building", () => {
     // The point of scaling uniformly. Cooling that exactly covered the base
     // building must not still cover the bonused one, or a multiplier would be
     // free power rather than a bigger bet.
-    const scaled = scaleEffectiveBuilding(generator, 1.67);
+    const scaled = scaleEffectiveBuilding(generator, SHORE);
     expect(wasteIsCovered(generator.waste, generator.waste)).toBe(true);
     expect(wasteIsCovered(scaled.waste, generator.waste)).toBe(false);
     expect(wasteIsCovered(scaled.waste, scaled.waste)).toBe(true);
@@ -138,19 +151,19 @@ describe("scaling a resolved building", () => {
 describe("a shared cooling pool reaching the board", () => {
   /*
    * The one rule that reaches across the whole board rather than a tile or a
-   * neighbourhood. Two halves: every cooler is re-rated x0.88 — the game
-   * applies that to `CoolingPerSec`, so it is what a cooler is worth — and the
-   * cooling half of the distribution is replaced by one pool that ignores
-   * adjacency entirely.
+   * neighbourhood. Two halves: every cooler is re-rated by `coolerMultiplier` —
+   * the game applies that to `CoolingPerSec`, so it is what a cooler is worth —
+   * and the cooling half of the distribution is replaced by one pool that
+   * ignores adjacency entirely.
    */
-  const cryo = getAnomaly("cryo_nexus");
+  const cryo = anomalyOfRule("cryo_nexus", "shared_cooling");
   // A cooler deliberately smaller than two generators' waste, so "the pool
-  // falls short" is a case these boards can actually reach: 30 x 0.88 is 26.4
-  // against 25 of waste per generator.
+  // falls short" is a case these boards can actually reach: 30 rated down by
+  // the pool covers one generator's 25 of waste and falls well short of two.
   const roster = basicRoster({ reactorValue: 500, coolerValue: 30 });
   const [REACTOR, GENERATOR, COOLER] = roster;
 
-  const ctxFor = (rows: string[], anomaly = cryo) =>
+  const ctxFor = (rows: string[], anomaly: AnomalyDefinition = cryo) =>
     buildIslandContext(makeGrid(rows), undefined, anomaly);
 
   /** Place `spec` — `[x, y, building]` — rating each for its tile. */
@@ -172,7 +185,10 @@ describe("a shared cooling pool reaching the board", () => {
     const ctx = ctxFor(["RRRR", "RGGR", "RRRR"]);
     const tile = ctx.tiles[0];
 
-    expect(ctx.rate(tile, COOLER).effectiveValue).toBeCloseTo(30 * 0.88, 9);
+    expect(ctx.rate(tile, COOLER).effectiveValue).toBeCloseTo(
+      30 * cryo.coolerMultiplier,
+      9,
+    );
     // The authored tier is what identifies it and never moves.
     expect(ctx.rate(tile, COOLER).baseValue).toBe(30);
     expect(ctx.rate(tile, REACTOR)).toBe(REACTOR);
@@ -273,7 +289,7 @@ describe("the seed under a shared cooling pool", () => {
    *
    * A 4x4 block beside three scraps: one tile on its own and a pair. Two-tile
    * hubs (one reactor fills one generator) fit the block exactly eight times,
-   * and the waste those make needs three coolers at x0.88 — the three scraps.
+   * and the waste those make needs three pool-rated coolers — the three scraps.
    */
   const BOARD = ["GGGGRG", "GGGGRR", "GGGGRG", "GGGGRG"];
   const roster = basicRoster();
@@ -426,10 +442,9 @@ describe("role isolation reaching the board", () => {
    *
    * The roster gives the reactor far more heat than the generator can take, so
    * the generator is never starved: with a reactor only as large as the
-   * generator's authored intake, a x4 intake bonus buys nothing at all and
-   * every case below would read as 1.0.
-   */
-  const singularity = getAnomaly("singularity_isolation");
+   * generator's authored intake, an `isolated` intake bonus buys nothing at all
+   * and every case below would read as 1.0. */
+  const singularity = anomalyOfRule("singularity_isolation", "role_isolation");
   const roster = basicRoster({
     reactorValue: 500,
     coolerValue: 200,
@@ -451,7 +466,10 @@ describe("role isolation reaching the board", () => {
    * building's own power, keyed "x,y". Run twice per case, under the anomaly
    * and under none, so what is compared is one layout against itself.
    */
-  const powers = (spec: [number, number, string][], anomaly = singularity) => {
+  const powers = (
+    spec: [number, number, string][],
+    anomaly: AnomalyDefinition = singularity,
+  ) => {
     const ctx = buildIslandContext(makeGrid(BOARD), undefined, anomaly);
     const at = new Map<string, number>();
     for (let t = 0; t < ctx.n; t++) at.set(`${ctx.xs[t]},${ctx.ys[t]}`, t);
@@ -475,7 +493,7 @@ describe("role isolation reaching the board", () => {
 
     const base = powers(spec, getAnomaly("none")).get("2,1")!;
     expect(base).toBeGreaterThan(0);
-    expect(powers(spec).get("2,1")).toBeCloseTo(base * 4, 6);
+    expect(powers(spec).get("2,1")).toBeCloseTo(base * singularity.isolated, 6);
   });
 
   it("penalises both generators the moment they touch", () => {
@@ -494,14 +512,20 @@ describe("role isolation reaching the board", () => {
     const crowded = powers(spec);
 
     expect(base.get("2,1")).toBeGreaterThan(0);
-    expect(crowded.get("2,1")).toBeCloseTo(base.get("2,1")! * 0.8, 6);
-    expect(crowded.get("3,1")).toBeCloseTo(base.get("3,1")! * 0.8, 6);
+    expect(crowded.get("2,1")).toBeCloseTo(
+      base.get("2,1")! * singularity.crowded,
+      6,
+    );
+    expect(crowded.get("3,1")).toBeCloseTo(
+      base.get("3,1")! * singularity.crowded,
+      6,
+    );
   });
 
   it("costs no more for a second neighbour than for the first", () => {
     // Three generators in a row, each with a reactor above it and a cooler
     // below. The middle one touches two generators and the outer ones touch
-    // one; all three take exactly x0.8 — the rule is a test, not a count.
+    // one; all three take exactly `crowded` — the rule is a test, not a count.
     const spec: [number, number, string][] = [
       [2, 1, "r"],
       [3, 1, "r"],
@@ -519,7 +543,10 @@ describe("role isolation reaching the board", () => {
 
     for (const key of ["2,2", "3,2", "4,2"]) {
       expect(base.get(key)).toBeGreaterThan(0);
-      expect(crowded.get(key), key).toBeCloseTo(base.get(key)! * 0.8, 6);
+      expect(crowded.get(key), key).toBeCloseTo(
+        base.get(key)! * singularity.crowded,
+        6,
+      );
     }
   });
 
@@ -541,7 +568,10 @@ describe("role isolation reaching the board", () => {
     const base = powers(spec, getAnomaly("none"));
     const under = powers(spec);
 
-    expect(under.get("2,1")).toBeCloseTo(base.get("2,1")! * 4, 6);
+    expect(under.get("2,1")).toBeCloseTo(
+      base.get("2,1")! * singularity.isolated,
+      6,
+    );
     // And the turbine beside it is rated exactly as authored.
     expect(under.get("3,1")).toBeCloseTo(base.get("3,1")!, 6);
   });
@@ -572,10 +602,12 @@ describe("a terrain bonus reaching the board", () => {
    * settles it once and `rate` is a lookup — the reason a shore bonus costs the
    * search nothing.
    */
-  const tidal = getAnomaly("tidal_ascendancy_legacy");
+  // The pre-nerf build, whose figure is frozen: the exact 167s below are 100
+  // at its multiplier, snapped to the authored precision.
+  const tidal = anomalyOfRule("tidal_ascendancy_legacy", "terrain_affinity");
 
   /** The context for a board, with off-board treated as water throughout. */
-  const contextFor = (rows: string[], anomaly = tidal) =>
+  const contextFor = (rows: string[], anomaly: AnomalyDefinition = tidal) =>
     buildIslandContext(makeGrid(rows), undefined, anomaly);
 
   it("rates a shore tile up and an inland tile as authored", () => {
@@ -624,7 +656,7 @@ describe("a terrain bonus reaching the board", () => {
     expect(onShore.effectiveValue).toBe(167);
     // Shore -> shore, twice over.
     expect(ctx.rate(shore, onShore)).toBe(onShore);
-    // Shore -> inland gives the authored building back, not 167 x 1.67.
+    // Shore -> inland gives the authored building back, not 167 rated again.
     expect(ctx.rate(inland, onShore)).toBe(base);
     // And back again.
     expect(ctx.rate(shore, ctx.rate(inland, onShore))).toBe(onShore);
@@ -647,15 +679,20 @@ describe("a terrain bonus reaching the board", () => {
      * `uniformRating` is the promise that `rate` is the identity, and it invites
      * a stage to skip the call — so it has to cover the role scale as well as
      * the per-tile one. It read `tileScale === null` once, which said "uniform"
-     * while every cooler on the board was being rated x0.88: a stage taking the
-     * invitation would have returned a layout 13.6% over-cooled on paper that
-     * the game shuts down board-wide, with nothing failing.
+     * while every cooler on the board was being rated by the pool: a stage
+     * taking the invitation would have returned a layout over-cooled on paper by
+     * 1/`coolerMultiplier` that the game shuts down board-wide, with nothing
+     * failing.
      */
-    const ctx = contextFor(["GGGGG", "GGGGG"], getAnomaly("cryo_nexus"));
+    const cryo = anomalyOfRule("cryo_nexus", "shared_cooling");
+    const ctx = contextFor(["GGGGG", "GGGGG"], cryo);
     const base = cooler(100);
 
     expect(ctx.uniformRating).toBe(false);
-    expect(ctx.rate(ctx.tiles[0], base).effectiveValue).toBeCloseTo(88, 9);
+    expect(ctx.rate(ctx.tiles[0], base).effectiveValue).toBeCloseTo(
+      100 * cryo.coolerMultiplier,
+      9,
+    );
     // Only the cooler role, and the same answer on every tile.
     expect(ctx.rate(ctx.tiles[1], base)).toBe(ctx.rate(ctx.tiles[0], base));
   });
@@ -766,7 +803,7 @@ describe("a terrain bonus reaching the board", () => {
     const inland = layoutOn(["RRRRR", "RRGRR", "RRGRR", "RRGRR", "RRRRR"]);
 
     expect(inland).toBeGreaterThan(0);
-    expect(shore).toBeCloseTo(inland * 1.67, 6);
+    expect(shore).toBeCloseTo(inland * tidal.multiplier, 6);
   });
 });
 
@@ -796,11 +833,13 @@ describe("role isolation for a role that is not the generator", () => {
     d: ROSTER[3],
   };
 
+  const SINGULARITY = anomalyOfRule("singularity_isolation", "role_isolation");
+
   /** Singularity's own shape with the role swapped out, and nothing else. */
   const isolating = (
     role: EffectiveBuilding["type"],
   ): RoleIsolationAnomaly => ({
-    ...(getAnomaly("singularity_isolation") as RoleIsolationAnomaly),
+    ...SINGULARITY,
     role,
   });
 
@@ -858,13 +897,13 @@ describe("role isolation for a role that is not the generator", () => {
       for (const key of ["0,0", "1,0"]) {
         const row = rated.get(key)!;
         expect(row.rated, `${key} touches another ${role}`).toBeCloseTo(
-          row.base * 0.8,
+          row.base * SINGULARITY.crowded,
           6,
         );
       }
       const lone = rated.get("4,0")!;
       expect(lone.rated, "three tiles from the nearest one").toBeCloseTo(
-        lone.base * 4,
+        lone.base * SINGULARITY.isolated,
         6,
       );
 
@@ -1032,16 +1071,17 @@ describe("the search running under each rule", () => {
   it("threads a shared cooling pool into the layout it reports", async () => {
     /*
      * Pooling changes both halves of what a solve is worth: every cooler is
-     * x0.88 and adjacency stops mattering. Drop the anomaly on the way into the
-     * context and the search reports a figure about 13.6% over what the board is
-     * actually worth, arranged for a rule it is not under.
+     * rated by `coolerMultiplier` and adjacency stops mattering. Drop the
+     * anomaly on the way into the context and the search reports a figure about
+     * 1/`coolerMultiplier` of what the board is actually worth, arranged for a
+     * rule it is not under.
      *
      * The board is handed over whole, as `wholeBoardIsland` does — that is what a
      * pool is defined over.
      */
     const cryo = getAnomaly("cryo_nexus");
-    // A cooler tight against the generators' waste, so the x0.88 genuinely
-    // binds and the pool has work to do.
+    // A cooler tight against the generators' waste, so the pool's rating
+    // genuinely binds and the pool has work to do.
     const roster = basicRoster({ reactorValue: 500, coolerValue: 30 });
     const [island] = splitGridIntoIslands(
       makeGrid(BOARD),
@@ -1145,7 +1185,7 @@ describe("the search running under each rule", () => {
      * is that way round, which no test reached — `prestige.test.ts` never builds
      * a context, and every context test starts from an unresearched roster.
      */
-    const tidal = getAnomaly("tidal_ascendancy_legacy");
+    const tidal = anomalyOfRule("tidal_ascendancy_legacy", "terrain_affinity");
     const [researched] = getEffectiveBuildings(
       BUILDINGS,
       { generator7: 3 },
@@ -1159,10 +1199,11 @@ describe("the search running under each rule", () => {
     const ctx = buildIslandContext(makeGrid(["GGG"]), undefined, tidal);
     const onShore = ctx.rate(ctx.tiles[0], researched);
 
-    expect(onShore.effectiveValue).toBe(8.85e21 * 1.25 * 1.67);
+    expect(onShore.effectiveValue).toBe(8.85e21 * 1.25 * tidal.multiplier);
+    // Pinned to the last bit, which is why this uses the frozen pre-nerf build.
     expect(onShore.effectiveValue).toBe(1.8474375e22);
     // The anomaly first and the research second, which is the wrong way round.
-    expect(onShore.effectiveValue).not.toBe(8.85e21 * 1.67 * 1.25);
+    expect(onShore.effectiveValue).not.toBe(8.85e21 * tidal.multiplier * 1.25);
     expect(onShore.baseValue).toBe(8.85e21);
   });
 });

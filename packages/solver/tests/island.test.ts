@@ -41,6 +41,7 @@ import type {
   TerrainAffinityAnomaly,
 } from "../src/solver/types";
 import {
+  anomalyOfRule,
   basicRoster,
   cooler,
   directProducer,
@@ -305,7 +306,7 @@ describe("water adjacency", () => {
      * `padMinY` is 1, and the only water on the board sits on one side of it.
      * The mask is therefore asymmetric: read at the wrong origin it describes a
      * different neighbourhood, and under a terrain bonus that is the wrong tiles
-     * rated x1.67 with nothing failing.
+     * rated at its `multiplier` with nothing failing.
      */
     const rows = [
       "RRRRRRRR",
@@ -576,9 +577,9 @@ describe("the theoretical max-power bound", () => {
     /*
      * The case a random-layout test cannot find, and the one that shipped
      * broken. `role_isolation` scales an isolated generator's heat *intake* by
-     * 4, so wherever generator intake is the short side of
+     * `isolated`, so wherever generator intake is the short side of
      * `min(nReact * rVal, nGen * gVal)` a layout that keeps its generators apart
-     * absorbs up to 4x the heat the bound allowed. Random placement almost
+     * absorbs up to `isolated` times the heat the bound allowed. Random placement almost
      * never isolates four generators, so this layout is built by hand:
      *
      *     G R G      four generators on the corners, which on a 3x3 are
@@ -635,7 +636,7 @@ describe("the theoretical max-power bound", () => {
      *
      * It is homogeneous in the roster, so no rule that scales everything at
      * once can make it bite. A rule that scales a single role is exactly what
-     * it takes, and `role_isolation` is that rule: rating a lone generator x4
+     * it takes, and `role_isolation` is that rule: rating a lone generator by `isolated`
      * while leaving the reactors that fill it alone let the LP spend fewer
      * tiles on generators than eight neighbours apiece can serve, and the
      * shipped maps' bound sat ~5% above anything the board allows.
@@ -675,7 +676,7 @@ describe("the theoretical max-power bound", () => {
        * A generator authored at 4000 and one rated there by the anomaly are
        * the same building to the cap, so the plain bound on the first is the
        * anomaly's bound on the second. Which is also why the anomaly buys so
-       * much less than its x4 suggests: past eight reactors it buys nothing.
+       * much less than its `isolated` suggests: past eight reactors it buys nothing.
        */
       const island = islandFor(board, basicRoster());
 
@@ -901,15 +902,15 @@ describe("the theoretical max-power bound", () => {
      * Pooling is the rule most likely to walk past a bound that assumed
      * adjacency — a cooler on the far side of the board now cools everything —
      * and the bound is safe because it never assumed any: it relaxes adjacency
-     * away and asks only what the tile counts allow. The 0.88 on every cooler
+     * away and asks only what the tile counts allow. The pool's `coolerMultiplier`
      * goes into the roster the bound is run on, so it is the plain bound over a
-     * roster whose coolers are worth 0.88 of their tier — below the plain one,
-     * never above it.
+     * roster whose coolers are worth that share of their tier — below the plain
+     * one, never above it.
      *
      * The board is handed over whole here, as `wholeBoardIsland` does, because
      * that is what the pool is defined over.
      */
-    const cryo = getAnomaly("cryo_nexus");
+    const cryo = anomalyOfRule("cryo_nexus", "shared_cooling");
     const roster = basicRoster({ dpValue: 120, dpWasteRatio: 0.2 });
     const [island] = splitGridIntoIslands(
       makeGrid(["GGG", "GGG", "GGG"]),
@@ -929,7 +930,9 @@ describe("the theoretical max-power bound", () => {
       boundFor(
         island,
         roster.map((b) =>
-          b.type === "cooler" ? scaleEffectiveBuilding(b, 0.88) : b,
+          b.type === "cooler"
+            ? scaleEffectiveBuilding(b, cryo.coolerMultiplier)
+            : b,
         ),
       ),
     );
@@ -955,7 +958,7 @@ describe("the theoretical max-power bound", () => {
   });
 
   it("rises with a terrain bonus only where a tile qualifies", () => {
-    const tidal = getAnomaly("tidal_ascendancy_legacy");
+    const tidal = anomalyOfRule("tidal_ascendancy_legacy", "terrain_affinity");
     const roster = basicRoster();
     // Two rows of bare grass: every tile is on the board's edge, so the whole
     // island is shore and the bound is the plain one scaled by the multiplier
@@ -973,7 +976,7 @@ describe("the theoretical max-power bound", () => {
 
     expectClose(
       estimateTotalMaxPower([shore], roster, tidal),
-      estimateTotalMaxPower([shore], roster) * 1.67,
+      estimateTotalMaxPower([shore], roster) * tidal.multiplier,
     );
     expectClose(
       estimateTotalMaxPower([inland], roster, tidal),
@@ -992,13 +995,13 @@ describe("the theoretical max-power bound", () => {
      * is still a bound, that it is tighter, and that it collapses to the old
      * figure at either end.
      */
-    const tidal = getAnomaly("tidal_ascendancy_legacy");
+    const tidal = anomalyOfRule("tidal_ascendancy_legacy", "terrain_affinity");
 
     /** The figure the two-class bound replaced: the plain LP at the multiplier. */
     const wholeIslandFigure = (
       island: IslandSubGrid,
       roster: EffectiveBuilding[],
-    ): number => estimateTotalMaxPower([island], roster) * 1.67;
+    ): number => estimateTotalMaxPower([island], roster) * tidal.multiplier;
 
     it("is never beaten by a random layout on a mixed board", () => {
       /*

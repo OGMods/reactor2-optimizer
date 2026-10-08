@@ -23,8 +23,9 @@ export interface SimPlacedBuilding extends PlacedBuilding {
    * two differ by the multiplier, and a consumer comparing a delivery against
    * the wrong one silently reads a full tile as a starved one (or the reverse):
    * the walk's "under-fed reactor" move measured `heatProduced` against
-   * `baseValue` for a while and stopped firing below x1/k fill — 66.7% under a
-   * maxed Stellar Forge, 60% on a Tidal shore — with nothing failing anywhere.
+   * `baseValue` for a while and stopped firing below 1/k fill for a tile
+   * rated k — under a maxed Stellar Forge or on a Tidal shore — with nothing
+   * failing anywhere.
    *
    * It stays on `SimPlacedBuilding` rather than on `PlacedBuilding`, so it does
    * not cross the worker boundary: it is the search's own units, meaningless to
@@ -243,9 +244,10 @@ export function simulateIsland(
        * board-wide all-or-nothing the rule describes, with no second code
        * path and no board-level flag.
        *
-       * The 0.88 is already in each cooler's `effectiveValue` — the game rates
-       * the cooler down rather than charging it at the pool — so this sums
-       * what the buildings are worth, exactly as the local path does.
+       * The pool's `coolerMultiplier` is already in each cooler's
+       * `effectiveValue` — the game rates the cooler down rather than charging
+       * it at the pool — so this sums what the buildings are worth, exactly as
+       * the local path does.
        */
       let totalCooling = 0.0;
       for (let i = 0; i < numCoolers; i++)
