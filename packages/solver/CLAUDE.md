@@ -712,3 +712,18 @@ but stage deadlines are wall-clock, so seeding narrows run-to-run variance
 rather than eliminating it. For a whole-board check use the CLI
 (`npm run solve -- --map 1 --attempts 10 --time 20`): the search is stochastic
 and map 1 swings ~2% run to run, so compare several runs, not one.
+
+**For a change to what a real run finds, use the survey before and after.** It
+solves every map (obstacles cleared) under every anomaly, island by island:
+
+```bash
+npm run survey -- --runs 5 --json solves/base.json     # on the old code
+npm run survey -- --runs 5 --compare solves/base.json  # on the new
+```
+
+`--compare` judges each island on the mean of its runs, against a noise band
+the width of the wider side's run spread, and exits 1 if any island fell below
+it. Same `--time`, `--runs` and `--seed` on both sides, same machine, same load —
+it warns if the first three differ. Expect about ±0.8% per map at 15s × 5 runs,
+so a gain smaller than that needs more runs to show; "no island got worse" is
+the claim it can make at any size.
