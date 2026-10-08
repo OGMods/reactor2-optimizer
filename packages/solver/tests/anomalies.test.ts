@@ -17,6 +17,7 @@ import {
   getAnomaly,
 } from "../src/data/anomalies";
 import { BUILDINGS } from "../src/data/buildings";
+import { decodeBlueprint } from "../src/encoding/blueprint";
 import {
   getEffectiveBuildings,
   scaleEffectiveBuilding,
@@ -33,6 +34,7 @@ import {
   splitGridIntoIslands,
 } from "../src/solver/island";
 import { internals, solveIsland } from "../src/solver/placementSearch";
+import { planSolve } from "../src/solver/solver";
 import {
   anomalyOfRule,
   basicCatalogue,
@@ -430,6 +432,79 @@ describe("gathering the coolers under a shared cooling pool", () => {
     const { before, out } = gather(getAnomaly("none"));
     expect(out.rows).toBe(before.placements);
     expect(out.power).toBe(before.totalPower);
+  });
+
+  it("moves a hub off a second landmass so the coolers can have it", async () => {
+    /*
+     * A solve of Entropy Isles with its obstacles cleared, reported by a
+     * player: a hub of 3 generators and 12 reactors on the 20-tile landmass
+     * west of the main one, with 34 coolers left on the main landmass. One
+     * tile at a time cannot move the hub — a generator taken from its reactors
+     * loses power at every step — and the player's own rearrangement put the
+     * hub on the main landmass and the coolers on the west one at the same
+     * 611AC.
+     */
+    const CODE =
+      "eJx1kFkOwzAIRL20-Z6_SvQcc_-rVYCNHZOiSEl4LMPU76fMoMdVUpCij4C3NBSJdwlTEyxNEgmJEwHgY9ZA3QZtNbbqGR8QBsK22qGPBPS3TFHjAOsyzlOLTcTAN0MO9Yjb0sUAdZw8mFEwfAo29iB8l1i1XY7p1GC7KarNuuZhS6H7bjW7v7Z0KtjK4511pzv-EzyxI9dxyYvv2mtrrfcfKAoi8Q";
+    const board = await decodeBlueprint(CODE);
+    const cryo = getAnomaly("cryo_nexus");
+    const plan = planSolve(
+      board.grid,
+      [...BUILDINGS],
+      board.tiers,
+      1,
+      0,
+      cryo.id,
+      prestigeScales(board.rules!.research),
+    )!;
+    const island = plan.islands[0];
+    const ctx = buildIslandContext(island.grid, island.buildable, cryo);
+    const original = (t: number) =>
+      island.originalTileIndices[ctx.ys[t] * island.width + ctx.xs[t]];
+    const tileAt = new Map(Array.from(ctx.tiles, (t) => [original(t), t]));
+    const byId = new Map(plan.effectiveBuildings.map((b) => [b.id, b]));
+
+    const placement: Placement = new Array(ctx.n).fill(null);
+    for (const p of board.placements) {
+      const t = tileAt.get(p.y * board.width + p.x)!;
+      placement[t] = ctx.rate(t, byId.get(p.buildingId)!);
+    }
+    const before = simulateIsland(placement, ctx);
+    const out = internals.gatherPooledCoolers(
+      before.placements,
+      before.totalPower,
+      plan.effectiveBuildings,
+      ctx,
+      // Generous, evacuation included, so a loaded machine tests the pass
+      // rather than its deadlines.
+      performance.now() + 10_000,
+      performance.now() + 10_000,
+    );
+
+    expect(wasteIsCovered(before.totalPower, out.power)).toBe(true);
+    const counts = (rows: { buildingId: string }[]) => {
+      const n = new Map<string, number>();
+      for (const r of rows) n.set(r.buildingId, (n.get(r.buildingId) ?? 0) + 1);
+      return [...n].sort();
+    };
+    expect(counts(out.rows)).toEqual(counts(before.placements));
+    for (const row of out.rows)
+      if (row.buildingId.startsWith("generator"))
+        expect(row.powerGenerated).toBeGreaterThan(EPS);
+
+    // The west landmass: every tile 4-connected to (0, 7) on land.
+    const west = new Set<number>();
+    const stack = [tileAt.get(7 * board.width)!];
+    while (stack.length > 0) {
+      const t = stack.pop()!;
+      if (west.has(t)) continue;
+      west.add(t);
+      for (const u of ctx.neighbors[t]) stack.push(u);
+    }
+    expect(west.size).toBe(20);
+    const onWest = out.rows.filter((r) => west.has(r.idx));
+    expect(onWest.length).toBe(20);
+    expect(onWest.every((r) => r.buildingId.startsWith("cooler"))).toBe(true);
   });
 });
 

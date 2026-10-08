@@ -177,8 +177,23 @@ CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
   every producer and the upgrade plan all hold, so the pass cannot cost a watt.
   It is capped at 150ms for the primary and 150ms shared across the
   alternates; on the shipped maps one layout takes 15-110ms. Map 1 goes from
-  five cooler clusters to one. Coolers on a second working landmass stay there
-  when no empty tile near the anchor is free to take them.
+  five cooler clusters to one.
+
+  **Before the sweep, hubs leave the smaller landmasses**
+  (`evacuateMinorLandmasses`). One tile at a time cannot move a hub: a
+  generator taken from its reactors loses power at every step, so a hub on a
+  second landmass kept its coolers there. Each smaller landmass that holds
+  producers, smallest first, has all of them moved onto the landmass holding
+  the most. A greedy placement puts them on that landmass's cooler or empty
+  tiles, and each displaced cooler crosses to the tile its producer left, so
+  composition and pool are unchanged. A swap descent over the main landmass
+  then restores power. The move is kept only on the same three tests as a swap,
+  and the emptied landmass then fills with coolers like any scrap. It has its
+  own 1s cap on top of the sweep's (`EVACUATE_BUDGET_MS`), sized for a phone; a
+  15-producer hub takes about 170ms on a desktop. On the eight maps with
+  obstacles cleared it brings seven to a single producing landmass at the same
+  power. Shadowspire keeps two, because its 29-producer second landmass does
+  not fit in the main one's coolers.
 
 - **Off the board counts as water**, which is a fact about our data rather than
   about the game: the game has one global map with open water between islands,
