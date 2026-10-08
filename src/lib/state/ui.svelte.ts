@@ -1010,9 +1010,21 @@ class UIState {
       await layoutState.importBlueprint(
         this.importCode,
         configState.buildingUpgrades,
+        // A run belongs to the board it was launched from, which an import
+        // takes off the screen — the reason a template switch stops one first.
+        // Stopped only once the code is accepted, so a bad paste mid-run costs
+        // nothing.
+        () => solverState.stopOptimizer(),
       );
       this.activeModal = null;
       this.importCode = "";
+      // An import is a template switch, and every switch has to swap the
+      // solve panel to the new island's (it has none yet, so this clears it).
+      // Without it the previous island's solve stayed up — over the solver
+      // view that is the old board's buildings on the new board's terrain —
+      // until a switch away and back ran the restore this one skipped.
+      solverState.restore();
+      this.closeInspector();
       // The imported board is a different shape; frame it.
       this.recenterCanvas();
     } catch (err) {
