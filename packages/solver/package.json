@@ -37,6 +37,7 @@
     "build": "vite build -c vite.build.config.ts && tsc -p tsconfig.build.json",
     "solve": "tsx bin/solve.ts",
     "fixtures": "tsx scripts/exportFixtures.ts",
+    "survey": "tsx scripts/gapSurvey.ts",
     "prepublishOnly": "npm run build"
   }
 }

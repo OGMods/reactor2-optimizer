@@ -29,7 +29,8 @@
     "test:watch": "vitest",
     "build:solver": "npm run build --workspace @reactor2/solver",
     "solve": "npm run solve --workspace @reactor2/solver --",
-    "fixtures": "npm run fixtures --workspace @reactor2/solver --"
+    "fixtures": "npm run fixtures --workspace @reactor2/solver --",
+    "survey": "npm run survey --workspace @reactor2/solver --"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
