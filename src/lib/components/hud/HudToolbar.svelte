@@ -1,9 +1,5 @@
 <script lang="ts">
-  import {
-    editorState,
-    uiState,
-    viewportState,
-  } from "../../state";
+  import { editorState, uiState, viewportState } from "../../state";
   import type { BuildingCategory } from "@reactor2/solver";
   import {
     ArrowLeft,
@@ -238,11 +234,7 @@
       <BuildingPalette category={activeBuildingCategory} />
     {/if}
 
-    <div
-      class="hud-modes ribbon"
-      role="toolbar"
-      aria-label="Editing tools"
-    >
+    <div class="hud-modes ribbon" role="toolbar" aria-label="Editing tools">
       {#if hudMode === "tiles"}
         <TerrainPalette onEnterBuildings={enterBuildingsMode} />
       {:else}

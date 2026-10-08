@@ -78,7 +78,7 @@ drifts to twelve-odd hues — a Share button wearing the colour the board uses f
 |                 | means                                                       |
 | --------------- | ----------------------------------------------------------- |
 | `--accent`      | this control is selected / active. Nothing else.            |
-| `--action`      | the one *filled* primary control. RUN, and nothing else.    |
+| `--action`      | the one _filled_ primary control. RUN, and nothing else.    |
 | `--status-ok`   | the board only: this building is working.                   |
 | `--status-idle` | the board only: this building is doing nothing.             |
 | `--danger`      | the board: overheating. In the UI: this destroys something. |
@@ -137,7 +137,7 @@ of them carries a rule about anomalies at all.
 
 It replaced eleven copies of the signal — ten components each with
 `class:anomalous={configState.hasAnomaly}` and a `.anomalous` rule re-pointing
-*a different subset* of the same tokens, which is exactly how the HUD's ground
+_a different subset_ of the same tokens, which is exactly how the HUD's ground
 went purple while the selected tool on it stayed cyan, and how
 `BuildingPalette` came to remember `--text-dim` where `ObstaclePalette` beside
 it did not. Every new panel was another place to remember, and forgetting was
@@ -154,7 +154,7 @@ Four things about what a theme may and may not move:
 - **Alpha is the component's, hue is the theme's.** Each surface picks its own
   strength over the board — the sheet 0.97, the readout 0.94, the HUD's pills
   0.92, the docked panel 0.88 — by composing `rgba(var(--surface-panel-rgb),
-  …)`. That is why the ground is a bare triplet rather than a colour: one
+…)`. That is why the ground is a bare triplet rather than a colour: one
   decision, not one token per surface. Selecting an anomaly changes the hue and
   nothing about how much board shows through.
 - **The whole `--accent` family goes**, so every mark meaning "selected" follows
@@ -165,8 +165,8 @@ Four things about what a theme may and may not move:
   by contrast, and the badge purple reads 3.3:1 on this panel, unreadable as a
   heading. `#c9a5f0` puts back the 6.5:1 the cyan had.
 - **`--action` is a separate role from `--accent`, and this is what it is for.**
-  RUN is the one *filled* control in the app: a fill carrying ink, where
-  brighter is *less* legible, against `--accent`'s stroke-on-dark, where brighter
+  RUN is the one _filled_ control in the app: a fill carrying ink, where
+  brighter is _less_ legible, against `--accent`'s stroke-on-dark, where brighter
   is more. The base theme answers both with the same cyan, which is why they
   looked like one token until a theme needed them apart — the selection
   lavender carries neither ink at AA, so `--action` is the badge purple pulled

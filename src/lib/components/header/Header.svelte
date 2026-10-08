@@ -1,9 +1,5 @@
 <script lang="ts">
-  import {
-    layoutState,
-    uiState,
-    viewportState,
-  } from "../../state";
+  import { layoutState, uiState, viewportState } from "../../state";
   import { LocateFixed, Share2 } from "lucide-svelte";
   import { asset } from "../../utils";
   import GridControls from "./GridControls.svelte";

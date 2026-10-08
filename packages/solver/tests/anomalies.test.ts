@@ -444,13 +444,7 @@ describe("role isolation reaching the board", () => {
   };
 
   /** A 7x5 board of grass walled in by rock, so no tile of it is on an edge. */
-  const BOARD = [
-    "RRRRRRR",
-    "RGGGGGR",
-    "RGGGGGR",
-    "RGGGGGR",
-    "RRRRRRR",
-  ];
+  const BOARD = ["RRRRRRR", "RGGGGGR", "RGGGGGR", "RGGGGGR", "RRRRRRR"];
 
   /**
    * Scores `spec` — `[x, y, code]` in board coordinates — and returns each
@@ -463,7 +457,8 @@ describe("role isolation reaching the board", () => {
     for (let t = 0; t < ctx.n; t++) at.set(`${ctx.xs[t]},${ctx.ys[t]}`, t);
 
     const placement: Placement = new Array(ctx.n).fill(null);
-    for (const [x, y, code] of spec) placement[at.get(`${x},${y}`)!] = CODES[code];
+    for (const [x, y, code] of spec)
+      placement[at.get(`${x},${y}`)!] = CODES[code];
 
     const out = new Map<string, number>();
     for (const row of simulateIsland(placement, ctx, true).placements)
@@ -719,7 +714,14 @@ describe("a terrain bonus reaching the board", () => {
     );
     const byId = new Map(roster.map((b) => [b.id, b]));
 
-    const solution = await solveIsland(island, roster, 0.5, undefined, 11, tidal);
+    const solution = await solveIsland(
+      island,
+      roster,
+      0.5,
+      undefined,
+      11,
+      tidal,
+    );
     expect(solution.placements.length).toBeGreaterThan(0);
 
     // Tile index by the island-local coordinates the report carries.
@@ -761,13 +763,7 @@ describe("a terrain bonus reaching the board", () => {
     // Three tiles in a column against the board's left edge: all shore.
     const shore = layoutOn(["GRRRR", "GRRRR", "GRRRR"]);
     // The same column, walled in by rock and away from every edge.
-    const inland = layoutOn([
-      "RRRRR",
-      "RRGRR",
-      "RRGRR",
-      "RRGRR",
-      "RRRRR",
-    ]);
+    const inland = layoutOn(["RRRRR", "RRGRR", "RRGRR", "RRGRR", "RRRRR"]);
 
     expect(inland).toBeGreaterThan(0);
     expect(shore).toBeCloseTo(inland * 1.67, 6);

@@ -178,9 +178,7 @@ export interface EffectiveBuilding {
  * here, and naming it here means giving it a byte.
  */
 export type PrestigeUpgradeId =
-  | "absolute_zero"
-  | "infinite_grid"
-  | "stellar_forge";
+  "absolute_zero" | "infinite_grid" | "stellar_forge";
 
 export interface PrestigeUpgrade {
   id: PrestigeUpgradeId;
@@ -213,10 +211,7 @@ export type PrestigeScales = Readonly<Record<BuildingType, number>>;
  * `undefined`.
  */
 export type AnomalyId =
-  | "none"
-  | "cryo_nexus"
-  | "tidal_ascendancy"
-  | "singularity_isolation";
+  "none" | "cryo_nexus" | "tidal_ascendancy" | "singularity_isolation";
 
 /**
  * Identity and the game's own wording, shared by every anomaly.

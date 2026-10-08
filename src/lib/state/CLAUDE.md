@@ -27,9 +27,10 @@ author's research, and a blueprint does not record what that was.
 - **Changing it re-scores both boards** through the same `$effect` in
   `App.svelte` a roster change goes through, and for the same reason. It is
   tracked separately there because the two ask for different work: a bought tier
-  changes which tier a *placement* resolves to (`rebasePlacements`), while an
+  changes which tier a _placement_ resolves to (`rebasePlacements`), while an
   anomaly changes none of them — the same building at the same tier is simply
   rated differently — so it needs the re-score alone.
+
 ## The upgrade plan: the app side
 
 The search side is in `docs/SOLVER.md`; the readout's plan line in

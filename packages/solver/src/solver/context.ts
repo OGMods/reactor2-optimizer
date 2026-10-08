@@ -191,7 +191,10 @@ export interface IslandContext {
    * are only two variants of each roster entry, so they are built once per
    * island and handed back for the rest of the solve.
    */
-  rateIsolated(building: EffectiveBuilding, crowded: boolean): EffectiveBuilding;
+  rateIsolated(
+    building: EffectiveBuilding,
+    crowded: boolean,
+  ): EffectiveBuilding;
   /**
    * A whole-layout scratch buffer, reused by `simulateIsland` when a rule has
    * to resolve a layout before scoring it.
@@ -364,14 +367,7 @@ export function buildIslandContext(
     neighbors[i] = Int32Array.from(found);
   }
 
-  const tileScale = terrainScales(
-    localGrid,
-    anomaly,
-    xs,
-    ys,
-    n,
-    waterAdjacent,
-  );
+  const tileScale = terrainScales(localGrid, anomaly, xs, ys, n, waterAdjacent);
   // A uniform scale on one role, which is what Cryo Nexus does to coolers: the
   // game applies its 0.88 to `CoolerBuilding.CoolingPerSec`, so it is what a
   // cooler is worth rather than a charge levied at the pool.

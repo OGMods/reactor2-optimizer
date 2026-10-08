@@ -401,11 +401,11 @@ other eight move research income, research time, Chronons, obstacle-removal
 cost, energy sale price and building prices — all decided before a board is
 laid out, so none can change which layout is best.
 
-| research           | scales                                        | levels (×)  |
-| ------------------ | --------------------------------------------- | ----------- |
-| **Stellar Forge**  | every heat producer's heat output              | ×1.1 – ×1.5 |
-| **Infinite Grid**  | every generator's and wind turbine's heat intake, energy and overheat capacity | ×1.1 – ×2.0 |
-| **Absolute Zero**  | every cooler's cooling                         | ×1.1 – ×2.0 |
+| research          | scales                                                                         | levels (×)  |
+| ----------------- | ------------------------------------------------------------------------------ | ----------- |
+| **Stellar Forge** | every heat producer's heat output                                              | ×1.1 – ×1.5 |
+| **Infinite Grid** | every generator's and wind turbine's heat intake, energy and overheat capacity | ×1.1 – ×2.0 |
+| **Absolute Zero** | every cooler's cooling                                                         | ×1.1 – ×2.0 |
 
 Absolute Zero and Infinite Grid share one bonus curve — 0.1, 0.25, 0.45, 0.7,
 1.0 — and Stellar Forge a shallower one — 0.1, 0.2, 0.3, 0.4, 0.5. The game
@@ -415,7 +415,7 @@ authors them as a bonus fraction and shows them as "+10%" through "+100%" (or
 **The roles do not overlap, and the boundary is the class of building rather
 than the catalogue's grouping.** The game's catalogue files reactors and wind
 turbines together under one "heat producer" category, but a wind turbine is a
-*power source* in the code, so Stellar Forge does not touch it — Infinite Grid
+_power source_ in the code, so Stellar Forge does not touch it — Infinite Grid
 does, which is why that one goes out of its way to name wind turbines. A reactor
 is the only heat producer the shipped roster has, so in practice Stellar Forge
 is "reactors"; it would cover any other heat producer the game added.
@@ -449,10 +449,10 @@ four roles:
 
 | the game says     | the figure                                                                      |
 | ----------------- | ------------------------------------------------------------------------------- |
-| Heat              | a reactor's output, a generator's intake capacity, a direct producer's own heat  |
-| Energy            | what a generator or direct producer puts out at full                             |
-| Cooling           | what a cooler absorbs                                                            |
-| overheat capacity | the size of a power source's waste-heat store — not the waste it makes           |
+| Heat              | a reactor's output, a generator's intake capacity, a direct producer's own heat |
+| Energy            | what a generator or direct producer puts out at full                            |
+| Cooling           | what a cooler absorbs                                                           |
+| overheat capacity | the size of a power source's waste-heat store — not the waste it makes          |
 
 So a building with a ×1.67 bonus is simply a building whose whole tier is worth
 1.67× as much: it absorbs more, produces more, and needs proportionally more
@@ -485,7 +485,7 @@ waste    = snapToAuthoredPrecision(heat − energy)     ← again, from the new 
 
 Scaling the authored waste directly instead — `authoredWaste × timeLab ×
 anomaly` — is wrong. It agrees to about fifteen digits and disagrees in the
-last, because the snap is a decimal rounding and it is applied to the *scaled*
+last, because the snap is a decimal rounding and it is applied to the _scaled_
 difference, not carried along from the table. The same is true of carrying a
 once-derived waste through the second multiply: the last derivation wins.
 
@@ -496,7 +496,7 @@ re-derived wherever the pair it comes from is scaled again.
 
 **Anomaly and research compose multiplicatively.** A generator under Singularity
 Isolation (×4) with Infinite Grid maxed (×2) is rated ×8. That is a
-*rating*, not a promise of 8× the power: what it actually produces still
+_rating_, not a promise of 8× the power: what it actually produces still
 depends on how much heat reaches it.
 
 It is also not always the same double as one combined multiply, and the
@@ -558,7 +558,7 @@ itself:
 **"An island" here means the whole map.** Gale Hills is an island; so is Ash
 Bay. The rule is board-wide: every cooler anywhere on the map pays into one
 pool, and every power source anywhere on the map draws from it. "Cooling does
-not carry over to other islands" means it does not carry to a *different map* —
+not carry over to other islands" means it does not carry to a _different map_ —
 there is nothing finer than the board for this pool to respect.
 
 This is the one rule in the game that reaches across the whole board, and every
@@ -566,7 +566,7 @@ other rule in this document is the opposite: adjacency-bound, which is why a
 board splits into independent patches of connected grass and each can be solved
 on its own. Under this anomaly they are not independent.
 
-They are still *nearly* independent, and the shape of what survives is worth
+They are still _nearly_ independent, and the shape of what survives is worth
 being precise about, because it is what decides how hard this is to solve:
 
 - **Heat is untouched.** Reactors still only reach adjacent generators, so which
@@ -574,7 +574,7 @@ being precise about, because it is what decides how hard this is to solve:
   question about that patch alone.
 - **The patches are coupled by exactly two numbers.** A layout on a patch makes
   some power, generates some waste, and contributes some cooling; the board runs
-  on whether the cooling *summed over every patch* covers the waste summed over
+  on whether the cooling _summed over every patch_ covers the waste summed over
   every patch. Nothing else crosses.
 
 So a patch is no longer described by "the most power it can make" but by a

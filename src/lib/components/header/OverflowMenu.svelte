@@ -1,9 +1,5 @@
 <script lang="ts">
-  import {
-    layoutState,
-    uiState,
-    viewportState,
-  } from "../../state";
+  import { layoutState, uiState, viewportState } from "../../state";
   import GridControls from "./GridControls.svelte";
   import DonateButton from "./DonateButton.svelte";
   import {
@@ -83,10 +79,7 @@
   </button>
 
   {#if uiState.overflowOpen}
-    <div
-      class="menu thin-scroll"
-      role="menu"
-    >
+    <div class="menu thin-scroll" role="menu">
       {#if showSize}
         <div class="menu-section">
           <span class="menu-title">Map size</span>

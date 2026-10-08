@@ -7,7 +7,7 @@ rules is in `src/lib/components/hud/CLAUDE.md`.
 
 `uiState.setupHidden` takes the panel off screen for the length of a run, and
 both ways back into it with it — the HUD's Setup button and the docked panel's
-own handle. Everything on its three tabs is an input to *that* run (the island
+own handle. Everything on its three tabs is an input to _that_ run (the island
 it is solving, the roster it was planned with, the timeline it is rating
 against) and a run reads every one of them once, at launch, so a press there
 either cannot reach the search at all or, on the island list, stops it outright.
@@ -24,7 +24,7 @@ Three things follow, and each is something that would otherwise be left behind:
   otherwise.** Its teardown is the same call `HudToolbar` makes for
   `hudHeight` — a width left behind reserves canvas, and the HUD's own
   `padding-left` tracks the same edge — and that is right for a preview or a
-  hidden interface, which are states the user is *in*. A run is not: Setup is
+  hidden interface, which are states the user is _in_. A run is not: Setup is
   away for seconds and comes back on its own, so handing the space over means
   taking it again a moment later, with the action pill gliding 190px out from
   under the cursor that pressed RUN and back when it lands. Held, the whole
@@ -52,7 +52,7 @@ from whether the switch is offered. Three reasons, all pointing the same way:
 the readout is pinned to the run for the duration (`statsPanel`), so switching
 to Edit leaves the card reporting the search while the canvas draws the user's
 board — the one disagreement `visiblePlacements` exists to make impossible; the
-switch to the solver's board is an edge on the run *starting* (`PixiCanvas`), so
+switch to the solver's board is an edge on the run _starting_ (`PixiCanvas`), so
 a layout finishing while the user is on their own board lands where nobody is
 looking; and on a first-ever run the pill would appear partway through anyway,
 the moment the first progress report gives it something to switch to, which on

@@ -749,8 +749,8 @@
                 <div class="row">
                   <span class="row-label">Mode</span>
                   <span class="row-value"
-                    >{runMode.label} <span class="ago">· {runMode.shape}</span
-                    ></span
+                    >{runMode.label}
+                    <span class="ago">· {runMode.shape}</span></span
                   >
                 </div>
               {/if}
@@ -1175,7 +1175,6 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
-
 
   /* ── The two figures ───────────────────────────────────────────── */
   .figures {
