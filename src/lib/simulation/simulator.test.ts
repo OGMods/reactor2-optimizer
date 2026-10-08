@@ -360,7 +360,7 @@ describe("the readout rates a board under the same rules the search does", () =>
    * solver's identical layout printed bonused ones — the two disagreeing about
    * the same board, which is the one thing this arrangement exists to prevent.
    */
-  const tidal = getAnomaly("tidal_ascendancy");
+  const tidal = getAnomaly("tidal_ascendancy_legacy");
 
   /** A reactor, generator and cooler in a row, with their tiles. */
   const chain = (x: number, y: number): Spec => [
@@ -426,7 +426,7 @@ describe("the readout rates a board under the same rules the search does", () =>
 });
 
 describe("a rated ceiling is what the row beside it was measured against", () => {
-  const TIDAL = getAnomaly("tidal_ascendancy");
+  const TIDAL = getAnomaly("tidal_ascendancy_legacy");
   const CRYO = getAnomaly("cryo_nexus");
   const SINGULARITY = getAnomaly("singularity_isolation");
 

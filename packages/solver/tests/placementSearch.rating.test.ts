@@ -37,7 +37,7 @@ vi.mock("../src/solver/simulate", async (importOriginal) => {
   return { ...real, simulateIsland: vi.fn(real.simulateIsland) };
 });
 
-const tidal = getAnomaly("tidal_ascendancy");
+const tidal = getAnomaly("tidal_ascendancy_legacy");
 const singularity = getAnomaly("singularity_isolation");
 
 /**

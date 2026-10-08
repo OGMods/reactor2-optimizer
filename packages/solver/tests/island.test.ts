@@ -543,7 +543,7 @@ describe("the theoretical max-power bound", () => {
      * mixed-board case, where the two-class bound has real work to do, is
      * `the two-class bound under a terrain bonus` below.
      */
-    const tidal = getAnomaly("tidal_ascendancy");
+    const tidal = getAnomaly("tidal_ascendancy_legacy");
     const roster = basicRoster({ dpValue: 120, dpWasteRatio: 0.2 });
     const island = islandFor(["GGG", "GGG", "GGG"], roster);
     const bound = estimateTotalMaxPower([island], roster, tidal);
@@ -955,7 +955,7 @@ describe("the theoretical max-power bound", () => {
   });
 
   it("rises with a terrain bonus only where a tile qualifies", () => {
-    const tidal = getAnomaly("tidal_ascendancy");
+    const tidal = getAnomaly("tidal_ascendancy_legacy");
     const roster = basicRoster();
     // Two rows of bare grass: every tile is on the board's edge, so the whole
     // island is shore and the bound is the plain one scaled by the multiplier
@@ -992,7 +992,7 @@ describe("the theoretical max-power bound", () => {
      * is still a bound, that it is tighter, and that it collapses to the old
      * figure at either end.
      */
-    const tidal = getAnomaly("tidal_ascendancy");
+    const tidal = getAnomaly("tidal_ascendancy_legacy");
 
     /** The figure the two-class bound replaced: the plain LP at the multiplier. */
     const wholeIslandFigure = (
@@ -1169,7 +1169,7 @@ describe("the theoretical max-power bound", () => {
       // Tidal's own identity, because `AnomalyId` is a closed union and this is
       // a shape a future entry could take rather than one that ships. Only the
       // terrain list is the point.
-      ...(getAnomaly("tidal_ascendancy") as TerrainAffinityAnomaly),
+      ...(getAnomaly("tidal_ascendancy_legacy") as TerrainAffinityAnomaly),
       terrain: ["water", "rock"],
       multiplier: 2,
     };

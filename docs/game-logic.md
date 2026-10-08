@@ -611,6 +611,12 @@ they are unbuildable ground.
 > The bonus affects Energy, Heat, Cooling, and overheat capacity. Buildings away
 > from water work normally and get no bonus.
 
+The game has since nerfed the multiplier to **×1.35**. A timeline keeps the
+figure it jumped in under until it jumps again, so a save from before the nerf
+still runs at ×1.67: both are in the table (`tidal_ascendancy` at ×1.35 and
+`tidal_ascendancy_legacy` at ×1.67) and the Tidal card switches between them.
+The ×1.67 examples elsewhere in this document still hold for those saves.
+
 A per-tile uniform scale, decided by terrain alone: a building is scaled if any
 of the eight tiles around it is water. Nothing about the layout can change which
 tiles qualify, so this is a fixed per-tile multiplier the solver can compute once

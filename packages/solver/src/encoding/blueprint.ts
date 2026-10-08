@@ -155,6 +155,10 @@ const ANOMALY_BYTE_MAP: Record<AnomalyId, number> = {
   cryo_nexus: 1,
   tidal_ascendancy: 2,
   singularity_isolation: 3,
+  // Byte 2 predates the nerf, so a code shared before it now reads at the live
+  // figure. There is no telling such a code from a new one, and the live figure
+  // is the rule a timeline started today runs under.
+  tidal_ascendancy_legacy: 4,
 };
 
 const RESEARCH_BYTE_MAP: Record<PrestigeUpgradeId, number> = {

@@ -572,7 +572,7 @@ describe("a terrain bonus reaching the board", () => {
    * settles it once and `rate` is a lookup — the reason a shore bonus costs the
    * search nothing.
    */
-  const tidal = getAnomaly("tidal_ascendancy");
+  const tidal = getAnomaly("tidal_ascendancy_legacy");
 
   /** The context for a board, with off-board treated as water throughout. */
   const contextFor = (rows: string[], anomaly = tidal) =>
@@ -1102,7 +1102,7 @@ describe("the search running under each rule", () => {
      * Grid at x2 on the generator and Absolute Zero at x2 on the cooler, and then
      * a shore bonus on top of both.
      */
-    const tidal = getAnomaly("tidal_ascendancy");
+    const tidal = getAnomaly("tidal_ascendancy_legacy");
     const { buildings, unlocks } = basicCatalogue();
     const roster = getEffectiveBuildings(
       buildings,
@@ -1145,7 +1145,7 @@ describe("the search running under each rule", () => {
      * is that way round, which no test reached — `prestige.test.ts` never builds
      * a context, and every context test starts from an unresearched roster.
      */
-    const tidal = getAnomaly("tidal_ascendancy");
+    const tidal = getAnomaly("tidal_ascendancy_legacy");
     const [researched] = getEffectiveBuildings(
       BUILDINGS,
       { generator7: 3 },

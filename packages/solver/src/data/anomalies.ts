@@ -49,10 +49,10 @@ export const ANOMALIES: readonly AnomalyDefinition[] = [
     id: "tidal_ascendancy",
     rule: "terrain_affinity",
     name: "Tidal Ascendancy",
-    benefit: "Waterside buildings ×1.67",
+    benefit: "Waterside buildings ×1.35",
     drawback: "Inland buildings gain nothing",
     description:
-      "Production buildings next to water get a ×1.67 multiplier. Corners " +
+      "Production buildings next to water get a ×1.35 multiplier. Corners " +
       "count too. The bonus affects Energy, Heat, Cooling, and overheat " +
       "capacity. Buildings away from water work normally and get no bonus.",
     // Water only. A pond looks wet and is not: the game files it with the rocks
@@ -61,7 +61,9 @@ export const ANOMALIES: readonly AnomalyDefinition[] = [
     // the rating of roughly half the board — it is the cheapest thing here to
     // get wrong.
     terrain: ["water"],
-    multiplier: 1.67,
+    // Nerfed from ×1.67 by the game; typed in ahead of the next extraction.
+    multiplier: 1.35,
+    variantLabel: "×1.35",
   },
   {
     id: "singularity_isolation",
@@ -77,6 +79,26 @@ export const ANOMALIES: readonly AnomalyDefinition[] = [
     role: "generator",
     isolated: 4,
     crowded: 0.8,
+  },
+  {
+    // Tidal Ascendancy as it shipped before the nerf. A save that jumped into
+    // it then keeps ×1.67 until it jumps again, so it stays selectable — as a
+    // switch on the Tidal card, not as a card of its own (see `variantOf`).
+    // Same name as the live one on purpose: in the game it *is* that anomaly.
+    id: "tidal_ascendancy_legacy",
+    rule: "terrain_affinity",
+    name: "Tidal Ascendancy",
+    benefit: "Waterside buildings ×1.67",
+    drawback: "Inland buildings gain nothing",
+    description:
+      "Production buildings next to water get a ×1.67 multiplier. Corners " +
+      "count too. The bonus affects Energy, Heat, Cooling, and overheat " +
+      "capacity. Buildings away from water work normally and get no bonus. " +
+      "This is the pre-nerf figure, which a timeline keeps until its next jump.",
+    terrain: ["water"],
+    multiplier: 1.67,
+    variantOf: "tidal_ascendancy",
+    variantLabel: "×1.67",
   },
 ];
 
