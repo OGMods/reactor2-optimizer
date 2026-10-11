@@ -321,6 +321,17 @@ cooler term goes, because adjacency does: the pool reaches the whole island, so 
 be a reactor. The two-class bound takes one cap on the _best_ of each class, since which class a
 tile falls in is a property of that tile and an inland generator may have shore reactors around it.
 
+**A cooler reaches eight producers, and the cooling budget forgot it.** The LP charges cooling as one
+island-wide budget, `0.25 · H + wMin · D <= nCool · C_top`, which is exact in the _amount_ and blind to
+the _reach_: cooling gets to a producer only from a cooler beside it, so `nCool` coolers keep at most
+`8 · nCool` producers online. That was harmless while a cooler covered two or three producers' waste.
+Cooler #8 against Generator #7 covers fourteen, and the budget asked for five coolers on Magma Rift's
+107 tiles where the best layout found uses thirteen at a third of their capacity — the base-rules bound
+sat 3–5% above it on every shipped map and read 92–94% for layouts at 96–98% of the corrected figure.
+The LP now caps generators at `8 · nCool` per split (and direct producers too); under a pool the cooling
+is not adjacent and neither is the cap. Singularity's bound does not move: its isolated generators are
+few enough that eight per cooler never binds.
+
 **The second half of the same argument is how many generators an island can keep apart, and a
 generator-bound roster is what runs into it.** Rating every generator at the bonus is what a search
 free to spread them out can reach — but isolated generators are pairwise non-adjacent by

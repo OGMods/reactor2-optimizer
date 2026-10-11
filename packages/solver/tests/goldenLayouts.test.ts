@@ -69,12 +69,25 @@ import { expectClose, placementsByPos } from "./helpers";
 
 const { hillClimb, offlineProducers, pruneDeadWeight } = internals;
 
-/** The scenario: everything unlocked EXCEPT these four. */
+/**
+ * The scenario: a mid-game player — everything unlocked EXCEPT the late game.
+ *
+ * The first four are the scenario as it was brute-forced. The rest are
+ * late-game buildings the game added since, every one stronger than anything
+ * the scenario holds; they join this list so the scenario stays the roster the
+ * optima below were verified on. Letting them in would not test anything new —
+ * it would ask about a player holding Heat Sink #8 without #7 — and every
+ * optimum would need brute-forcing again for no player anyone has.
+ */
 const EXCLUDED_BUILDINGS = new Set([
   "generator7",
   "cooler7",
   "flux_reactor",
   "doomStar_reactor",
+  // 1.1.10
+  "cooler8",
+  "precursor_pyramid",
+  "ecto_compressor",
 ]);
 
 /**
@@ -258,11 +271,13 @@ describe("the roster these layouts assume", () => {
    * expected layouts below need recomputing.
    */
 
-  it("excludes exactly the four buildings the scenario names", () => {
+  it("excludes exactly the buildings the scenario names", () => {
     /*
      * Written so it holds whether or not the full roster currently unlocks these
-     * four — the scenario is "everything the player has, minus these", not "the
-     * default roster is exactly four bigger".
+     * — the scenario is "everything the player has, minus these", not "the
+     * default roster is exactly this many bigger". So a building the game adds
+     * lands IN the scenario until it is named above, and the next test is what
+     * notices: decide then whether it belongs to the mid game.
      */
     const available = new Set(ROSTER.map((b) => b.id));
     const full = new Set(

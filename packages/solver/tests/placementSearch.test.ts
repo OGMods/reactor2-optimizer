@@ -314,29 +314,72 @@ describe("seed construction", () => {
     expect(keys).toEqual(sorted);
   });
 
-  it("reaches a high fraction of the theoretical bound on a real map", async () => {
-    /*
-     * A quality floor on the real game roster and a real map. The seed normally
-     * lands within a few percent of the (loose) upper bound; this fails loudly
-     * if a change to the construction heuristic guts it.
-     */
-    const roster = getEffectiveBuildings(BUILDINGS, allUpgradesUnlocked());
+  /*
+   * A quality floor on a real map, so a change to the construction heuristic
+   * that guts it fails loudly. The replay is deterministic, so each floor sits
+   * a margin under a figure this exact seed reproduces.
+   */
+  async function seedShareOfBound(
+    unlocks: Record<string, number>,
+  ): Promise<{ power: number; bound: number }> {
+    const roster = getEffectiveBuildings(BUILDINGS, unlocks);
     const grid = (await decodeBlueprint(ISLAND_TEMPLATES[0].code)).grid;
     const island = splitGridIntoIslands(grid, canCoolDirectProducer(roster))[0];
-
     const { powerOutput } = await replayIslandDeterministic(
       island,
       roster,
       1,
       0,
     );
-    const bound = estimateTotalMaxPower([island], roster);
+    return {
+      power: powerOutput,
+      bound: estimateTotalMaxPower([island], roster),
+    };
+  }
+
+  it("reaches a high fraction of the theoretical bound on a real map", async () => {
+    /*
+     * On the roster this floor was calibrated against: everything unlocked as
+     * of the game before 1.1.10, which added two tiers to Heat Sink #7, three to
+     * Generator #7 and three late-game buildings. Pinned, because what it
+     * guards is the heuristic, and a roster that changes shape moves the figure
+     * without the heuristic doing anything. Measured 83.0%.
+     */
+    const all = allUpgradesUnlocked();
+    const before: Record<string, number> = {
+      ...all,
+      cooler7: all.cooler7 - 2,
+      generator7: all.generator7 - 3,
+    };
+    for (const id of ["cooler8", "precursor_pyramid", "ecto_compressor"])
+      delete before[id];
+    const { power, bound } = await seedShareOfBound(before);
 
     expect(
-      powerOutput,
-      `seed power ${powerOutput.toExponential(3)} is far below the ` +
+      power,
+      `seed power ${power.toExponential(3)} is far below the ` +
         `${bound.toExponential(3)} bound`,
     ).toBeGreaterThan(0.75 * bound);
+  }, 20_000);
+
+  it("holds its floor on the current roster too", async () => {
+    /*
+     * The game as it ships. Since 1.1.10 one Ecto Compressor outputs about two
+     * top generators' worth of heat, where a top generator used to take about
+     * four of the best reactors, so the best hub is a reactor between
+     * generators rather than a generator ringed by reactors. The seed is built
+     * around the old shape and lands lower: measured 66.1%, against 83.0% on the
+     * roster before. This floor is the new figure less a margin, so a drop from
+     * here still fails, and lifting the seed for the new shape is the fix that
+     * would let it rise.
+     */
+    const { power, bound } = await seedShareOfBound(allUpgradesUnlocked());
+
+    expect(
+      power,
+      `seed power ${power.toExponential(3)} is far below the ` +
+        `${bound.toExponential(3)} bound`,
+    ).toBeGreaterThan(0.6 * bound);
   }, 20_000);
 });
 

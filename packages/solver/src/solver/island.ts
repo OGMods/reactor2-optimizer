@@ -470,11 +470,23 @@ function estimateIslandMaxPower(
 
   let best = 0.0;
   const maxEngine = canHub ? buildableTiles : 0;
+  // A producer counts only if cooling covers its waste, and cooling reaches a
+  // producer only from a cooler beside it — so every online generator and
+  // direct producer stands next to a cooler, and a cooler has eight
+  // neighbours: `nCool` coolers can keep at most `8 * nCool` producers online.
+  // The cooling *budget* above relaxes that away, and it stops being harmless
+  // once one cooler can cover many producers' waste: cooler8 against
+  // generator7 covers fourteen, the budget asks for five coolers on Magma
+  // Rift's 107 tiles, and the best layout found uses thirteen at a third of
+  // their capacity. Counting the reach took 3-5% off the base-rules bound on
+  // every shipped map at full unlocks. Under a pool the cooling is not
+  // adjacent, and neither is this.
+  const reach = pooledCooling ? Infinity : maxNeighbourTiles(buildableTiles);
 
   for (let nEngine = 0; nEngine <= maxEngine; nEngine++) {
-    const heatCap = bestHeatForEngineTiles(nEngine, rVal, capacities);
+    const heatCapAll = bestHeatForEngineTiles(nEngine, rVal, capacities);
     // Engine tiles that can't form a reactor+generator pair.
-    if (nEngine > 0 && heatCap <= 0.0) continue;
+    if (nEngine > 0 && heatCapAll <= 0.0) continue;
 
     const maxDp = canDp ? buildableTiles - nEngine : 0;
     for (let nDp = 0; nDp <= maxDp; nDp++) {
@@ -482,6 +494,12 @@ function estimateIslandMaxPower(
       // Nothing runs on an island with zero coolers.
       if (nCool < 1) continue;
       const cooling = nCool * cVal;
+      const reached = nCool * reach;
+      const heatCap =
+        reached >= nEngine
+          ? heatCapAll
+          : bestHeatForEngineTiles(nEngine, rVal, capacities, reached);
+      const dpCap = Math.min(nDp, reached);
 
       // Maximize 0.75*H + dpNet*D under the shared cooling budget: a
       // two-variable LP whose optimum sits at one of the two "fill one side
@@ -489,11 +507,12 @@ function estimateIslandMaxPower(
       const hFirst = Math.min(heatCap, cooling / wasteRatio);
       const dRest =
         dpWaste <= EPS
-          ? nDp
-          : Math.min(nDp, (cooling - hFirst * wasteRatio) / dpWaste);
+          ? dpCap
+          : Math.min(dpCap, (cooling - hFirst * wasteRatio) / dpWaste);
       const pHeatFirst = hFirst * energyRatio + dpNet * dRest;
 
-      const dFirst = dpWaste <= EPS ? nDp : Math.min(nDp, cooling / dpWaste);
+      const dFirst =
+        dpWaste <= EPS ? dpCap : Math.min(dpCap, cooling / dpWaste);
       const hRest = Math.min(
         heatCap,
         (cooling - dpWaste * dFirst) / wasteRatio,
@@ -771,11 +790,13 @@ function bestHeatForEngineTiles(
   nEngine: number,
   rVal: number,
   capacities: Float64Array,
+  maxGenerators = Infinity,
 ): number {
   if (nEngine < 2 || rVal <= 0) return 0.0;
 
   let best = 0.0;
-  for (let nReact = 1; nReact <= nEngine - 1; nReact++) {
+  const fewestReactors = Math.max(1, nEngine - maxGenerators);
+  for (let nReact = fewestReactors; nReact <= nEngine - 1; nReact++) {
     const heat = Math.min(nReact * rVal, capacities[nEngine - nReact]);
     if (heat > best) best = heat;
   }

@@ -207,7 +207,7 @@ roster — which is to say, in normal play but never in a quick smoke test:
 
 - **`.scroll-body` needs `min-height: 0`.** A flex item's automatic minimum size is
   its _content_ size, so `flex: 1` alone cannot shrink a list below the height of
-  every card in it. Without it a full 38-building roster refuses to shrink and
+  every card in it. Without it a full 41-building roster refuses to shrink and
   overflows the sheet. `.sidebar-panel` clips its own overflow, which is why only
   the phone ever showed it.
 - **`.app-shell` uses `overflow: clip`, not `overflow: hidden`.** The mobile sheet

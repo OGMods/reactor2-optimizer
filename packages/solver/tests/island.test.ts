@@ -502,6 +502,46 @@ describe("the theoretical max-power bound", () => {
     expectClose(boundFor(islandFor(["GGG"]), roster), 75);
   });
 
+  describe("when one cooler can cover many producers", () => {
+    /*
+     * A cooler of 10000 against generators of 100 at a 1/4 waste ratio covers
+     * four hundred of them, so the cooling budget asks for one cooler and
+     * spends the other fifteen tiles of a 4x4 on 5 reactors and 10 generators:
+     * 1000 heat, 750 power. But cooling reaches a generator only from a cooler
+     * beside it, and one cooler has eight neighbours — two of the ten would
+     * never run. The real ceiling is the better of one cooler beside 8
+     * generators (7 reactors, 800 heat) and two coolers beside 9 (5 reactors,
+     * 900 heat): 675.
+     */
+    const roster = basicRoster({
+      reactorValue: 200,
+      generatorValue: 100,
+      coolerValue: 10_000,
+    });
+    const board = ["GGGG", "GGGG", "GGGG", "GGGG"];
+
+    it("keeps no more producers online than its coolers stand beside", () => {
+      expectClose(boundFor(islandFor(board, roster), roster), 675);
+    });
+
+    it("is still never beaten by a random layout", () => {
+      const island = islandFor(board, roster);
+      const bound = boundFor(island, roster);
+      const ctx = buildIslandContext(island.grid);
+      const rng = new Rng(20261011);
+      const options: (EffectiveBuilding | null)[] = [...roster, null];
+      for (let attempt = 0; attempt < 2000; attempt++) {
+        const placement: Placement = Array.from({ length: ctx.n }, () =>
+          rng.choice(options),
+        );
+        expect(
+          simulateIsland(placement, ctx).totalPower,
+          `a layout beat the 'upper' bound on attempt ${attempt}`,
+        ).toBeLessThanOrEqual(bound + EPS);
+      }
+    });
+  });
+
   it("is never beaten by a random layout", () => {
     /*
      * The bound property itself, exercised the only way that generalizes: throw
