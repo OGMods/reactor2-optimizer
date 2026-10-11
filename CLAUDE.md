@@ -173,6 +173,12 @@ Share codes, saved layouts, the templates and the CLI's output are all blueprint
 are described in `packages/solver/CLAUDE.md`. **Never compare encoded codes to
 test whether two layouts match** — use `blueprintKey()`.
 
+The one code that is not a blueprint is the game's own: its Export to Optimizer
+button writes an `R2X1.` code with the player's whole save, read by
+`encoding/gameExport.ts` and mapped onto ours by `data/gameImport.ts`. Its format
+is the game's, specified in `docs/game-export.md`; the app side is in
+`src/lib/state/CLAUDE.md`.
+
 ### Two halves: UI shell and solver engine
 
 - **UI shell** — Svelte 5 components + runes state classes: paint a grid, manage

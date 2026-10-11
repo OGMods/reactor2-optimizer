@@ -31,11 +31,13 @@ export * from "./solver/solver";
 export * from "./data/anomalies";
 export * from "./data/buildings";
 export * from "./data/effectiveBuildings";
+export * from "./data/gameImport";
 export * from "./data/maps";
 export * from "./data/prestige";
 export * from "./data/upgradePlan";
 
 export * from "./encoding/blueprint";
+export * from "./encoding/gameExport";
 export * from "./utils/formatters";
 
 export * from "./grid";

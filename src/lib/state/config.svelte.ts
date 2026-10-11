@@ -8,6 +8,7 @@ import {
   resolveUpgradePlan,
   rosterCanProducePower,
   type AnomalyDefinition,
+  type GameImportState,
   type PrestigeScales,
   type ResolvedUpgradePlan,
   type UpgradeStep,
@@ -332,6 +333,24 @@ class ConfigState {
 
   save() {
     buildingStorage.saveBuildings(this.buildingUpgrades);
+  }
+
+  /**
+   * Takes the roster, Time Lab and anomaly from a game export as they are, and
+   * the upgrade plan when the import makes one (`applyInProgress` in
+   * `@reactor2/solver`). A null plan leaves the player's own in place: steps
+   * the new roster has caught up with stop counting on their own.
+   */
+  applyGameImport(state: GameImportState, anomalyId: string) {
+    this.buildingUpgrades = { ...state.buildingUpgrades };
+    this.save();
+    this.prestigeLevels = { ...state.prestigeLevels };
+    prestigeStorage.savePrestige(this.prestigeLevels);
+    this.setAnomaly(anomalyId);
+    if (state.upgradePlan) {
+      this.upgradePlan = state.upgradePlan.map((s) => ({ ...s }));
+      this.#savePlan();
+    }
   }
 }
 

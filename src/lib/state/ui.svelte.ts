@@ -3,7 +3,16 @@ import type { ImageScale, PlacedBuilding, PlacementView } from "../types";
 import type { BuildingCategory } from "@reactor2/solver";
 import { buildShareUrl, clearSharedCode } from "../encoding/shareLink";
 import { downloadBlob, toFileSlug } from "../utils/downloadFile";
-import { blueprintRules, formatNumberForFilename } from "@reactor2/solver";
+import {
+  applyInProgress,
+  blueprintRules,
+  decodeGameExport,
+  formatNumberForFilename,
+  isGameExportCode,
+  resolveGameExport,
+  type InProgressMode,
+  type ResolvedGameImport,
+} from "@reactor2/solver";
 import {
   analyticsOptedOut,
   doNotTrackRequested,
@@ -420,6 +429,17 @@ class UIState {
   importCode = $state("");
   importError = $state<string | null>(null);
   isImporting = $state(false);
+
+  /**
+   * A pasted code from the game's Export to Optimizer button, read and
+   * resolved but not yet applied — what the import dialog summarises before
+   * asking to replace anything. Null for anything else in the box.
+   */
+  gameImport = $state<ResolvedGameImport | null>(null);
+  /** What the import does with research still running in the game. */
+  gameImportMode = $state<InProgressMode>("plan");
+  /** Orders reads of the box, so a slow decode cannot land over a newer paste. */
+  #gameReadSeq = 0;
 
   /** Binding reference for the PixiCanvas instance. */
   canvasRef = $state<PixiCanvas | null>(null);
@@ -993,7 +1013,76 @@ class UIState {
     this.importCode = "";
     this.importError = null;
     this.isImporting = false;
+    this.gameImport = null;
     this.activeModal = "import";
+  }
+
+  /**
+   * Reads the import box when it holds a game code, so the dialog can say what
+   * the code contains before anything is replaced. Anything else in the box
+   * clears the summary and is left for `importLayout`.
+   */
+  async readImportCode(code: string) {
+    const seq = ++this.#gameReadSeq;
+    if (!isGameExportCode(code)) {
+      this.gameImport = null;
+      return;
+    }
+    try {
+      const resolved = await resolveGameExport(await decodeGameExport(code));
+      if (seq !== this.#gameReadSeq) return;
+      this.gameImport = resolved;
+      this.importError = null;
+    } catch (err) {
+      if (seq !== this.#gameReadSeq) return;
+      this.gameImport = null;
+      this.importError =
+        err instanceof Error ? err.message : "That code could not be read.";
+    }
+  }
+
+  /**
+   * Applies a read game code: the roster, Time Lab, anomaly and — depending on
+   * `gameImportMode` — the upgrade plan, then each unlocked island's board.
+   *
+   * Unlike a share code this replaces what the player had, which is the point
+   * of it: the game is the record of what they own. The dialog asks twice
+   * before calling this. Configuration goes first so the islands are loaded
+   * at the imported roster.
+   */
+  async applyGameImport() {
+    const resolved = this.gameImport;
+    if (!resolved || this.isImporting) return;
+    this.isImporting = true;
+    this.importError = null;
+    try {
+      // The run belongs to a board and a roster this is about to replace.
+      solverState.stopOptimizer();
+      configState.applyGameImport(
+        applyInProgress(resolved, this.gameImportMode),
+        resolved.anomalyId,
+      );
+      await layoutState.importGameIslands(
+        resolved.islands,
+        configState.buildingUpgrades,
+        resolved.lockedTemplateIds,
+      );
+      this.activeModal = null;
+      this.importCode = "";
+      this.gameImport = null;
+      // The board on screen may have been replaced, and every stored solve was
+      // found under the old roster — restore() hangs the right one, as stale.
+      solverState.restore();
+      this.closeInspector();
+      this.recenterCanvas();
+      const n = resolved.islands.length;
+      this.showToast(`Imported your game: ${n} island${n === 1 ? "" : "s"}`);
+    } catch (err) {
+      this.importError =
+        err instanceof Error ? err.message : "That code could not be imported.";
+    } finally {
+      this.isImporting = false;
+    }
   }
 
   /**

@@ -139,7 +139,7 @@
           onclick={() => uiState.openImport()}
         >
           <Download size={16} />
-          <span>Import a layout</span>
+          <span>Import code</span>
         </button>
       {/if}
 
