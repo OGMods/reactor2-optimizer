@@ -6,6 +6,7 @@
  *     npm run survey -- --map 3 --map 7 --anomaly cryo_nexus
  *     npm run survey -- --json solves/survey.json
  *     npm run survey -- --compare solves/base.json
+ *     npm run survey -- --unlock generator7=1 --anomaly singularity_isolation
  *
  * Every shipped map is solved under every anomaly, `--runs` times each, and
  * every island's best is set against its own share of the bound. The report
@@ -42,7 +43,11 @@ import path from "node:path";
 import { WorkerPool } from "../bin/pool";
 import { MAPS, MAPS_BY_NUM, type CliMap } from "../bin/maps";
 import { ANOMALIES, getAnomaly } from "../src/data/anomalies";
-import { BUILDINGS, allUpgradesUnlocked } from "../src/data/buildings";
+import {
+  BUILDINGS,
+  allUpgradesUnlocked,
+  findBuilding,
+} from "../src/data/buildings";
 import { decodeBlueprint } from "../src/encoding/blueprint";
 import { estimateTotalMaxPower } from "../src/solver/island";
 import { planSolve, type IslandPlan } from "../src/solver/solver";
@@ -88,6 +93,8 @@ interface Args {
   top: number;
   workers: number;
   seed: number;
+  /** Tier overrides on top of full unlocks, 0-based as `unlockedUpgrades` is. */
+  unlocks: Record<string, number>;
   json: string | undefined;
   compare: string | undefined;
 }
@@ -113,8 +120,8 @@ interface Case {
 }
 
 const USAGE = `usage: survey [--map NUM]... [--anomaly ID]... [--time S] [--runs N]
-              [--top K] [--workers N] [--seed SEED] [--json PATH]
-              [--compare PATH]
+              [--top K] [--workers N] [--seed SEED] [--unlock ID=LEVEL]...
+              [--json PATH] [--compare PATH]
 
 Solve every map under every anomaly and report each island's gap to its bound.
 
@@ -129,6 +136,10 @@ options:
   --top K        how many islands the ranking lists (default: ${DEFAULT_TOP})
   --workers N    islands solved at once (default: every core, ${os.cpus().length} here)
   --seed SEED    base seed (default: 1)
+  --unlock ID=LEVEL
+                 survey a roster other than full unlocks: building ID at
+                 0-based LEVEL, or locked with -1 (repeatable). A generator-
+                 bound roster is where Singularity's bonus is worth something.
   --json PATH    also write every island's figures to PATH
   --compare PATH set every island against a baseline written by --json, and
                  exit 1 if any got worse than run-to-run noise explains`;
@@ -142,6 +153,7 @@ function parseArgs(argv: string[]): Args | null {
     top: DEFAULT_TOP,
     workers: os.cpus().length,
     seed: 1,
+    unlocks: {},
     json: undefined,
     compare: undefined,
   };
@@ -187,6 +199,18 @@ function parseArgs(argv: string[]): Args | null {
       case "--seed":
         args.seed = Math.floor(num());
         break;
+      case "--unlock": {
+        const [id, level] = raw.split("=");
+        const building = findBuilding(id);
+        const n = Number(level);
+        if (!building) throw new Error(`unknown building '${id}'`);
+        if (!Number.isInteger(n) || n < -1 || n >= building.levels.length)
+          throw new Error(
+            `${flag}: level for ${id} must be -1..${building.levels.length - 1}`,
+          );
+        args.unlocks[id] = n;
+        break;
+      }
       case "--json":
         args.json = raw;
         break;
@@ -212,6 +236,16 @@ function topLeft(plan: IslandPlan, index: number): { x: number; y: number } {
   };
 }
 
+/** Full unlocks with `--unlock`'s overrides; -1 leaves a building out. */
+function rosterFor(args: Args): Record<string, number> {
+  const unlocks = allUpgradesUnlocked();
+  for (const [id, level] of Object.entries(args.unlocks)) {
+    if (level < 0) delete unlocks[id];
+    else unlocks[id] = level;
+  }
+  return unlocks;
+}
+
 async function buildCases(args: Args): Promise<Case[]> {
   const maps = args.maps.length
     ? args.maps.map((n) => MAPS_BY_NUM.get(n)!)
@@ -222,7 +256,7 @@ async function buildCases(args: Args): Promise<Case[]> {
       // rule at a different number — surveying it by default would be a
       // duplicate row reading as a second anomaly.
       ANOMALIES.filter((a) => !a.variantOf).map((a) => a.id);
-  const unlocks = allUpgradesUnlocked();
+  const unlocks = rosterFor(args);
 
   const cases: Case[] = [];
   for (const map of maps) {
@@ -333,8 +367,12 @@ function printTable(header: string[], rows: string[][], rightFrom = 2): void {
 }
 
 function report(cases: Case[], args: Args): void {
+  const overrides = Object.entries(args.unlocks)
+    .map(([id, level]) => `${id}=${level}`)
+    .join(" ");
   console.log(
-    "Per map and anomaly, obstacles cleared (sum of each island's best run)\n",
+    "Per map and anomaly, obstacles cleared (sum of each island's best run)\n" +
+      `Roster: full unlocks${overrides ? `, ${overrides}` : ""}\n`,
   );
   printTable(
     ["Map", "Anomaly", "Best", "Bound", "Eff", "Lost", "Islands at bound"],
@@ -419,6 +457,8 @@ interface SurveyFile {
   timeS: number;
   runs: number;
   seed: number;
+  /** Absent in a file written before the flag existed: full unlocks. */
+  unlocks?: Record<string, number>;
   cases: {
     map: number;
     name: string;
@@ -441,6 +481,7 @@ function writeJson(file: string, cases: Case[], args: Args): void {
     timeS: args.timeS,
     runs: args.runs,
     seed: args.seed,
+    unlocks: args.unlocks,
     cases: cases.map((c) => ({
       map: c.map.num,
       name: c.map.name,
@@ -523,6 +564,9 @@ function compare(cases: Case[], args: Args, base: SurveyFile): number {
     warnings.push(`--runs ${base.runs} -> ${args.runs}`);
   if (base.seed !== args.seed)
     warnings.push(`--seed ${base.seed} -> ${args.seed}`);
+  const roster = (u: Record<string, number> | undefined) =>
+    JSON.stringify(Object.entries(u ?? {}).sort());
+  if (roster(base.unlocks) !== roster(args.unlocks)) warnings.push("--unlock");
   if (warnings.length)
     console.log(
       `Baseline differs in ${warnings.join(", ")}: not like with like.\n`,

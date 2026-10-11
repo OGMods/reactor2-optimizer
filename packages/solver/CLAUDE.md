@@ -366,15 +366,21 @@ CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
   Heat crosses a tile boundary and nothing else, so a generator's intake is
   whatever the reactors beside it make, and the all-or-nothing cooling rule
   wants coolers beside it too — out of the same eight tiles. So
-  `estimateIslandMaxPower` runs on `min(gVal, 8 / (1 / rVal + wasteRatio /
-cVal))`, and the cooler term goes under a pool, where cooling reaches the
-  whole island. The cap is homogeneous like the LP, so a rule that scales
+  `estimateIslandMaxPower` runs on `min(gVal, cap)`, where the cap is the best
+  split of a tile's neighbours into **whole** reactors and coolers (sharing a
+  neighbour never makes it a fraction of each), counted per tile by
+  `tileHeatCaps` so a coastal tile is credited with the neighbours it has. The
+  cooler term goes under a pool, where cooling reaches the whole island. The cap is homogeneous like the LP, so a rule that scales
   everything at once can never make it bite; a rule that scales **one role**
   is what it takes, and Singularity's shipped `isolated` puts the top generator at 290% of
   it — without the cap the bound sits 6-9% above anything the board allows,
   reading 83-87% efficiency for layouts that are not 83-87% of anything. With
   it the maps read 89.4-95.0%, and the base, Cryo and Tidal figures do not move
-  a digit.
+  a digit. The whole-building split took another 0.6-2.2% off the Singularity
+  bound at full unlocks; the per-tile count is worth at most 0.4% on the shipped
+  maps, which all have interior to spare. What is left of the gap there — about
+  4% — is the bound needing a near-perfect packing of generator neighbourhoods
+  that an irregular island cannot hold, and no cheap count sees it.
 
   **The second half of that is `isolationRoom`: how many generators an island
   can keep apart.** Isolated generators are pairwise non-adjacent, so they are
@@ -729,3 +735,11 @@ it. Same `--time`, `--runs` and `--seed` on both sides, same machine, same load 
 it warns if the first three differ. Expect about ±0.8% per map at 15s × 5 runs,
 so a gain smaller than that needs more runs to show; "no island got worse" is
 the claim it can make at any size.
+
+The survey solves at full unlocks unless told otherwise. `--unlock ID=LEVEL`
+(0-based, `-1` to lock) surveys another roster, and a rule that rates one role
+needs one: at full unlocks Singularity's generator bonus buys a capacity no
+layout was short of, so the rule is power-neutral there and a change to how the
+search handles it cannot show. `--unlock generator7=2` (tier 3, about one Doom
+Star of intake) is where the bonus is worth +38% and the search's choices
+matter.

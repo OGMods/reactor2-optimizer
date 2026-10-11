@@ -430,9 +430,10 @@ function estimateIslandMaxPower(
     wasteRatio = GENERATOR_WASTE_RATIO;
 
   // What a generator tile is worth to the bound: its tier, or the most its
-  // eight neighbours can push through it, whichever is less. Both ratings a
-  // role isolation offers are capped, and for the same reason — the bonus one
-  // most of all, since it is the one that outruns a neighbourhood.
+  // neighbours can push through it, whichever is less. Both ratings a role
+  // isolation offers are capped, and for the same reason — the bonus one most
+  // of all, since it is the one that outruns a neighbourhood. `neighbourCap`
+  // is the figure for the best-placed tile; `tileHeatCaps` refines it per tile.
   const neighbourCap = neighbourHeatCap(
     maxNeighbourTiles(buildableTiles),
     rVal,
@@ -451,6 +452,7 @@ function estimateIslandMaxPower(
     gCrowdedTake < gTake
       ? { gTake: gCrowdedTake, room: isolationRoom(island) }
       : null,
+    tileHeatCaps(island, rVal, cVal, wasteRatio, pooledCooling),
   );
 
   // The same 3-and-2 reasoning `minIslandTiles` owns — a reactor + generator +
@@ -538,6 +540,16 @@ function estimateIslandMaxPower(
  *
  * Under a shared cooling pool the cooler term is gone, because adjacency is:
  * the pool reaches the whole island, so every neighbour may be a reactor.
+ *
+ * **The split is in whole buildings**, so the figure is the best of the ways to
+ * divide the tiles rather than the fractional crossing of the two terms above.
+ * Each neighbour holds one building: a reactor hands this generator at most
+ * `rVal` and a cooler at most `cVal`, however that neighbour's output is shared
+ * with anything else beside it. Sharing only ever lowers what this generator
+ * gets; it never turns a tile into part reactor, part cooler. At full unlocks
+ * the fractional split is 5.4 reactors to 2.6 coolers and the best whole one is
+ * 5 to 3, at 92% of it — worth 0-1.5% of the bound on the shipped maps under
+ * Singularity, and nothing under a rule whose generator sits below the cap.
  */
 function neighbourHeatCap(
   maxNeighbours: number,
@@ -547,9 +559,66 @@ function neighbourHeatCap(
   pooledCooling: boolean,
 ): number {
   if (maxNeighbours <= 0 || rVal <= 0) return 0.0;
-  const perUnitHeat =
-    1 / rVal + (pooledCooling || cVal <= 0 ? 0 : wasteRatio / cVal);
-  return maxNeighbours / perUnitHeat;
+  if (pooledCooling || cVal <= 0) return maxNeighbours * rVal;
+  const coolingPerTile = cVal / wasteRatio;
+  let best = 0.0;
+  for (let reactors = 1; reactors <= maxNeighbours; reactors++) {
+    const heat = Math.min(
+      reactors * rVal,
+      (maxNeighbours - reactors) * coolingPerTile,
+    );
+    if (heat > best) best = heat;
+  }
+  return best;
+}
+
+/**
+ * `neighbourHeatCap` for every tile of the island, by how many of its eight
+ * neighbours are the island's own, sorted best first.
+ *
+ * A generator on the coast has fewer tiles to be fed and cooled from, and the
+ * one-figure cap credits it with eight. Every generator stands on a tile of its
+ * own, so `nGen` of them can take in at most the `nGen` best tiles' caps —
+ * which is how `generatorCapacities` reads this.
+ *
+ * Measured, it is worth little: at most 0.4% of the bound on the shipped maps,
+ * under every roster tried, because they all have far more interior tiles than
+ * any split wants generators. It is here because it is cheap and exactly true,
+ * and an island that is mostly coast is the case it is for.
+ */
+function tileHeatCaps(
+  island: IslandSubGrid,
+  rVal: number,
+  cVal: number,
+  wasteRatio: number,
+  pooledCooling: boolean,
+): Float64Array {
+  const byCount = new Float64Array(CHEBYSHEV_DIRECTIONS.length + 1);
+  for (let count = 0; count < byCount.length; count++)
+    byCount[count] = neighbourHeatCap(
+      count,
+      rVal,
+      cVal,
+      wasteRatio,
+      pooledCooling,
+    );
+
+  const { width, height, buildable } = island;
+  const caps: number[] = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (buildable[y * width + x] !== 1) continue;
+      let count = 0;
+      for (const [dx, dy] of CHEBYSHEV_DIRECTIONS) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+        if (buildable[ny * width + nx] === 1) count++;
+      }
+      caps.push(byCount[count]);
+    }
+  }
+  return Float64Array.from(caps.sort((a, b) => b - a));
 }
 
 /** How many tiles can touch one building here: eight, or the island if smaller. */
@@ -640,27 +709,46 @@ export function isolationRoom(island: IslandSubGrid): IsolationRoom {
  *
  * `crowded` is null under every other rule, and then this is the multiply it
  * always was.
+ *
+ * `tileCaps`, when given, is what each tile can feed a generator, best first
+ * (`tileHeatCaps`): the `k`-th generator is worth no more than the `k`-th best
+ * tile, and the isolated ones take the best tiles, since `min(rating, cap)`
+ * summed is largest with the larger rating on the larger cap. The search's own
+ * table passes none — a target counts what the roster is worth, not what a
+ * neighbourhood can push through it.
  */
 export function generatorCapacities(
   buildableTiles: number,
   gTake: number,
   crowded: { gTake: number; room: IsolationRoom } | null,
+  tileCaps?: Float64Array,
 ): Float64Array {
-  const capacities = new Float64Array(buildableTiles + 1);
-  if (crowded === null) {
-    for (let nGen = 0; nGen <= buildableTiles; nGen++)
-      capacities[nGen] = nGen * gTake;
-    return capacities;
-  }
+  // What the best `k` tiles are worth at one rating. Without caps it is the
+  // multiply, kept exact rather than summed: the search sizes its targets
+  // through this table, and a rounding drift would move them.
+  const runningSums = (rating: number): Float64Array => {
+    const sums = new Float64Array(buildableTiles + 1);
+    for (let k = 0; k < buildableTiles; k++)
+      sums[k + 1] = tileCaps
+        ? sums[k] + Math.min(rating, tileCaps[k] ?? 0)
+        : (k + 1) * rating;
+    return sums;
+  };
+
+  const isolatedSums = runningSums(gTake);
+  if (crowded === null) return isolatedSums;
 
   const { room } = crowded;
+  const crowdedSums = runningSums(crowded.gTake);
+  const capacities = new Float64Array(buildableTiles + 1);
   for (let nGen = 0; nGen <= buildableTiles; nGen++) {
     let best = 0.0;
     const mostIsolated = Math.min(nGen, room.maxIsolated);
     for (let nIso = 0; nIso <= mostIsolated; nIso++) {
       const rest = nGen - nIso;
       if (rest > room.freeTiles[nIso]) continue;
-      const capacity = nIso * gTake + rest * crowded.gTake;
+      const capacity =
+        isolatedSums[nIso] + crowdedSums[nGen] - crowdedSums[nIso];
       if (capacity > best) best = capacity;
     }
     capacities[nGen] = best;

@@ -1,6 +1,5 @@
 <script lang="ts">
   import { solverState, uiState } from "../../state";
-  import { SOLVE_MODE_LIST } from "../../worker/solveModes";
   import { Info } from "lucide-svelte";
 
   /*
@@ -32,7 +31,7 @@
 
 <div class="mode-row">
   <div class="modes" role="group" aria-label="Optimizer run length">
-    {#each SOLVE_MODE_LIST as mode (mode.id)}
+    {#each solverState.solveModes as mode (mode.id)}
       <button
         class="mode"
         class:active={solverState.solveModeId === mode.id}

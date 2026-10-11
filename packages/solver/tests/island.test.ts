@@ -829,22 +829,69 @@ describe("the theoretical max-power bound", () => {
       );
     });
 
-    it("counts the room a shape has, not the tiles it has", () => {
+    /** The best power any layout of `roster` reaches on `island`, by trying every one. */
+    function bestLayoutPower(
+      island: IslandSubGrid,
+      roster: EffectiveBuilding[],
+    ): number {
+      const ctx = buildIslandContext(
+        island.grid,
+        island.buildable,
+        singularity,
+        island.waterAdjacent,
+      );
+      const options: (EffectiveBuilding | null)[] = [...roster, null];
+      let best = 0;
+      for (let code = 0; code < options.length ** ctx.n; code++) {
+        let rest = code;
+        const placement: Placement = new Array(ctx.n);
+        for (let t = 0; t < ctx.n; t++) {
+          placement[t] = options[rest % options.length];
+          rest = (rest - (rest % options.length)) / options.length;
+        }
+        best = Math.max(best, simulateIsland(placement, ctx).totalPower);
+      }
+      return best;
+    }
+
+    it("reads a row and a block of eight at exactly what each can hold", () => {
       /*
-       * Two islands of eight tiles, and the bound reads them 50% apart. A 2x4
-       * block is four 2x2 blocks of two tiles each, and every tile in it is
-       * next to six others; a row of eight is four blocks too, but a
-       * generator on it only ever has two neighbours, so the row can keep
-       * three apart and still have tiles left for what feeds them. Tile count
-       * is what the rest of the LP runs on and it cannot tell these apart.
+       * Two islands of eight tiles. A row has room to keep more generators
+       * apart than a 2x4 block, and with the isolation room alone the bound
+       * read the row a third higher — 300 against 240. But a generator on a
+       * row has two neighbours to be fed and cooled from, not eight, and once
+       * `tileHeatCaps` counts them the row comes out *below* the block, which
+       * is what every layout of it says too. Both are exact here.
        */
       const roster = basicRoster({ generatorValue: 40 });
       const block = islandFor(["GGGG", "GGGG"], roster);
       const row = islandFor(["GGGGGGGG"], roster);
 
       expect(block.tileCount).toBe(row.tileCount);
-      expect(estimateTotalMaxPower([row], roster, singularity)).toBeGreaterThan(
+      for (const island of [block, row])
+        expectClose(
+          estimateTotalMaxPower([island], roster, singularity),
+          bestLayoutPower(island, roster),
+        );
+      expect(estimateTotalMaxPower([row], roster, singularity)).toBeLessThan(
         estimateTotalMaxPower([block], roster, singularity),
+      );
+    });
+
+    it("splits a generator's neighbours into whole buildings", () => {
+      /*
+       * A generator rated far past anything its neighbours can feed, so the
+       * neighbour cap is the whole answer. Eight neighbours of 100 heat or 100
+       * cooling at a 1/4 waste ratio cross at 6.4 reactors to 1.6 coolers,
+       * 640 heat — and no layout has 0.4 of a reactor. The best whole split
+       * is 6 and 2, 600 heat, and that is what the board reaches.
+       */
+      const roster = basicRoster({ generatorValue: 1000 });
+      const island = islandFor(["GGG", "GGG", "GGG"], roster);
+
+      expectClose(
+        estimateTotalMaxPower([island], roster, singularity),
+        bestLayoutPower(island, roster),
       );
     });
 

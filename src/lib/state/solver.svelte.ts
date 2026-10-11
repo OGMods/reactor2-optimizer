@@ -9,7 +9,9 @@ import { defaultPoolSize } from "../worker/solverCoordinator";
 import {
   DEFAULT_SOLVE_MODE,
   SOLVE_MODES,
+  SOLVE_MODE_LIST,
   estimateMakespanMs,
+  solveModeFor,
   taskDurationsMs,
   type SolveMode,
   type SolveModeId,
@@ -299,9 +301,22 @@ class SolverState {
 
   #watchdog: ReturnType<typeof setTimeout> | null = null;
 
-  /** The chosen shape of a run. Falls back rather than throwing on a stale id. */
+  /**
+   * The chosen shape of a run, as it runs under the active anomaly. Falls back
+   * rather than throwing on a stale id.
+   */
   get solveMode(): SolveMode {
-    return SOLVE_MODES[this.solveModeId] ?? SOLVE_MODES[DEFAULT_SOLVE_MODE];
+    return solveModeFor(
+      SOLVE_MODES[this.solveModeId] ?? SOLVE_MODES[DEFAULT_SOLVE_MODE],
+      configState.anomalyId,
+    );
+  }
+
+  /** Every mode, in the control's order, as each would run right now. */
+  get solveModes(): SolveMode[] {
+    return SOLVE_MODE_LIST.map((mode) =>
+      solveModeFor(mode, configState.anomalyId),
+    );
   }
 
   /** Picks how the next run spends its time, and remembers it. */

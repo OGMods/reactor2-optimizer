@@ -291,10 +291,21 @@ buy heat by spending _fewer_ tiles on generators, and past a point no board can 
 crosses a tile boundary and nothing else, so a generator's intake is the output of the reactors
 beside it, and the all-or-nothing cooling rule wants coolers beside it too — out of the same eight
 tiles. One generator absorbing `H` needs `H / rVal` of them as reactors and `wasteRatio · H / cVal`
-as coolers, so `neighbourHeatCap` is `8 / (1 / rVal + wasteRatio / cVal)` and `estimateIslandMaxPower`
+as coolers, so `neighbourHeatCap` was `8 / (1 / rVal + wasteRatio / cVal)` and `estimateIslandMaxPower`
 runs on `min(gVal, cap)`. Every term in it is a _most_ — an adjacent reactor may be feeding another
-generator — so it only ever errs high. On an island of fewer than nine tiles the count is the island
-rather than eight.
+generator — so it only ever errs high.
+
+**The split is in whole buildings, and the count is the tile's own.** Each neighbour holds one
+building, and sharing it with another generator only lowers what this one gets — it never makes a
+tile part reactor, part cooler — so the cap is the best of the `k` reactors / `n - k` coolers splits
+rather than the fractional crossing: 5 to 3 at full unlocks, 92% of the fractional 5.4 to 2.6. And
+`n` is how many of that tile's eight neighbours are the island's, so `tileHeatCaps` gives every tile
+its own cap and `generatorCapacities` credits `nGen` generators with the `nGen` best tiles. A
+generator on a row of eight has two neighbours, and the bound used to read that row at 300 where
+every layout of it reaches 225 — `island.test.ts` now pins both shapes to an exhaustive search.
+On the shipped maps the whole-building split is worth 0.6–2.2% of the Singularity bound at full
+unlocks and the per-tile count at most 0.4%: every shipped island has far more interior tiles than
+any split wants generators. Base, Cryo and Tidal do not move outside one 0.05% coastal scrap.
 
 It is the one piece of adjacency the bound does not relax away, and it is here because it is the one
 that binds. It is homogeneous of degree 1 in the roster exactly as the LP is, so a rule that scales
@@ -303,7 +314,8 @@ same factor and it goes on not binding; at full unlocks the top generator sits a
 the base rules. A rule that scales a _single role_ is what it takes, and Singularity is that rule:
 the shipped `isolated` puts the top generator at 290% of the cap. Without it the shipped maps' bound sits 6–9% above
 anything the board allows, reading 83–87% layout efficiency for layouts that are not 83–87% of
-anything; with it they read 89.4–95.0%, against 93.5–98.5% under the base rules. Nothing else moved —
+anything; with it they read 89.4–95.0% (95.4–96.7% since the whole-building split, on layouts found
+at 60s), against 97.0–99.6% under the base rules. Nothing else moved —
 the base, Cryo and Tidal figures on all eight maps are unchanged to the last digit. Under a pool the
 cooler term goes, because adjacency does: the pool reaches the whole island, so every neighbour may
 be a reactor. The two-class bound takes one cap on the _best_ of each class, since which class a

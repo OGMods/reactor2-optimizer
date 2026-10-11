@@ -18,7 +18,7 @@
  * the button is pressed rather than after.
  */
 
-import { islandBudgetsS } from "@reactor2/solver";
+import { getAnomaly, islandBudgetsS, type AnomalyId } from "@reactor2/solver";
 
 export type SolveModeId = "quick" | "deep" | "max";
 
@@ -78,6 +78,50 @@ export const SOLVE_MODES: Record<SolveModeId, SolveMode> = {
 };
 
 export const DEFAULT_SOLVE_MODE: SolveModeId = "quick";
+
+/**
+ * How much longer each attempt runs under an anomaly whose search needs it.
+ *
+ * Singularity Isolation is the one: a generator's rating depends on its
+ * neighbours, so the walk has to discover a different shape of layout, and a
+ * short attempt comes back with one that would score the same under the base
+ * rules.
+ *
+ * Measured with `npm run survey` over all eight maps, three runs each, on four
+ * rosters from full unlocks down to generator7 at tier 1 (where the bonus is
+ * worth +60%). A 10s walk falls short on every one of them — at generator7 tier
+ * 3 it averages +30.6% over the base rules against +37.7% at 20s, and at full
+ * unlocks it comes back 1.2% *below* them. 20s recovers nearly all of it; 30s
+ * and 60s add a few tenths more. Best of ten 10s walks beats one 10s walk, but
+ * best of ten 20s walks beats it again by 1-2 points on every roster, so the
+ * attempt is lengthened rather than the count raised. Doubling gives Deep and
+ * Max their 20s, and Quick goes along so a mode keeps one meaning.
+ */
+const ATTEMPT_BUDGET_SCALE: Partial<Record<AnomalyId, number>> = {
+  singularity_isolation: 2,
+};
+
+/** The factor `solveModeFor` applies under `anomalyId`; 1 under most rules. */
+export function attemptBudgetScale(anomalyId: string): number {
+  return ATTEMPT_BUDGET_SCALE[getAnomaly(anomalyId).id] ?? 1;
+}
+
+/**
+ * `mode` as it runs under `anomalyId`: the same attempts, each scaled by
+ * `ATTEMPT_BUDGET_SCALE`, and a `shape` that says so. Every reader of a mode —
+ * the control, the estimate, the run itself — goes through this, so the figure
+ * on the button cannot describe a run the coordinator does not make.
+ */
+export function solveModeFor(mode: SolveMode, anomalyId: string): SolveMode {
+  const scale = attemptBudgetScale(anomalyId);
+  if (scale === 1) return mode;
+  const attemptBudgetMs = mode.attemptBudgetMs * scale;
+  return {
+    ...mode,
+    attemptBudgetMs,
+    shape: `${mode.attempts} × ${Math.round(attemptBudgetMs / 1000)}s`,
+  };
+}
 
 /** Every mode, in the order the control offers them. */
 export const SOLVE_MODE_LIST: SolveMode[] = [

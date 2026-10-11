@@ -86,6 +86,10 @@ the basin it is already in. Attempts run as independent tasks across a worker
 pool, so the wall-clock cost of "10 × 10s" depends on how many cores the browser
 gives you — the control prints the estimate.
 
+Under Singularity Isolation every attempt runs twice as long (Quick 1 × 60s,
+Deep 10 × 20s, Max 50 × 20s): a generator's output depends on its neighbours
+there, and a 10s walk does not have time to find layouts that keep them apart.
+
 ## Quick start
 
 ```bash

@@ -1,6 +1,9 @@
 <script lang="ts">
-  import { solverState, uiState } from "../../state";
-  import { SOLVE_MODE_LIST } from "../../worker/solveModes";
+  import { configState, solverState, uiState } from "../../state";
+  import {
+    attemptBudgetScale,
+    type SolveModeId,
+  } from "../../worker/solveModes";
   import { Check } from "lucide-svelte";
   import ModalShell from "./ModalShell.svelte";
 
@@ -20,13 +23,14 @@
    */
   let poolSize = $derived(solverState.workerCount);
   let running = $derived(solverState.isOptimizing);
+  let budgetScale = $derived(attemptBudgetScale(configState.anomalyId));
 
   /** Seconds, whole — the figure is an estimate and tenths would oversell it. */
   function seconds(ms: number): string {
     return `~${Math.max(1, Math.round(ms / 1000))}s`;
   }
 
-  function choose(id: (typeof SOLVE_MODE_LIST)[number]["id"]) {
+  function choose(id: SolveModeId) {
     solverState.setSolveMode(id);
     uiState.closeModal();
   }
@@ -51,7 +55,7 @@
     </p>
 
     <div class="modes">
-      {#each SOLVE_MODE_LIST as mode (mode.id)}
+      {#each solverState.solveModes as mode (mode.id)}
         <button
           class="mode"
           class:active={solverState.solveModeId === mode.id}
@@ -90,6 +94,14 @@
       with each other all keep their layouts, which is why a longer run leaves
       you more equal-power boards to choose between.
     </p>
+
+    {#if budgetScale !== 1}
+      <p class="note">
+        Under {configState.activeAnomaly.name} every search runs {budgetScale}×
+        as long. A generator's output depends on its neighbours there, so a walk
+        needs the extra time to find layouts that keep them apart.
+      </p>
+    {/if}
 
     {#if running}
       <p class="note running">

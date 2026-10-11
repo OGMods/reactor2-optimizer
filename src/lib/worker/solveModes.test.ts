@@ -7,7 +7,12 @@
  * a pool wide enough to overlap the attempts, and one that is not.
  */
 import { describe, expect, it } from "vitest";
-import { SOLVE_MODES, estimateMakespanMs, taskDurationsMs } from "./solveModes";
+import {
+  SOLVE_MODES,
+  estimateMakespanMs,
+  solveModeFor,
+  taskDurationsMs,
+} from "./solveModes";
 
 describe("taskDurationsMs", () => {
   it("splits an attempt's budget across islands by tile count squared", () => {
@@ -73,5 +78,27 @@ describe("estimateMakespanMs", () => {
 
   it("is zero when there is nothing to schedule", () => {
     expect(estimateMakespanMs([], 8)).toBe(0);
+  });
+});
+
+describe("solveModeFor", () => {
+  it("leaves every mode alone under the base rules", () => {
+    for (const mode of Object.values(SOLVE_MODES))
+      expect(solveModeFor(mode, "none")).toBe(mode);
+  });
+
+  it("lengthens each attempt under Singularity, and the shape says so", () => {
+    const deep = solveModeFor(SOLVE_MODES.deep, "singularity_isolation");
+    expect(deep.attempts).toBe(SOLVE_MODES.deep.attempts);
+    expect(deep.attemptBudgetMs).toBeGreaterThan(
+      SOLVE_MODES.deep.attemptBudgetMs,
+    );
+    expect(deep.shape).toBe(`10 × ${deep.attemptBudgetMs / 1000}s`);
+  });
+
+  it("reads an unknown id as the base rules, as getAnomaly does", () => {
+    expect(solveModeFor(SOLVE_MODES.quick, "not-an-anomaly")).toBe(
+      SOLVE_MODES.quick,
+    );
   });
 });

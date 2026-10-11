@@ -126,6 +126,12 @@ cores and gives two must not have its run cut short.
 modes buy). Ties from different attempts are pooled, which is where a deep run's
 fuller shortlist comes from.
 
+A mode is read through `solveModeFor(mode, anomalyId)`, never off `SOLVE_MODES`
+directly — `solverState.solveMode` and `solverState.solveModes` do that — because
+an anomaly may lengthen every attempt (Singularity doubles it; the measurement
+is in `ATTEMPT_BUDGET_SCALE`'s comment). The control, the estimate, the
+watchdog and the run all read the scaled mode, so none of them can disagree.
+
 Attempts are ordinary pool tasks: `attempts × islands` go into the same queue
 that runs one island per worker, so extra searches cost wall-clock only once the
 pool is full. That is why `estimatedRunMs` exists and why the control prints it —
