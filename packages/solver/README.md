@@ -76,7 +76,8 @@ there is no build step between an edit and a reload.
 Before changing the search, read [`docs/SOLVER.md`](../../docs/SOLVER.md) and
 [`docs/game-logic.md`](../../docs/game-logic.md). Two things in particular are
 easy to break without noticing: the RNG's pinned golden streams, and the proven
-optima in `tests/goldenLayouts.test.ts`, **which must never go down**.
+optima in `tests/goldenLayouts.test.ts` and `tests/goldenLayoutsFullTier.test.ts`,
+**which must never go down**.
 
 ## License
 

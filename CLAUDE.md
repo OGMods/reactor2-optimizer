@@ -25,7 +25,7 @@ step and `npm run build:solver` exists only so the package stays publishable
 
 Three things worth knowing when either starts complaining:
 
-- **`BUILDING_TABLE` is `as const`**, so its element type is a union of 38
+- **`BUILDING_TABLE` is `as const`**, so its element type is a union of 41
   literal object types and `.find()` over that union hides any property some
   member lacks. `packages/solver/src/data/buildings.ts` exports it through a
   `readonly BuildingDefinition[]` annotation so consumers get the uniform

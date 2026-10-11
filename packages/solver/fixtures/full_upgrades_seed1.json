@@ -21,9 +21,11 @@
     "cooler4": 7,
     "cooler5": 8,
     "cooler6": 10,
-    "cooler7": 6,
+    "cooler7": 8,
+    "cooler8": 1,
     "divine_reactor": 5,
     "doomStar_reactor": 5,
+    "ecto_compressor": 5,
     "flux_reactor": 5,
     "fusion_reactor": 5,
     "gas_plant": 5,
@@ -33,7 +35,7 @@
     "generator4": 5,
     "generator5": 8,
     "generator6": 8,
-    "generator7": 4,
+    "generator7": 7,
     "geothermal_plant": 5,
     "gravitron_plant": 5,
     "heliothermal_plant": 5,
@@ -41,6 +43,7 @@
     "hyper_space_core": 5,
     "neuro_grid_reactor": 5,
     "nuclear_reactor": 5,
+    "precursor_pyramid": 5,
     "psionic_tower": 5,
     "quantum_reactor": 5,
     "sauron_eye": 5,
@@ -54,75 +57,70 @@
       {
         "x": 1,
         "y": 0,
-        "building_id": "doomStar_reactor"
-      },
-      {
-        "x": 2,
-        "y": 0,
-        "building_id": "doomStar_reactor"
-      },
-      {
-        "x": 3,
-        "y": 0,
-        "building_id": "cooler7"
-      },
-      {
-        "x": 0,
-        "y": 1,
-        "building_id": "doomStar_reactor"
-      },
-      {
-        "x": 1,
-        "y": 1,
-        "building_id": "cooler7"
-      },
-      {
-        "x": 2,
-        "y": 1,
-        "building_id": "generator7"
-      },
-      {
-        "x": 3,
-        "y": 1,
-        "building_id": "cooler7"
-      },
-      {
-        "x": 0,
-        "y": 2,
-        "building_id": "doomStar_reactor"
-      },
-      {
-        "x": 1,
-        "y": 2,
         "building_id": "generator7"
       },
       {
         "x": 2,
-        "y": 2,
-        "building_id": "doomStar_reactor"
+        "y": 0,
+        "building_id": "ecto_compressor"
       },
       {
         "x": 3,
+        "y": 0,
+        "building_id": "generator7"
+      },
+      {
+        "x": 0,
+        "y": 1,
+        "building_id": "generator7"
+      },
+      {
+        "x": 1,
+        "y": 1,
+        "building_id": "generator7"
+      },
+      {
+        "x": 2,
+        "y": 1,
+        "building_id": "cooler8"
+      },
+      {
+        "x": 3,
+        "y": 1,
+        "building_id": "generator7"
+      },
+      {
+        "x": 0,
         "y": 2,
-        "building_id": "doomStar_reactor"
+        "building_id": "ecto_compressor"
+      },
+      {
+        "x": 1,
+        "y": 2,
+        "building_id": "cooler8"
+      },
+      {
+        "x": 2,
+        "y": 2,
+        "building_id": "ecto_compressor"
       },
       {
         "x": 0,
         "y": 3,
-        "building_id": "doomStar_reactor"
+        "building_id": "precursor_pyramid"
       },
       {
         "x": 1,
         "y": 3,
-        "building_id": "doomStar_reactor"
+        "building_id": "generator7"
       },
       {
         "x": 2,
         "y": 3,
-        "building_id": "cooler7"
+        "building_id": "generator7"
       }
     ],
-    "power_output": 2.66e+22,
+    "power_output": 6.71830985915493e+23,
     "island_count": 1
   },
   "annealed": {
@@ -130,85 +128,85 @@
       {
         "x": 0,
         "y": 0,
-        "building_id": "cooler7"
+        "building_id": "generator7"
       },
       {
         "x": 1,
         "y": 0,
-        "building_id": "doomStar_reactor"
+        "building_id": "generator7"
       },
       {
         "x": 2,
         "y": 0,
-        "building_id": "cooler7"
+        "building_id": "generator7"
       },
       {
         "x": 3,
         "y": 0,
-        "building_id": "generator7"
+        "building_id": "ecto_compressor"
       },
       {
         "x": 0,
         "y": 1,
-        "building_id": "doomStar_reactor"
+        "building_id": "ecto_compressor"
       },
       {
         "x": 1,
+        "y": 1,
+        "building_id": "cooler8"
+      },
+      {
+        "x": 2,
         "y": 1,
         "building_id": "generator7"
       },
       {
-        "x": 2,
-        "y": 1,
-        "building_id": "doomStar_reactor"
-      },
-      {
         "x": 3,
         "y": 1,
-        "building_id": "doomStar_reactor"
+        "building_id": "ecto_compressor"
       },
       {
         "x": 0,
-        "y": 2,
-        "building_id": "doomStar_reactor"
-      },
-      {
-        "x": 1,
-        "y": 2,
-        "building_id": "cooler7"
-      },
-      {
-        "x": 2,
         "y": 2,
         "building_id": "generator7"
       },
       {
+        "x": 1,
+        "y": 2,
+        "building_id": "generator7"
+      },
+      {
+        "x": 2,
+        "y": 2,
+        "building_id": "ecto_compressor"
+      },
+      {
         "x": 3,
         "y": 2,
-        "building_id": "doomStar_reactor"
+        "building_id": "generator7"
       },
       {
         "x": 0,
         "y": 3,
-        "building_id": "generator5"
+        "building_id": "ecto_compressor"
       },
       {
         "x": 1,
         "y": 3,
-        "building_id": "cooler7"
+        "building_id": "generator7"
       },
       {
         "x": 2,
         "y": 3,
-        "building_id": "doomStar_reactor"
+        "building_id": "cooler8"
       },
       {
         "x": 3,
         "y": 3,
-        "building_id": "doomStar_reactor"
+        "building_id": "generator7"
       }
     ],
-    "power_output": 2.7050847458757064e+22,
+    "power_output": 9.540000000000001e+23,
     "island_count": 1
   }
 }

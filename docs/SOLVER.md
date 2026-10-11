@@ -321,6 +321,17 @@ cooler term goes, because adjacency does: the pool reaches the whole island, so 
 be a reactor. The two-class bound takes one cap on the _best_ of each class, since which class a
 tile falls in is a property of that tile and an inland generator may have shore reactors around it.
 
+**A cooler reaches eight producers, and the cooling budget forgot it.** The LP charges cooling as one
+island-wide budget, `0.25 · H + wMin · D <= nCool · C_top`, which is exact in the _amount_ and blind to
+the _reach_: cooling gets to a producer only from a cooler beside it, so `nCool` coolers keep at most
+`8 · nCool` producers online. That was harmless while a cooler covered two or three producers' waste.
+Cooler #8 against Generator #7 covers fourteen, and the budget asked for five coolers on Magma Rift's
+107 tiles where the best layout found uses thirteen at a third of their capacity — the base-rules bound
+sat 3–5% above it on every shipped map and read 92–94% for layouts at 96–98% of the corrected figure.
+The LP now caps generators at `8 · nCool` per split (and direct producers too); under a pool the cooling
+is not adjacent and neither is the cap. Singularity's bound does not move: its isolated generators are
+few enough that eight per cooler never binds.
+
 **The second half of the same argument is how many generators an island can keep apart, and a
 generator-bound roster is what runs into it.** Rating every generator at the bonus is what a search
 free to spread them out can reach — but isolated generators are pairwise non-adjacent by
@@ -776,6 +787,9 @@ about before changing anything in the search:
   exhaustive brute force rather than by running the solver and writing down what it said. **These
   numbers must never go down.** Each size is checked twice: once against the simulator, pinning
   the exact layout deterministically, and once against the search, which must reproduce it.
+  That ladder is a mid-game roster, where cooling binds; **`goldenLayoutsFullTier.test.ts`** is
+  the same seven islands with every building at its top tier, where cooler8 makes cooling
+  plentiful and generator capacity binds instead, so the optima are a different ladder.
 - **`anomalies.test.ts`**, **`scaling.test.ts`** and **`placementSearch.rating.test.ts`** — the
   rules, which the fixtures cannot reach at all because every fixture is solved under the base
   ones. Between them they pin each rule reaching the layout the search reports, the search running

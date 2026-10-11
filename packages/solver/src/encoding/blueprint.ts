@@ -187,7 +187,7 @@ const TILE_BYTE_MAP: Record<TileType, number> = {
 };
 
 const BUILDING_BYTE_MAP: Record<BuildingId, number> = {
-  // Coolers (10-16)
+  // Coolers (10-17)
   cooler1: 10,
   cooler2: 11,
   cooler3: 12,
@@ -195,6 +195,7 @@ const BUILDING_BYTE_MAP: Record<BuildingId, number> = {
   cooler5: 14,
   cooler6: 15,
   cooler7: 16,
+  cooler8: 17,
 
   // Generators (20-26)
   generator: 20,
@@ -205,7 +206,7 @@ const BUILDING_BYTE_MAP: Record<BuildingId, number> = {
   generator6: 25,
   generator7: 26,
 
-  // Heat Producers (30-53)
+  // Heat Producers (30-55)
   wind_turbine: 30,
   solar_panel: 31,
   coal_plant: 32,
@@ -230,6 +231,8 @@ const BUILDING_BYTE_MAP: Record<BuildingId, number> = {
   neuro_grid_reactor: 51,
   flux_reactor: 52,
   doomStar_reactor: 53,
+  precursor_pyramid: 54,
+  ecto_compressor: 55,
 };
 
 const REV_TILE_BYTE_MAP: Record<number, TileType> = Object.fromEntries(

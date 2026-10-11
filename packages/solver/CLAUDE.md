@@ -689,7 +689,9 @@ Start with `npm test`. Four parts of it are what actually catch a regression:
   correctly rounded and a V8 upgrade can move one by an ULP — enough to diverge
   the walk permanently.
 - **`tests/goldenLayouts.test.ts`** pins the proven optima for islands of 3–9
-  tiles. **These numbers must never go down.**
+  tiles on a mid-game roster, and **`tests/goldenLayoutsFullTier.test.ts`** the
+  same islands with every building at its top tier. **These numbers must never
+  go down.**
 - **`tests/distribution.test.ts`** pins the flow rules against measurements from
   the live game and against an independent max-flow oracle.
 - **The anomaly suite** — `tests/anomalies.test.ts`, `tests/scaling.test.ts`,
