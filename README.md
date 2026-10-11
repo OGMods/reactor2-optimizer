@@ -29,6 +29,12 @@ Workers so the board stays interactive while it thinks.
   best arrangement, so it keeps up to ten boards that tie on power and lets you
   cycle them and apply the one you like. Which tie is nicest to build is the one
   judgement the solver cannot make.
+- **Load your game.** The game's **Export to Optimizer** button copies a code
+  with your whole save — every island's cleared obstacles and buildings, your
+  unlocks, Time Lab and anomaly. Paste it into **Import code** and the optimizer
+  is set up exactly as you are, with research still in progress either counted
+  as done or turned into the upgrade plan. The format is in
+  [`docs/game-export.md`](docs/game-export.md).
 - **Share codes and links.** Any board — hand-built or solved — compresses to a
   short code, or a `?bp=` URL. Opening someone's link is a read-only preview
   until you choose to adopt it.

@@ -26,6 +26,9 @@
   // loadTemplate restores that island's saved terrain AND placements, so
   // there is no clearPlacements() here — switching islands is not "discard".
   async function selectTemplate(template: IslandTemplate) {
+    // The island on screen is already loaded: reloading it would only cost a
+    // decode, a stopped run and a recentred view the player did not ask for.
+    if (template.id === layoutState.activeTemplateId) return;
     confirm.disarm();
     // A terrain brush held over from a custom island does nothing on a
     // shipped one, so the hand is emptied rather than left looking armed.

@@ -347,12 +347,10 @@ class LayoutState {
       this.findTemplate(this.activeTemplateId) ?? ISLAND_TEMPLATES[0];
 
     if (template) {
-      await this.#applyBaseTemplate(template);
+      await this.#load(template, unlockedUpgrades);
     } else {
       this.initDefaultGrid();
     }
-
-    await this.#applySaved(this.activeTemplateId, unlockedUpgrades);
   }
 
   initDefaultGrid() {
@@ -424,26 +422,101 @@ class LayoutState {
   }
 
   /**
-   * Loads a template's pristine board and records its identity, so `persist()`
-   * can tell later whether the user has actually changed anything.
+   * Bumped by every load; a load commits only if no other started after it.
+   *
+   * Decoding is asynchronous, so two taps on an island used to start two loads
+   * whose halves interleaved — and each half painted. The bare template came up
+   * between the two decodes, and a second load could put it back over the
+   * first one's saved board, leaving the player looking at either state
+   * depending on timing. Now both decodes finish before anything is written,
+   * the write is one synchronous step, and only the newest load makes it.
    */
-  async #applyBaseTemplate(template: IslandTemplate) {
+  #loadSeq = 0;
+
+  /**
+   * Puts `template` on screen with the user's saved layout over it, or returns
+   * false without touching anything if a later load superseded this one.
+   */
+  async #load(
+    template: IslandTemplate,
+    unlockedUpgrades: Record<string, number>,
+  ): Promise<boolean> {
+    const seq = ++this.#loadSeq;
+    // The record is read now, not after an await: a background save landing
+    // mid-load must not change which board this load means.
+    const record = this.savedGrids[template.id];
+    const [base, saved] = await Promise.all([
+      this.#decodeTemplate(template),
+      this.#decodeSaved(template.id, record),
+    ]);
+    if (seq !== this.#loadSeq) return false;
+
+    this.#applyBaseTemplate(template, base);
+    if (saved) this.#applySaved(saved, unlockedUpgrades);
+    return true;
+  }
+
+  async #decodeTemplate(
+    template: IslandTemplate,
+  ): Promise<DecodedBlueprint | null> {
+    try {
+      return await decodeBlueprint(template.code);
+    } catch (err) {
+      console.error(
+        `[Layout] Template "${template.id}" failed to decode:`,
+        err,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * A saved layout record for `templateId`, decoded, or null when there is
+   * none. An unreadable one is discarded rather than retried forever — unless
+   * it has been replaced in the meantime, in which case it is not ours to drop.
+   */
+  async #decodeSaved(
+    templateId: string,
+    saved: SavedTemplateData | undefined,
+  ): Promise<DecodedBlueprint | null> {
+    if (!saved) return null;
+
+    try {
+      const decoded = await decodeBlueprint(saved.code);
+      return decoded.width && decoded.height ? decoded : null;
+    } catch (err) {
+      console.error(
+        `[Layout] Discarding unreadable saved layout for "${templateId}":`,
+        err,
+      );
+      if (this.savedGrids[templateId] === saved) {
+        delete this.savedGrids[templateId];
+        this.#saveState();
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Puts a template's pristine board on screen and records its identity, so
+   * `persist()` can tell later whether the user has actually changed anything.
+   * `decoded` null means the template could not be read.
+   */
+  #applyBaseTemplate(
+    template: IslandTemplate,
+    decoded: DecodedBlueprint | null,
+  ) {
     // A different board arrives here, so nothing already on the stack applies
     // to it — see `#clearHistory`.
     this.#clearHistory();
     this.activeTemplateId = template.id;
     this.placements = [];
 
-    try {
-      const decoded = await decodeBlueprint(template.code);
+    if (decoded) {
       this.grid = decoded.grid;
       this.width = decoded.width;
       this.height = decoded.height;
-    } catch (err) {
-      console.error(
-        `[Layout] Template "${template.id}" failed to decode:`,
-        err,
-      );
+    } else {
       this.initDefaultGrid();
     }
 
@@ -451,56 +524,42 @@ class LayoutState {
     this.#pristineTypes = this.grid.map((row) => row.map((t) => t.type));
   }
 
-  /** Overlays the user's saved blueprint for `templateId`, if one exists. */
-  async #applySaved(
-    templateId: string,
+  /** Overlays the user's saved blueprint, already decoded. */
+  #applySaved(
+    decoded: DecodedBlueprint,
     unlockedUpgrades: Record<string, number>,
-  ): Promise<boolean> {
-    const saved = this.savedGrids[templateId];
-    if (!saved) return false;
-
-    try {
-      const decoded = await decodeBlueprint(saved.code);
-      if (!decoded.width || !decoded.height) return false;
-
-      this.grid = decoded.grid;
-      this.width = decoded.width;
-      this.height = decoded.height;
-      this.placements = decoded.placements.map((p) =>
-        createPlacement(p.buildingId, p.x, p.y, unlockedUpgrades),
-      );
-      this.recalculate();
-      return true;
-    } catch (err) {
-      console.error(
-        `[Layout] Discarding unreadable saved layout for "${templateId}":`,
-        err,
-      );
-      delete this.savedGrids[templateId];
-      this.#saveState();
-      return false;
-    }
+  ) {
+    this.grid = decoded.grid;
+    this.width = decoded.width;
+    this.height = decoded.height;
+    this.placements = decoded.placements.map((p) =>
+      createPlacement(p.buildingId, p.x, p.y, unlockedUpgrades),
+    );
+    this.recalculate();
   }
 
   /**
-   * Switches templates: pristine terrain first, then the user's saved layout
-   * for it — terrain *and* placements — if they have one.
+   * Switches templates: pristine terrain, then the user's saved layout for it
+   * — terrain *and* placements — if they have one, landing as one write.
    */
   async loadTemplate(
     template: IslandTemplate,
     unlockedUpgrades: Record<string, number>,
   ) {
-    await this.#applyBaseTemplate(template);
-    this.#saveState();
-    await this.#applySaved(template.id, unlockedUpgrades);
+    if (await this.#load(template, unlockedUpgrades)) this.#saveState();
   }
 
   /** Throws away the user's edits for a template and restores the pristine one. */
   async resetTemplate(template: IslandTemplate) {
+    // A save of the edits being thrown away may still be encoding; it would
+    // land after this and bring them back. Cancel it.
+    this.#persistSeq++;
     delete this.savedGrids[template.id];
 
     if (this.activeTemplateId === template.id) {
-      await this.#applyBaseTemplate(template);
+      // With the record gone this lands the bare template — and, being a
+      // load, it also outranks any switch still decoding.
+      await this.#load(template, {});
     }
 
     this.#saveState();
@@ -637,6 +696,8 @@ class LayoutState {
     }
     if (!decoded.width || !decoded.height) return false;
 
+    // A switch still decoding would otherwise land over the preview.
+    this.#loadSeq++;
     // Someone else's board replaces the visitor's own on screen, so the
     // visitor's own edit history no longer describes what they are looking at.
     // Undo is barred in preview anyway; this is what makes leaving clean.
@@ -792,6 +853,70 @@ class LayoutState {
     await this.loadTemplate(island, unlockedUpgrades);
 
     return island;
+  }
+
+  /**
+   * Replaces the saved boards of shipped islands with the player's boards from
+   * the game (`resolveGameExport` in `@reactor2/solver`).
+   *
+   * This is the one write that lands on a shipped island from outside, and it
+   * keeps the rule that makes those islands fixed maps: each board arrives as
+   * its template with obstacles cleared and buildings placed, nothing else,
+   * because the resolver builds it from the template rather than from the
+   * game's terrain. It goes in as a saved layout — the same record a board
+   * edited by hand is — so loading, the Modified badge and Reset need no case
+   * of their own. A board identical to its template drops its record, as
+   * `persist()` does.
+   *
+   * `reset` names the islands still locked in the game, which go back to
+   * their untouched map: the player owns nothing there yet, so whatever was
+   * drawn on one is not their board. Custom islands are never named. If the
+   * board on screen is replaced or reset, it is reloaded, which also clears its
+   * undo history: the history describes a board that is gone.
+   */
+  async importGameIslands(
+    islands: readonly {
+      templateId: string;
+      grid: Tile[][];
+      placements: readonly { x: number; y: number; buildingId: string }[];
+    }[],
+    unlockedUpgrades: Record<string, number>,
+    reset: readonly string[] = [],
+  ) {
+    if (this.isPreview) {
+      throw new Error("Leave the shared layout before importing.");
+    }
+    // A save of the board on screen may still be encoding; landing after this
+    // it would overwrite the imported board with the one it replaced.
+    this.#persistSeq++;
+
+    for (const island of islands) {
+      const template = ISLAND_TEMPLATES.find((t) => t.id === island.templateId);
+      if (!template) continue;
+      const pristine = await decodeBlueprint(template.code);
+      if (
+        blueprintKey(island.grid, island.placements) ===
+        blueprintKey(pristine.grid)
+      ) {
+        delete this.savedGrids[island.templateId];
+      } else {
+        this.savedGrids[island.templateId] = {
+          code: await encodeBlueprint(island.grid, island.placements),
+        };
+      }
+    }
+    for (const id of reset) {
+      if (ISLAND_TEMPLATES.some((t) => t.id === id)) delete this.savedGrids[id];
+    }
+    this.#saveState();
+
+    if (
+      islands.some((i) => i.templateId === this.activeTemplateId) ||
+      reset.includes(this.activeTemplateId)
+    ) {
+      const template = this.findTemplate(this.activeTemplateId);
+      if (template) await this.loadTemplate(template, unlockedUpgrades);
+    }
   }
 
   /**

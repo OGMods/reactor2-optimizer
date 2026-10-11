@@ -98,6 +98,22 @@ layout over it, so the first paint is the real board. Writes go the other way:
 `persist()` returns immediately and the encode lands in the background, with a
 sequence number so a burst of paints cannot land out of order.
 
+Both directions are asynchronous, and both race the player's taps, so two rules
+hold them:
+
+- **A load decodes everything before it writes anything, and only the newest
+  load writes** (`#loadSeq`). Loading used to paint the bare template, then the
+  saved layout over it, so the bare map flashed up between the two and a second
+  tap could leave either on screen. `loadPreview` bumps the same counter, so a
+  switch still decoding cannot land over a shared board. The island list also
+  ignores a tap on the island already open.
+- **Anything that replaces a saved record cancels the save in flight** —
+  `resetTemplate` and `importGameIslands` bump `#persistSeq`. Otherwise an edit's
+  save, still encoding, lands afterwards and brings the replaced board back. A
+  load reads the record when it starts, not after an await, for the same reason.
+
+`state/templateLoad.test.ts` pins each of these.
+
 ### `configState` (`config.svelte.ts`)
 
 The roster: which buildings are unlocked and to what level. **Presence of a key
@@ -448,11 +464,23 @@ map whose only undo was Reset — which also discards every building placed.
 Ghosts live in their own Pixi container rather than in the per-tile prop nodes,
 because `renderTileVisuals` clears those whenever a tile's state changes.
 
-**Importing therefore always creates a new custom island**
+**Importing a share code therefore always creates a new custom island**
 (`layoutState.importBlueprint`). It cannot land on a shipped template, and
 deliberately does not overwrite the current custom island, since that would be a
 destructive act with no undo behind a button marked "Import". At
 `MAX_CUSTOM_ISLANDS` it refuses and says so.
+
+**A game code is the one exception, and it keeps the rule.** The game's Export to
+Optimizer button writes an `R2X1.` code (`encoding/gameExport.ts`; the spec the
+game was built from is `docs/game-export.md`) holding the player's whole
+save. `resolveGameExport` builds each unlocked island's board **from our
+template** — obstacles the player cleared are cleared, buildings placed, nothing
+else — so a shipped board still differs from its map only by the player's moves.
+`layoutState.importGameIslands` writes those as the islands' saved layouts;
+islands still locked in the game are reset to their untouched map, since the
+player owns nothing there yet. Because it
+replaces work, the Import dialog summarises the code first and takes two presses.
+The template-to-game mapping is `IslandTemplate.game` in `data/maps.ts`.
 
 ### The transformer is special
 

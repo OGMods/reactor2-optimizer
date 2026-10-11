@@ -9,8 +9,8 @@ the terminal.
 packages/solver/
   src/solver/     the engine: types, island split, simulation, distribution, search
   src/data/       the authored building tables, the anomaly table, the shipped island codes,
-                  unlock resolution
-  src/encoding/   the blueprint wire format
+                  unlock resolution, mapping a game export onto all of that
+  src/encoding/   the blueprint wire format, and a reader for the game's export code
   src/utils/      the game's number ladder
   src/grid.ts     tile predicates and the ASCII alphabet the tests are written in
   bin/            the CLI (`npm run solve`)
