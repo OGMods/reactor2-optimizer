@@ -787,6 +787,9 @@ about before changing anything in the search:
   exhaustive brute force rather than by running the solver and writing down what it said. **These
   numbers must never go down.** Each size is checked twice: once against the simulator, pinning
   the exact layout deterministically, and once against the search, which must reproduce it.
+  That ladder is a mid-game roster, where cooling binds; **`goldenLayoutsFullTier.test.ts`** is
+  the same seven islands with every building at its top tier, where cooler8 makes cooling
+  plentiful and generator capacity binds instead, so the optima are a different ladder.
 - **`anomalies.test.ts`**, **`scaling.test.ts`** and **`placementSearch.rating.test.ts`** — the
   rules, which the fixtures cannot reach at all because every fixture is solved under the base
   ones. Between them they pin each rule reaching the layout the search reports, the search running
