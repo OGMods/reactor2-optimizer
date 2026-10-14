@@ -840,9 +840,14 @@ could not see would restart numbering at 1 and overwrite an untagged run.
 `--attempts` runs a batch session: N whole solves through a worker pool, with a leaderboard of
 distinct layouts at the end. Ctrl-C stops it and still prints the report.
 
-Cores are spent on two axes and the flags pick which. A **run** farms its islands out to the pool
-— the same search either way, since each island still gets its own slice (`islandBudgetsS`) of
-the budget, so only wall clock changes. A **session** runs whole attempts in the pool with islands
+Cores are spent on two axes and the flags pick which. A **run** farms its islands out to the pool,
+each with its own slice (`islandBudgetsS`) of the budget. When every island has a worker of its
+own the slices are stretched until the largest is the whole budget (`fitBudgetsToPool`), since a
+run that fits the pool lasts as long as its largest slice anyway — the app's Quick does the same.
+That makes it a different search from the serial fallback (one island, or a pool of one), which
+keeps the summed split, so on a multi-island board the core count decides how long each island is
+searched. `npm run survey` keeps the summed split too: it measures one attempt's slices, which is
+what a queued Deep or Max run spends. A **session** runs whole attempts in the pool with islands
 serial inside each; the pool already owns the cores, and a nested pool per island would
 oversubscribe the machine.
 

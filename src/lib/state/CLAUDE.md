@@ -151,7 +151,7 @@ watchdog and the run all read the scaled mode, so none of them can disagree.
 Attempts are ordinary pool tasks: `attempts × islands` go into the same queue
 that runs one island per worker, so extra searches cost wall-clock only once the
 pool is full. That is why `estimatedRunMs` exists and why the control prints it —
-"10 × 10s" is not a duration until you know how many workers the browser gives
+"5 × 20s" is not a duration until you know how many workers the browser gives
 you. `estimateMakespanMs` replays the coordinator's own greedy dispatch over the
 task durations rather than guessing.
 

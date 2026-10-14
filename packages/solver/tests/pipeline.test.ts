@@ -30,7 +30,7 @@ import {
   splitGridIntoIslands,
 } from "../src/solver/island";
 import { simulateIsland } from "../src/solver/simulate";
-import { islandBudgetsS, solve } from "../src/solver/solver";
+import { fitBudgetsToPool, islandBudgetsS, solve } from "../src/solver/solver";
 import type { Placement, Tile } from "../src/solver/types";
 import { basicCatalogue, basicRoster, expectClose } from "./helpers";
 
@@ -295,5 +295,19 @@ describe("splitting the budget between islands", () => {
   it("spends nothing on a board with nothing to search", () => {
     expect(islandBudgetsS([0], 30)).toEqual([0]);
     expect(islandBudgetsS([], 30)).toEqual([]);
+  });
+  /*
+   * Islands run side by side, so when every task has a worker the run lasts
+   * as long as its largest slice, and the slices are stretched until that
+   * one is the whole budget. A run that queues keeps the summed split.
+   */
+  it("stretches the slices to the budget when the run fits the pool", () => {
+    expect(fitBudgetsToPool([27, 3], 30, 1, 2)).toEqual([30, 30 / 9]);
+    expect(fitBudgetsToPool([27, 3], 30, 2, 4)).toEqual([30, 30 / 9]);
+  });
+
+  it("keeps the summed split once the run has to queue", () => {
+    expect(fitBudgetsToPool([27, 3], 30, 2, 3)).toEqual([27, 3]);
+    expect(fitBudgetsToPool([0], 30, 1, 8)).toEqual([0]);
   });
 });

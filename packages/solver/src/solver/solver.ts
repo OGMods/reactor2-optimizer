@@ -109,6 +109,35 @@ export function islandBudgetsS(
   return budgets;
 }
 
+/**
+ * One attempt's per-island budgets, stretched to the attempt's wall-clock when
+ * the whole run fits the pool at once.
+ *
+ * `islandBudgetsS` divides an attempt's budget so the slices **sum** to it,
+ * which is what keeps a run that queues — more tasks than workers — to the
+ * cost it advertises. But islands run concurrently, so when every task of the
+ * run has a worker of its own the sum buys nothing: the run lasts as long as
+ * its largest slice, and on a board of two large islands that was 16-24s of a
+ * "30s" Quick run. There the slices are scaled up together until the largest
+ * is the whole budget — the run takes exactly what the mode says, and every
+ * island gets more time than before, in the same proportions.
+ *
+ * Shared by the app's coordinator, its run estimate and the CLI's pooled run,
+ * so none of them can disagree.
+ */
+export function fitBudgetsToPool(
+  budgetsS: readonly number[],
+  attemptBudgetS: number,
+  attempts: number,
+  poolSize: number,
+): number[] {
+  const largest = Math.max(0, ...budgetsS);
+  if (largest <= 0 || attempts * budgetsS.length > poolSize)
+    return [...budgetsS];
+  const scale = attemptBudgetS / largest;
+  return budgetsS.map((s) => s * scale);
+}
+
 export interface IslandPlan {
   islands: IslandSubGrid[];
   effectiveBuildings: EffectiveBuilding[];

@@ -18,8 +18,10 @@
  * of a bound that is not tight.
  *
  * Islands are solved one task each through the CLI's own worker pool, with
- * the slice of `--time` `planSolve` gives them — the same budget a real run
- * spends on that island — so a figure here is a figure the app would get.
+ * the slice of `--time` `planSolve` gives them — the same budget a queued app
+ * run spends on that island. A run that fits the app's pool stretches those
+ * slices (`fitBudgetsToPool`), so on a board of several large islands this
+ * undercounts what a Quick run gets.
  *
  * **Every map is surveyed with its obstacles cleared.** Rocks, trees and ponds
  * are removable in the game and become grass here; water and the transformer

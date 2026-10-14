@@ -363,10 +363,8 @@ class SolverState {
     // carries the board's real terrain, so a neighbouring island's tiles sit
     // inside it and counting them would inflate every budget estimate.
     const tileCounts = islands.map((island) => island.tileCount);
-    return estimateMakespanMs(
-      taskDurationsMs(mode, tileCounts),
-      defaultPoolSize(),
-    );
+    const pool = defaultPoolSize();
+    return estimateMakespanMs(taskDurationsMs(mode, tileCounts, pool), pool);
   }
 
   /** The same figure for the mode a run would use right now. */

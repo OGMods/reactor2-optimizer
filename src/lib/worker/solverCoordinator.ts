@@ -7,7 +7,7 @@ import {
 } from "@reactor2/solver";
 import { buildSolveVariants } from "./variants";
 import { IslandBest } from "./islandBest";
-import { countGrassTiles } from "@reactor2/solver";
+import { countGrassTiles, fitBudgetsToPool } from "@reactor2/solver";
 import type { IslandSolution } from "@reactor2/solver";
 import type {
   BuildingDefinition,
@@ -66,7 +66,8 @@ export function defaultPoolSize(): number {
  * Runs one island-search per worker, mirroring the process pool the reference
  * pipeline uses: islands cannot influence each other, so wall-clock time
  * becomes ~max(island budget) instead of the sum of them, and every island
- * still gets its full share of the budget (`islandBudgetsS`).
+ * still gets its full share of the budget (`islandBudgetsS`) — stretched to
+ * the whole of it when the run fits the pool at once (`fitBudgetsToPool`).
  *
  * A multi-attempt run rides the same queue. Nothing about a second search of
  * an island differs from a first, so `attempts × islands` tasks go into the
@@ -109,11 +110,16 @@ export class SolverCoordinator {
       return [createEmptyResult(grid?.[0]?.length ? countGrassTiles(grid) : 0)];
 
     this.ensurePool();
-    const solutions = await this.runQueue(
-      plan,
-      Math.max(1, options?.attempts ?? 1),
-      options,
+    const attempts = Math.max(1, options?.attempts ?? 1);
+    // A run whose every task has a worker of its own takes its largest slice,
+    // not the sum, so the slices are stretched to the whole budget.
+    plan.budgetsS = fitBudgetsToPool(
+      plan.budgetsS,
+      timeBudgetS,
+      attempts,
+      this.poolSize,
     );
+    const solutions = await this.runQueue(plan, attempts, options);
 
     return buildSolveVariants(plan, solutions);
   }

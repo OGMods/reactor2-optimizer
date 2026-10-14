@@ -1,6 +1,7 @@
 <script lang="ts">
   import { configState, solverState, uiState } from "../../state";
   import {
+    attemptBudgetReason,
     attemptBudgetScale,
     type SolveModeId,
   } from "../../worker/solveModes";
@@ -39,8 +40,8 @@
   const blurb: Record<string, string> = {
     quick:
       "One search. The fastest answer, and on a small island usually the same answer as the others.",
-    deep: "Ten searches from ten different starting streams, best kept. The one to reach for when the layout matters.",
-    max: "Fifty. Barely more power than Deep — but far more arrangements that tie it, which is what you cycle through.",
+    deep: "Five searches from five different starting streams, best kept. The one to reach for when the layout matters.",
+    max: "Twenty-five. A little more power than Deep — and far more arrangements that tie it, which is what you cycle through.",
   };
 </script>
 
@@ -50,8 +51,8 @@
       The optimizer does not compute the best layout — it walks toward one at
       random and cools as it goes. Past the first few seconds a walk mostly
       polishes the arrangement it already has, so a longer run is worth much
-      less than <em>more</em> runs. Each option below is the same search repeated
-      a different number of times; the best result per island is kept.
+      less than <em>more</em> runs. Quick is one search; Deep and Max repeat a shorter
+      one a different number of times, and the best result per island is kept.
     </p>
 
     <div class="modes">
@@ -85,7 +86,7 @@
       The second figure is what it should actually take here. Searches run in
       parallel — this browser gives {poolSize}
       {poolSize === 1 ? "worker" : "workers"}, shared across the map's islands —
-      so fifty searches cost nothing like fifty times one.
+      so twenty-five searches cost nothing like twenty-five times one.
     </p>
 
     <p class="note">
@@ -98,8 +99,7 @@
     {#if budgetScale !== 1}
       <p class="note">
         Under {configState.activeAnomaly.name} every search runs {budgetScale}×
-        as long. A generator's output depends on its neighbours there, so a walk
-        needs the extra time to find layouts that keep them apart.
+        as long. {attemptBudgetReason(configState.anomalyId)}
       </p>
     {/if}
 
