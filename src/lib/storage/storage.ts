@@ -334,6 +334,9 @@ export const solverStorage = {
     setItem(KEYS.SOLVE, records);
   },
 
+  /** Every island that has a stored solve. */
+  solveIds: (): string[] => Object.keys(loadSolveRecords()),
+
   /** Forgets one island's solve, or the whole store when it empties. */
   clearSolve: (templateId: string): void => {
     const records = loadSolveRecords();

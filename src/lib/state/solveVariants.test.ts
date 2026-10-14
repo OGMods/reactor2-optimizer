@@ -10,7 +10,7 @@
  * An app rule, like `solvePersistence.test.ts` — the engine solves
  * for one layout and has nothing to say about any of it.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { OptimizationResult, PlacedBuilding } from "../types";
 
 // The storage helpers are SSR-guarded on `typeof window`, so a test running in
@@ -26,9 +26,14 @@ const store = new Map<string, string>();
 };
 
 const { layoutState } = await import("./layout.svelte");
-const { solverState, chooseSolveVariants } = await import("./solver.svelte");
+const { solverState, chooseSolveVariants, composeIslandBests } =
+  await import("./solver.svelte");
 const { solverStorage } = await import("../storage/storage");
+const { configState } = await import("./config.svelte");
 const { SolverWorkerClient } = await import("../worker/workerClient");
+const { simulatePlacedBuildings } = await import("../simulation/simulator");
+const { createPlacementAtLevel } = await import("../data/placements");
+const { BUILDINGS } = await import("@reactor2/solver");
 
 function placed(buildingId: string, x: number, y: number): PlacedBuilding {
   return {
@@ -187,6 +192,91 @@ describe("what a finished run does to the shortlist", () => {
     const held = Array.from({ length: 8 }, (_, i) => spread(500, i));
     const fresh = Array.from({ length: 8 }, (_, i) => spread(500, i + 8));
     expect(chooseSolveVariants(held, 0, fresh, 10).variants).toHaveLength(10);
+  });
+});
+
+describe("taking each island's best across two runs", () => {
+  /**
+   * A board of two islands, x < 100 and x >= 100, worth `a` and `b`. `shape`
+   * moves both islands' buildings, so boards of different shapes are distinct
+   * layouts on each island separately.
+   */
+  function twoIslands(a: number, b: number, shape: number): OptimizationResult {
+    const board = result(a + b, 0);
+    const row = (x0: number, power: number) =>
+      [0, 1, 2, 3, 4].map((k) => ({
+        ...placed("generator", x0 + shape * 5 + k, 0),
+        powerGenerated: k === 0 ? power : 0,
+      }));
+    board.placements = [...row(0, a), ...row(100, b)];
+    return board;
+  }
+  const islandOf = (p: PlacedBuilding) => (p.x < 100 ? 0 : 1);
+  const sum = (rows: PlacedBuilding[]) =>
+    rows.reduce((s, p) => s + p.powerGenerated, 0);
+  const shapeOf = (rows: PlacedBuilding[], island: number) =>
+    (rows.filter((p) => islandOf(p) === island)[0].x - island * 100) / 5;
+
+  /*
+   * The case it exists for: the fresh run wins on the total by finding a
+   * better large island, and would have taken a worse small one with it.
+   */
+  it("keeps the held island the fresh run did worse on", () => {
+    const held = [twoIslands(100, 200, 0)];
+    const fresh = [twoIslands(150, 180, 1)];
+    const composed = composeIslandBests(held, fresh, islandOf, sum)!;
+
+    expect(composed.map(sum)).toEqual([350]);
+    expect(shapeOf(composed[0], 0)).toBe(1);
+    expect(shapeOf(composed[0], 1)).toBe(0);
+  });
+
+  it("has nothing to add when one board already holds every best", () => {
+    const held = [twoIslands(100, 200, 0)];
+    expect(
+      composeIslandBests(held, [twoIslands(150, 200, 1)], islandOf, sum),
+    ).toBeNull();
+    expect(
+      composeIslandBests(held, [twoIslands(90, 190, 1)], islandOf, sum),
+    ).toBeNull();
+  });
+
+  it("is never asked to merge when nothing is held", () => {
+    expect(
+      composeIslandBests([], [twoIslands(1, 2, 0)], islandOf, sum),
+    ).toBeNull();
+  });
+
+  /*
+   * Every layout is upgraded, so a tied alternate on the island it was
+   * already best on survives as an alternate of the merged board.
+   */
+  it("upgrades the shortlist too, and drops the copies that makes", () => {
+    const held = [twoIslands(100, 200, 0), twoIslands(100, 200, 2)];
+    const fresh = [twoIslands(150, 180, 1), twoIslands(150, 180, 3)];
+    const composed = composeIslandBests(held, fresh, islandOf, sum)!;
+
+    // The fresh run's leader, upgraded, is the held leader upgraded: one board.
+    expect(composed.map(sum)).toEqual([350, 350, 350]);
+    expect(composed.map((c) => [shapeOf(c, 0), shapeOf(c, 1)])).toEqual([
+      [1, 0],
+      [1, 2],
+      [3, 0],
+    ]);
+  });
+
+  it("feeds a merge that beats both runs through as the new shortlist", () => {
+    const held = [twoIslands(100, 200, 0)];
+    const merged = composeIslandBests(
+      held,
+      [twoIslands(150, 180, 1)],
+      islandOf,
+      sum,
+    )!.map((placements) => ({ ...result(sum(placements), 0), placements }));
+
+    const chosen = chooseSolveVariants(held, 0, merged);
+    expect(chosen.defended).toBe(false);
+    expect(chosen.variants[0].totalPower).toBe(350);
   });
 });
 
@@ -389,5 +479,143 @@ describe("what a re-run leaves on screen", () => {
     await solverState.runOptimizer({ keepBest: true });
     expect(solverState.optimizationResult?.totalPower).toBe(500);
     expect(solverState.variants.map((v) => v.totalPower)).toEqual([500]);
+  });
+
+  /*
+   * The merge as the app reaches it: two islands, each run winning one of
+   * them, and real scoring on the way out — the composite is re-scored on the
+   * board, so this is what proves it is a legal board worth the sum.
+   */
+  it("keeps the better of each island across the two runs", async () => {
+    // Two three-tile islands, rows 0 and 4, with water between.
+    layoutState.grid = ["GGG", "~~~", "~~~", "~~~", "GGG"].map((row, y) =>
+      [...row].map((c, x) => ({
+        x,
+        y,
+        type: c === "G" ? ("grass" as const) : ("water" as const),
+      })),
+    );
+    /** A reactor, generator and cooler along row `y`, the reactor at `tier`. */
+    const hub = (y: number, tier: number) => [
+      createPlacementAtLevel("solar_panel", 0, y, tier),
+      createPlacementAtLevel("generator", 1, y, 0),
+      createPlacementAtLevel("cooler1", 2, y, 5),
+    ];
+    const board = (rows: PlacedBuilding[]): OptimizationResult => {
+      const scored = simulatePlacedBuildings(layoutState.grid, BUILDINGS, rows);
+      const power = scored.reduce((sum, p) => sum + p.powerGenerated, 0);
+      return { ...result(power, 0), placements: scored };
+    };
+    const strong = board(hub(0, 5)).totalPower;
+    const weak = board(hub(0, 0)).totalPower;
+    expect(weak).toBeGreaterThan(0);
+    expect(strong).toBeGreaterThan(weak);
+
+    fake = [board([...hub(0, 5), ...hub(4, 0)])];
+    await solverState.runOptimizer();
+    // The two tie on the total, so the whole-board rules could only pool
+    // them; neither board on its own has both strong islands.
+    fake = [board([...hub(0, 0), ...hub(4, 5)])];
+    await solverState.runOptimizer({ keepBest: true });
+
+    expect(solverState.optimizationResult?.totalPower).toBeCloseTo(2 * strong);
+  });
+
+  describe("merging islands on a board that has moved on", () => {
+    /** Two three-tile islands, rows 0 and 4, with water between. */
+    const twoIslands = () =>
+      ["GGG", "~~~", "~~~", "~~~", "GGG"].map((row, y) =>
+        [...row].map((c, x) => ({
+          x,
+          y,
+          type: c === "G" ? ("grass" as const) : ("water" as const),
+        })),
+      );
+    /** A reactor, generator and cooler along row `y`. */
+    const hub = (y: number) => [
+      createPlacementAtLevel("solar_panel", 0, y, 5),
+      createPlacementAtLevel("generator", 1, y, 0),
+      createPlacementAtLevel("cooler1", 2, y, 5),
+    ];
+    /** The same row with no reactor, so nothing to convert: worth nothing. */
+    const idle = (y: number) => [
+      createPlacementAtLevel("generator", 1, y, 0),
+      createPlacementAtLevel("cooler1", 2, y, 5),
+    ];
+    const board = (rows: PlacedBuilding[]): OptimizationResult => {
+      const scored = simulatePlacedBuildings(layoutState.grid, BUILDINGS, rows);
+      const power = scored.reduce((sum, p) => sum + p.powerGenerated, 0);
+      return { ...result(power, 0), placements: scored };
+    };
+    const reactorRows = (v: OptimizationResult | null | undefined) =>
+      (v?.placements ?? [])
+        .filter((p) => p.buildingId === "solar_panel")
+        .map((p) => p.y)
+        .sort();
+
+    let roster: Record<string, number> = {};
+    beforeEach(() => {
+      roster = { ...configState.buildingUpgrades };
+      configState.lockAll();
+      configState.setUpgradeLevel("solar_panel", 5);
+      configState.setUpgradeLevel("generator", 0);
+      configState.setUpgradeLevel("cooler1", 5);
+      layoutState.grid = twoIslands();
+    });
+    afterEach(() => {
+      while (configState.upgradePlan.length > 0) configState.removePlanStep(0);
+      configState.lockAll();
+      for (const [id, level] of Object.entries(roster))
+        configState.setUpgradeLevel(id, level);
+    });
+
+    /*
+     * Under a plan an island is judged by `evaluatePlan` on its placements
+     * alone, so the merge leans on that figure adding up across islands. A
+     * part-board it could not rate would read as zero and the merge would
+     * never fire.
+     */
+    it("takes each island's best under an upgrade plan too", async () => {
+      configState.addPlanStep("generator");
+      expect(configState.hasPlan).toBe(true);
+
+      fake = [board([...hub(0), ...idle(4)])];
+      await solverState.runOptimizer();
+      fake = [board([...idle(0), ...hub(4)])];
+      await solverState.runOptimizer({ keepBest: true });
+
+      expect(reactorRows(solverState.optimizationResult)).toEqual([0, 4]);
+    });
+
+    /*
+     * A held layout is the board at its own run. Paint under one of its
+     * buildings and that island is no longer something a new board can be
+     * built from: the merge would carry the building on the rock across.
+     *
+     * The building painted over is a spare cooler, so losing it costs the held
+     * island nothing — which is exactly when a merged board carrying it would
+     * win and be kept.
+     */
+    it("does not take an island from a held layout the terrain has left", async () => {
+      const wider = () => {
+        const grid = twoIslands();
+        grid[0].push({ x: 3, y: 0, type: "grass" });
+        for (const row of grid.slice(1))
+          row.push({ x: 3, y: row[0].y, type: "water" });
+        return grid;
+      };
+      layoutState.grid = wider();
+      const spare = createPlacementAtLevel("cooler1", 3, 0, 5);
+      fake = [board([...hub(0), spare, ...idle(4)])];
+      await solverState.runOptimizer();
+
+      layoutState.grid = wider();
+      layoutState.grid[0][3] = { x: 3, y: 0, type: "rock" };
+      fake = [board([...idle(0), ...hub(4)])];
+      await solverState.runOptimizer({ keepBest: true });
+
+      for (const v of solverState.variants)
+        expect(reactorRows(v)).not.toEqual([0, 4]);
+    });
   });
 });

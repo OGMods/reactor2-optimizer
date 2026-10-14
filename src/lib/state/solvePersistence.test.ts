@@ -173,6 +173,53 @@ describe("persisted solve results", () => {
     expect(activeSolve()).toBeNull();
   });
 
+  describe("the run dialog", () => {
+    /**
+     * What the board and storage held at the moment the run was started, with
+     * the run itself stood in for: what is under test is what the dialog does
+     * before it, not the search.
+     */
+    async function startFromDialog(keepBest: boolean) {
+      const { uiState } = await import("./ui.svelte");
+      let seen: { onScreen: number | null; stored: boolean } | null = null;
+      const real = solverState.runOptimizer;
+      solverState.runOptimizer = async () => {
+        seen = {
+          onScreen: solverState.optimizationResult?.totalPower ?? null,
+          stored: activeSolve() !== null,
+        };
+      };
+      try {
+        uiState.startSolve(keepBest);
+      } finally {
+        solverState.runOptimizer = real;
+      }
+      return seen;
+    }
+
+    it("deletes a discarded solve before the run starts", async () => {
+      stageSolve(fakeResult(500));
+      solverState.restore();
+
+      // Gone from the board and from storage straight away, so a run stopped
+      // before it reports anything cannot hand the discarded layout back.
+      expect(await startFromDialog(false)).toEqual({
+        onScreen: null,
+        stored: false,
+      });
+    });
+
+    it("leaves a kept solve where it is", async () => {
+      stageSolve(fakeResult(500));
+      solverState.restore();
+
+      expect(await startFromDialog(true)).toEqual({
+        onScreen: 500,
+        stored: true,
+      });
+    });
+  });
+
   it("keeps a solve when the user places a building by hand", () => {
     stageSolve(fakeResult(500));
 

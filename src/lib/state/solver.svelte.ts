@@ -1,5 +1,10 @@
-import type { OptimizationResult, PlacedBuilding } from "../types";
-import { DEFAULT_ANOMALY_ID, type AnomalyId } from "@reactor2/solver";
+import type { OptimizationResult, PlacedBuilding, Tile } from "../types";
+import {
+  DEFAULT_ANOMALY_ID,
+  getAnomaly,
+  type AnomalyDefinition,
+  type AnomalyId,
+} from "@reactor2/solver";
 import {
   SolverWorkerClient,
   type SolveTaskHandle,
@@ -33,6 +38,7 @@ import { trackEvent } from "../utils/analytics";
 import {
   solverStorage,
   uiStorage,
+  type SavedSolveData,
   type StoredPlacement,
 } from "../storage/storage";
 import { configState } from "./config.svelte";
@@ -127,6 +133,78 @@ export function chooseSolveVariants(
 }
 
 /**
+ * Boards built from the best answer each island has had, across both runs.
+ *
+ * `chooseSolveVariants` weighs whole boards, and on a board of several islands
+ * that loses work: a re-run that finds a better large island and a worse small
+ * one wins on the total and takes the worse small island with it, although the
+ * held board's version is still sitting in the shortlist. Islands never
+ * interact, so any mix of one board's islands with another's is a legal board
+ * whose power is the sum of the parts — and taking the stronger side island by
+ * island is at least as good as either board.
+ *
+ * Every layout in either shortlist is upgraded this way, not only the leaders,
+ * so the arrangements a shortlist offers survive wherever they were already
+ * the best answer for their island. Each comes out at the same power, which is
+ * what makes the result a shortlist again.
+ *
+ * Null when one board already holds the best of every island — the merge
+ * would only rebuild it, and the plain whole-board rules say everything there
+ * is to say. `islandPower` is the figure the run maximised for those
+ * placements alone, so under an upgrade plan it is the power at the plan's end.
+ */
+export function composeIslandBests(
+  held: readonly OptimizationResult[],
+  fresh: readonly OptimizationResult[],
+  islandOf: (p: PlacedBuilding) => number,
+  islandPower: (placements: PlacedBuilding[]) => number,
+  limit: number = MAX_SOLVE_VARIANTS,
+): PlacedBuilding[][] | null {
+  if (held.length === 0 || fresh.length === 0) return null;
+
+  const boards = [...held, ...fresh].map((variant) => {
+    const byIsland = new Map<number, PlacedBuilding[]>();
+    for (const p of variant.placements) {
+      const key = islandOf(p);
+      const rows = byIsland.get(key);
+      if (rows) rows.push(p);
+      else byIsland.set(key, [p]);
+    }
+    return byIsland;
+  });
+  const islands = [...new Set(boards.flatMap((b) => [...b.keys()]))];
+  const power = boards.map(
+    (b) => new Map(islands.map((k) => [k, islandPower(b.get(k) ?? [])])),
+  );
+
+  // Which board holds each island's best answer.
+  const owner = new Map<number, number>();
+  for (const k of islands) {
+    let best = 0;
+    for (let i = 1; i < boards.length; i++)
+      if (power[i].get(k)! > power[best].get(k)!) best = i;
+    owner.set(k, best);
+  }
+
+  /** Strictly below, and by more than the precision the figures carry. */
+  const falls = (i: number, k: number) => {
+    const mine = power[i].get(k)!;
+    const top = power[owner.get(k)!].get(k)!;
+    return mine < top && !powerTies(mine, top);
+  };
+  if (boards.some((_, i) => islands.every((k) => !falls(i, k)))) return null;
+
+  const composed: PlacedBuilding[][] = [];
+  for (let i = 0; i < boards.length && composed.length < limit; i++) {
+    const placements = islands.flatMap(
+      (k) => boards[falls(i, k) ? owner.get(k)! : i].get(k) ?? [],
+    );
+    if (isDistinctLayout(placements, composed)) composed.push(placements);
+  }
+  return composed;
+}
+
+/**
  * A layout stripped to what storage keeps: which building, where, and the tier
  * it was placed at. Everything else is re-derived by scoring it — see
  * `SavedSolveData.variants` for why it is not stored.
@@ -136,6 +214,22 @@ function toStoredPlacements(placements: PlacedBuilding[]): StoredPlacement[] {
 }
 
 /** The other direction: bare shape back to unscored placements. */
+/**
+ * The anomaly a stored solve's shapes were searched under. A record from before
+ * `anomalyId` existed carries it in its signature, second field from the end.
+ */
+function searchedAnomaly(saved: SavedSolveData): AnomalyId {
+  if (saved.anomalyId) return saved.anomalyId;
+  // Counted from the end: the terrain key in front is raw bytes and may hold
+  // a "|" of its own, while the roster, anomaly and research never do. A
+  // record older still is `terrain|roster`, from before there were anomalies,
+  // so that field is a piece of the terrain key — and `getAnomaly` reads
+  // anything it does not know as the base rules, which is what that solve was
+  // searched under.
+  const fields = saved.signature.split("|");
+  return getAnomaly(fields[fields.length - 2]).id;
+}
+
 function restorePlacements(stored: StoredPlacement[]): PlacedBuilding[] {
   return stored.map(([buildingId, x, y, baseValue]) =>
     unscoredPlacement(buildingId, x, y, baseValue),
@@ -253,7 +347,7 @@ class SolverState {
    *
    * Persisted, because it is a standing answer to "how much wall-clock am I
    * willing to give this", not a per-island decision. It deliberately does not
-   * take part in `solveSignature()`: a layout found by ten short searches is
+   * take part in `solveSignature()`: a layout found by five short searches is
    * the same kind of answer as one found by a single long one, so changing the
    * mode does not make a stored solve stale.
    */
@@ -301,6 +395,9 @@ class SolverState {
 
   #watchdog: ReturnType<typeof setTimeout> | null = null;
 
+  /** Settles once the run in flight has filed its result; null between runs. */
+  #runEnded: Promise<void> | null = null;
+
   /**
    * The chosen shape of a run, as it runs under the active anomaly. Falls back
    * rather than throwing on a stale id.
@@ -331,7 +428,7 @@ class SolverState {
    *
    * Not `attempts × budget`: the attempts are pool tasks and overlap, so the
    * cost of a deep run depends on how many cores the browser reports. Printing
-   * it is the whole reason the choice can be made honestly — "10 × 10s" says
+   * it is the whole reason the choice can be made honestly — "5 × 20s" says
    * nothing about whether that means twenty seconds or a hundred.
    *
    * Takes the mode rather than reading the current one so the explainer can
@@ -382,7 +479,11 @@ class SolverState {
 
   /** Theoretical upper bound maximum power estimate for current grid and unlocked buildings. */
   get estimatedMaxPower(): number {
-    const grid = layoutState.grid;
+    return this.#maxPowerFor(layoutState.grid);
+  }
+
+  /** `estimatedMaxPower` for any board, not only the one on screen. */
+  #maxPowerFor(grid: Tile[][]): number {
     if (!grid || !grid.length || !grid[0] || !grid[0].length) return 0;
 
     const upgrades = configState.buildingUpgrades;
@@ -455,7 +556,7 @@ class SolverState {
    * Public because it is a plain query — and because it is what a test needs
    * to stage a stored solve without running a five-minute solve first.
    */
-  solveSignature(): string {
+  solveSignature(grid: Tile[][] = layoutState.grid): string {
     const roster = Object.entries(configState.buildingUpgrades)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([id, level]) => `${id}:${level}`)
@@ -468,7 +569,7 @@ class SolverState {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([id, level]) => `${id}:${level}`)
       .join(",");
-    return `${blueprintKey(layoutState.grid)}|${roster}|${configState.anomalyId}|${research}`;
+    return `${blueprintKey(grid)}|${roster}|${configState.anomalyId}|${research}`;
   }
 
   /**
@@ -486,12 +587,25 @@ class SolverState {
    */
   restore() {
     const templateId = layoutState.activeTemplateId;
-    const saved = solverStorage.loadSolve(templateId);
+    let saved = solverStorage.loadSolve(templateId);
 
-    // A repainted board or a different roster is not a stale view of the
-    // truth — it is a different question's answer.
-    if (!saved || saved.signature !== this.solveSignature()) {
-      if (saved) solverStorage.clearSolve(templateId);
+    // A repainted board is a different question, and its answer goes. A
+    // roster, research or anomaly changed in Setup while this island was off
+    // screen is not: the shape still stands on this terrain, so it is re-rated
+    // the way `rescoreResult` re-rated the island that *was* on screen —
+    // otherwise every other island's solve was lost on its next open.
+    if (saved && saved.signature !== this.solveSignature()) {
+      const sameTerrain = saved.signature.startsWith(
+        `${blueprintKey(layoutState.grid)}|`,
+      );
+      if (sameTerrain && this.#refile(templateId, saved, layoutState.grid))
+        saved = solverStorage.loadSolve(templateId);
+      else {
+        solverStorage.clearSolve(templateId);
+        saved = null;
+      }
+    }
+    if (!saved) {
       this.#reset();
       return;
     }
@@ -534,11 +648,65 @@ class SolverState {
    * scored. `bound` is passed in rather than read per call: it is the same
    * figure for every variant and computing it re-splits the whole grid.
    */
+  /**
+   * `composeIslandBests` over the held and fresh shortlists, scored — or null
+   * where the merge has nothing to add.
+   *
+   * The islands are split the way the run split them: the roster it searched
+   * decides whether a lone patch can be cooled, and the anomaly can decide
+   * whether there are islands at all. Under a shared cooling pool the board is
+   * one island, so a merge never finds anything to do. Placements on no island
+   * share one key, which keeps them with whichever board they came from.
+   */
+  #composeIslands(
+    held: OptimizationResult[],
+    fresh: OptimizationResult[],
+    grid: Tile[][],
+    unlocks: Record<string, number>,
+    anomaly: AnomalyDefinition,
+    islandPower: (placements: PlacedBuilding[]) => number,
+  ): OptimizationResult[] | null {
+    // A held layout is the board as it stood at its own run, and terrain
+    // painted since may have put something under one of its buildings. The
+    // whole board defending itself is `chooseSolveVariants`' concern; taking
+    // one island of it into a new board is this one's, so only layouts still
+    // standing on grass are offered — the test `#refile` applies.
+    const standing = held.filter((v) =>
+      v.placements.every((p) => grid[p.y]?.[p.x]?.type === "grass"),
+    );
+    if (standing.length === 0) return null;
+
+    const width = grid[0]?.length ?? 0;
+    const islandAt = new Map<number, number>();
+    const islands = splitGridIntoIslands(
+      grid,
+      canCoolDirectProducer(
+        getEffectiveBuildings(BUILDINGS, unlocks, configState.prestige),
+      ),
+      anomaly,
+    );
+    islands.forEach((island, i) =>
+      island.originalTileIndices.forEach((tile, k) => {
+        if (island.buildable[k] === 1) islandAt.set(tile, i);
+      }),
+    );
+
+    const composed = composeIslandBests(
+      standing,
+      fresh,
+      (p) => islandAt.get(p.y * width + p.x) ?? -1,
+      islandPower,
+    );
+    if (!composed) return null;
+    const bound = this.estimatedMaxPower;
+    return composed.map((placements) => this.#scoreLayout(placements, bound));
+  }
+
   #scoreLayout(
     placements: PlacedBuilding[],
     bound: number,
+    grid: Tile[][] = layoutState.grid,
   ): OptimizationResult {
-    const grid = layoutState.grid;
     const scored = simulatePlacedBuildings(
       grid,
       BUILDINGS,
@@ -605,6 +773,95 @@ class SolverState {
   /** Forgets a solve for an island that no longer exists. */
   forgetSolve(templateId: string) {
     solverStorage.clearSolve(templateId);
+  }
+
+  /**
+   * What importing the game does to every island's stored solve, decided per
+   * island against the board the import left it with.
+   *
+   * A game import changes the roster, the research and usually the terrain,
+   * and each of those is in `solveSignature()` — so left alone, `restore()`
+   * would discard every island's solve the next time it was opened, though
+   * most of them are still perfectly buildable. A solve can take minutes, so
+   * only what is actually invalid goes:
+   *
+   * - an island **still locked** in the game, whose board was reset to its map;
+   * - a solve **searched under another anomaly** — its shapes answer other
+   *   rules, and re-rating them would pass them off as this timeline's;
+   * - a layout with a building on a tile the import made **unbuildable**, or
+   *   one the imported roster **does not unlock** — dropped from the
+   *   shortlist, and the solve with it once none survive.
+   *
+   * Everything else is kept: re-tiered to the imported unlocks, re-scored on
+   * the island's new board, and filed under the signature that board and
+   * roster now give, as `rescoreResult` does for the island on screen. Like it,
+   * this searches nothing, so a cleared obstacle shows up as room a re-run can
+   * use rather than as a changed layout.
+   */
+  async carryOverSolves(locked: readonly string[]) {
+    for (const templateId of solverStorage.solveIds()) {
+      const saved = solverStorage.loadSolve(templateId);
+      if (!saved) continue;
+      const grid = locked.includes(templateId)
+        ? null
+        : await layoutState.boardOf(templateId);
+      if (!grid || searchedAnomaly(saved) !== configState.activeAnomaly.id) {
+        solverStorage.clearSolve(templateId);
+        continue;
+      }
+
+      if (!this.#refile(templateId, saved, grid))
+        solverStorage.clearSolve(templateId);
+    }
+  }
+
+  /**
+   * Re-files a stored solve for `grid` under the roster, research and anomaly
+   * now in force, without searching again — or returns false when nothing in
+   * it can still be built there.
+   *
+   * A layout is dropped if a building stands on a tile that is no longer
+   * grass, or is one the roster no longer unlocks; the rest are re-tiered to
+   * the current unlocks, re-scored on `grid`, and written back under the
+   * signature `grid` now gives. The record keeps the anomaly its shapes were
+   * *searched* under, so a solve carried into another timeline still says so.
+   */
+  #refile(templateId: string, saved: SavedSolveData, grid: Tile[][]): boolean {
+    const upgrades = $state.snapshot(configState.buildingUpgrades);
+    const shapes = saved.variants?.length
+      ? saved.variants.map(restorePlacements)
+      : [saved.result.placements];
+    // Standing on grass, and something the roster still unlocks.
+    const buildable = (p: PlacedBuilding) =>
+      grid[p.y]?.[p.x]?.type === "grass" && p.buildingId in upgrades;
+    const kept = shapes
+      .map((placements, index) => ({ placements, index }))
+      .filter(({ placements }) => placements.every(buildable));
+    if (kept.length === 0) return false;
+
+    const bound = this.#maxPowerFor(grid);
+    const variants = kept.map(({ placements }) =>
+      this.#scoreLayout(
+        rebaseToUnlocks(placements, upgrades) ?? placements,
+        bound,
+        grid,
+      ),
+    );
+    const selected = Math.max(
+      0,
+      kept.findIndex(({ index }) => index === (saved.selectedVariant ?? 0)),
+    );
+    this.#persistResult(
+      variants,
+      selected,
+      saved.durationMs,
+      saved.finishedAt,
+      templateId,
+      this.solveSignature(grid),
+      searchedAnomaly(saved),
+      saved.planKey ?? "",
+    );
+    return true;
   }
 
   /**
@@ -800,6 +1057,12 @@ class SolverState {
             runAnomaly,
           )?.power ?? 0)
         : result.totalPower;
+    /** `rank` for one island's placements alone, read off the scored rows. */
+    const islandPower = (placements: PlacedBuilding[]): number =>
+      runPlan
+        ? (evaluatePlan(runGrid, placements, runPlan, runPrestige, runAnomaly)
+            ?.power ?? 0)
+        : placements.reduce((sum, p) => sum + p.powerGenerated, 0);
     /*
      * The bar a streaming snapshot has to clear to be worth putting on screen,
      * and it is the same bar `chooseSolveVariants` will judge the finished run
@@ -863,6 +1126,8 @@ class SolverState {
     // the run's island is still on screen.
     let runError: string | null = null;
     let donePower = 0;
+    let endRun!: () => void;
+    this.#runEnded = new Promise<void>((resolve) => (endRun = resolve));
 
     try {
       // $state.snapshot is required before anything crosses postMessage:
@@ -956,11 +1221,26 @@ class SolverState {
         !this.optimizationError
       ) {
         // `previousVariants` is empty unless the user asked to keep the better
-        // layout, so without that this always resolves to the fresh run.
+        // layout, so without that this always resolves to the fresh run. When
+        // each run won some islands, the boards made of every island's winner
+        // beat both, and stand in for the fresh run (`composeIslandBests`).
+        // Scored against the board on screen, so only while it is this run's.
+        const composed = onScreen()
+          ? this.#composeIslands(
+              previousVariants,
+              finalVariants,
+              runGrid,
+              runPlan
+                ? runPlan.target
+                : $state.snapshot(configState.buildingUpgrades),
+              runAnomaly,
+              islandPower,
+            )
+          : null;
         const { variants, selected, defended } = chooseSolveVariants(
           previousVariants,
           previousIndex,
-          finalVariants,
+          composed ?? finalVariants,
           MAX_SOLVE_VARIANTS,
           rank,
         );
@@ -1029,6 +1309,11 @@ class SolverState {
         this.resultPlanKey = previousPlanKey;
       }
 
+      // Filed: a caller waiting on `settleOptimizer` may change the rules now.
+      // Before the analytics below, which must not be able to strand it.
+      this.#runEnded = null;
+      endRun();
+
       // Every `solve_run` gets one of these, so a status other than `ok` is
       // countable rather than inferred from a run that simply never reported.
       const bound = this.estimatedMaxPower;
@@ -1056,11 +1341,34 @@ class SolverState {
   }
 
   /**
+   * `stopOptimizer`, then waits until the run has filed its result.
+   *
+   * A stop only asks: the workers finish the pass they are on, and the result
+   * is scored and filed after. That is harmless when the board merely leaves
+   * the screen, but not before the rules change under it — a game import that
+   * went on without waiting would have the late result scored against the
+   * imported board and roster, and filed over the record `carryOverSolves`
+   * had just re-filed. Waiting lets it land under the rules it was searched
+   * under, where the carry-over picks it up like any other stored solve.
+   */
+  async settleOptimizer(): Promise<void> {
+    this.stopOptimizer();
+    await this.#runEnded;
+  }
+
+  /**
    * The backstop is set against the run's **serial** cost — every attempt of
-   * every island one after another — not against the estimate the button
-   * prints. The estimate assumes a pool that is actually running in parallel;
-   * a machine that reports eight cores and gives two would trip a watchdog set
-   * to it, and cutting a run short is worse than letting a slow one finish.
+   * every island one after another, as `islandBudgetsS` divides them — not
+   * against the estimate the button prints. The estimate assumes a pool that is
+   * actually running in parallel; a machine that reports eight cores and gives
+   * two would trip a watchdog set to it, and cutting a run short is worse than
+   * letting a slow one finish.
+   *
+   * A run `fitBudgetsToPool` stretched spends more CPU than that, but only one
+   * whose every task has a worker of its own is stretched, and the search's
+   * deadlines are wall-clock: each task stops at its slice however busy the
+   * cores are, so the run still ends inside one attempt's budget. It would
+   * outlast this only if the browser started the workers one after another.
    */
   #startWatchdog(mode: SolveMode) {
     this.#stopWatchdog();

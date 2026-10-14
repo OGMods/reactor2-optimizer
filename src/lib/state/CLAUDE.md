@@ -169,12 +169,27 @@ pooled rather than discarded. Finished attempts only: a progress report is a
 snapshot of a search still moving, so the coordinator streams those to the screen
 on a separate, monotonic track and never files them as answers.
 
+**The page gets at most one progress update per report interval, however many
+workers are reporting.** Each worker reports on its own clock, so a pool of eight
+handed the main thread up to eight full boards a second to rebuild, re-score and
+redraw. The workers' rate does not slow with the machine and the main thread's
+cost does: on a page slowed 6x that kept it 85% busy, and a main thread that
+falls behind cannot read the next message either — the board stops updating, Stop
+is never forwarded, and a queued task waits on a DONE nobody has read. Every
+report still lands in the monotonic track; only the page's copy is coalesced, and
+a pending update is cancelled when the run settles so it cannot draw over the
+finished result.
+
 **A re-run has to earn its place.** `runOptimizer({ keepBest })` captures the
 shortlist on screen and puts the new result back only if it scores higher; a
 defended layout keeps its _own_ run's duration and timestamp, because it is still
 that solve and the card prints both. The search is stochastic and the budget
 short, so a second run genuinely can come back worse — which is why the choice is
-put to the user (`uiState.requestSolve`) rather than assumed.
+put to the user (`uiState.requestSolve`) rather than assumed. The other answer,
+discarding, deletes the layout from the screen and from storage as the run
+starts (`uiState.startSolve`), not when its result lands: a layout the player
+threw away should not stay on the board through the run, and a run stopped before
+it reports would otherwise hand it back.
 
 Two things about "the layout on screen" are load-bearing:
 
@@ -204,8 +219,16 @@ The list is filled from two directions: one run usually fills it on the shipped
 islands, and `chooseSolveVariants` pools further runs that **tie** into it (a
 fresh layout joins only if it clears `MIN_ALTERNATE_DISTANCE`; held layouts go in
 unfiltered and stay in front, so the user's pick keeps its index). A run that
-beats it replaces the list; one that comes back lower is defended against. That
-policy is exported and pinned by `state/solveVariants.test.ts` rather than buried
+beats it replaces the list; one that comes back lower is defended against.
+
+Before that whole-board comparison, `composeIslandBests` takes each **island's**
+best across the held and fresh lists. Islands never interact, so when each run
+won some islands, a board made of every island's winner beats both. That board
+stands in for the fresh run. Without the merge, a re-run that found a better
+large island would win on the total and bring a worse small island with it. It
+does nothing under a shared cooling pool (one island) and returns null when one
+board already holds every best, leaving the plain rules above. Both policies are
+exported and pinned by `state/solveVariants.test.ts` rather than buried
 in `runOptimizer`, because it is the whole meaning of "ten layouts at the same
 power".
 
@@ -221,10 +244,15 @@ one, which is what it was.
 `MAX_STORED_SOLVES`) and re-hung by `restore()`, which `hydrateState()` awaits
 _after_ `layoutState.hydrate()` — deciding whether a stored result is still valid
 means reading the board it was solved against. Validity is a stored signature:
-the terrain (`blueprintKey(grid)`, no placements) and the roster. Hand-placed
-buildings are deliberately outside it because the solver ignores them, so
-building by hand does not invalidate a solve; clearing an obstacle or changing an
-unlock does.
+the terrain (`blueprintKey(grid)`, no placements), the roster, the anomaly and
+the research. Hand-placed buildings are deliberately outside it because the
+solver ignores them, so building by hand does not invalidate a solve; clearing an
+obstacle does. A mismatch on anything **but** the terrain is not a different
+board, so `restore()` re-rates rather than discards: the same `#refile` a game
+import uses re-tiers the shapes to the current unlocks, drops any layout using a
+building no longer unlocked (the solve too, once none are left), re-scores and
+re-files under the new signature. That is what lets a Setup change made with one
+island on screen leave every other island's solve standing.
 
 A run can take five minutes, which is what makes losing one expensive.
 **Switching islands is a change of view, not a deletion**: `TemplateSelector`
@@ -481,6 +509,16 @@ islands still locked in the game are reset to their untouched map, since the
 player owns nothing there yet. Because it
 replaces work, the Import dialog summarises the code first and takes two presses.
 The template-to-game mapping is `IslandTemplate.game` in `data/maps.ts`.
+
+**An import keeps the solves it leaves buildable.** It changes the roster, the
+research and usually the terrain, all of which are in `solveSignature()`, so
+left alone `restore()` would discard every island's solve on its next open.
+`solverState.carryOverSolves` runs first and decides per island: a solve goes
+for an island still locked in the game or one searched under another anomaly;
+a layout goes if the import put an obstacle under one of its buildings or no
+longer unlocks one of them (the solve with it once none survive); the rest are
+re-tiered, re-scored on the island's new board and re-filed under its new
+signature, without searching again.
 
 ### The transformer is special
 
