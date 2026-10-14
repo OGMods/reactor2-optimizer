@@ -810,42 +810,149 @@ function bestHeatForEngineTiles(
  * A shore reactor may feed an inland generator and the other way round — the
  * bound relaxes adjacency away, so only the two totals matter — which makes
  * this `max over the split of min(reactor heat, generator intake)` with two
- * integer splits instead of one. For each split of the shore tiles the inland
- * split is the one-line crossing the single-class version already checks, so
- * the search is linear in the shore count rather than quadratic.
+ * integer splits instead of one. For each split of the shore tiles, reactor
+ * heat rises with the inland reactor count and generator intake falls with
+ * it, so the inland split is their crossing, found by bisection.
+ *
+ * `shoreSums[k]` and `inlandSums[k]` are what the best `k` tiles of each class
+ * can take in as generators (`intakeSums`): generators stand on the tiles with
+ * the best neighbourhoods and reactors on the rest, which is the arrangement
+ * that credits each class most.
  */
 function bestHeatForMixedEngineTiles(
   nEngine: number,
   shoreEngine: number,
   inland: RosterFigures,
   shore: RosterFigures,
+  shoreSums: Float64Array,
+  inlandSums: Float64Array,
 ): number {
   if (nEngine < 2) return 0.0;
 
   const inlandEngine = nEngine - shoreEngine;
-  const slope = inland.rVal + inland.gVal;
+  const rVal = inland.rVal;
   let best = 0.0;
+  // The last inland reactor count at which heat has not overtaken intake; the
+  // peak of the min is there or one past it. Each shore reactor added raises
+  // the heat side and lowers the intake side, so it only ever moves down: it
+  // is carried from one shore split to the next and galloped down from there,
+  // which finds the same count a fresh bisection would at a fraction of the
+  // cost. This runs once per engine split, so it is the bound's inner loop.
+  let hi = inlandEngine;
   for (let shoreReact = 0; shoreReact <= shoreEngine; shoreReact++) {
     const shoreHeat = shoreReact * shore.rVal;
-    const shoreIntake = (shoreEngine - shoreReact) * shore.gVal;
-    // min(shoreHeat + R·x, shoreIntake + G·(inlandEngine − x)) peaks at the
-    // crossing; the ends cover a crossing outside the inland range.
-    const crossing =
-      slope > 0
-        ? Math.floor(
-            (shoreIntake + inland.gVal * inlandEngine - shoreHeat) / slope,
-          )
-        : 0;
-    for (const inlandReact of [crossing, crossing + 1, 0, inlandEngine]) {
-      if (inlandReact < 0 || inlandReact > inlandEngine) continue;
-      const heat = Math.min(
-        shoreHeat + inlandReact * inland.rVal,
-        shoreIntake + (inlandEngine - inlandReact) * inland.gVal,
+    const shoreIntake = shoreSums[shoreEngine - shoreReact];
+    if (
+      hi >= 0 &&
+      shoreHeat + hi * rVal > shoreIntake + inlandSums[inlandEngine - hi]
+    ) {
+      // `hi` fails: find a passing count below it, then bisect between.
+      let fail = hi;
+      let step = 1;
+      let pass = hi - step;
+      while (
+        pass >= 0 &&
+        shoreHeat + pass * rVal > shoreIntake + inlandSums[inlandEngine - pass]
+      ) {
+        fail = pass;
+        step *= 2;
+        pass = hi - step;
+      }
+      if (pass < 0) pass = -1;
+      while (fail - pass > 1) {
+        const mid = (pass + fail) >> 1;
+        if (
+          shoreHeat + mid * rVal <=
+          shoreIntake + inlandSums[inlandEngine - mid]
+        )
+          pass = mid;
+        else fail = mid;
+      }
+      hi = pass;
+    }
+    for (let x = hi; x <= hi + 1; x++) {
+      if (x < 0 || x > inlandEngine) continue;
+      const h = Math.min(
+        shoreHeat + x * rVal,
+        shoreIntake + inlandSums[inlandEngine - x],
       );
-      if (heat > best) best = heat;
+      if (h > best) best = h;
     }
   }
   return best;
+}
+
+/**
+ * Running sums of what one class of tile can take in as generators, best tile
+ * first: `sums[k]` is the most heat `k` generators of that class can absorb.
+ *
+ * Each is held to the smaller of `gVal` and what **its own** neighbours can
+ * feed and cool, counted by class: `neighbourHeatCap` with eight neighbours at
+ * the shore rating credited every inland generator with a ring of rated
+ * reactors and coolers that only the tiles one step from the coast can have.
+ * Once the cap binds — a generator tier outrunning its reactors and coolers,
+ * as generator7 does over any reactor this side of the top tiers — that was
+ * most of what the bound had to spare. Neighbours are whole buildings, so the
+ * split of each class between reactors and coolers is enumerated; a tile has
+ * at most eight, which keeps the table to 45 entries.
+ */
+function intakeSums(
+  island: IslandSubGrid,
+  shoreClass: boolean,
+  gVal: number,
+  inland: RosterFigures,
+  shore: RosterFigures,
+  wasteRatio: number,
+  pooledCooling: boolean,
+): Float64Array {
+  const most = CHEBYSHEV_DIRECTIONS.length;
+  const capFor = new Map<number, number>();
+  const cap = (s: number, i: number): number => {
+    const key = s * (most + 1) + i;
+    const known = capFor.get(key);
+    if (known !== undefined) return known;
+    let top = 0.0;
+    for (let rs = 0; rs <= s; rs++) {
+      for (let ri = 0; ri <= i; ri++) {
+        const heat = rs * shore.rVal + ri * inland.rVal;
+        const cooling = (s - rs) * shore.cVal + (i - ri) * inland.cVal;
+        const h = pooledCooling ? heat : Math.min(heat, cooling / wasteRatio);
+        if (h > top) top = h;
+      }
+    }
+    // Under a pool every neighbour may be a reactor, so the loop's all-reactor
+    // corner already holds the answer; outside one it is cooled to nothing.
+    const value = Math.min(gVal, top);
+    capFor.set(key, value);
+    return value;
+  };
+
+  const { width, height, buildable, waterAdjacent } = island;
+  const caps: number[] = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const at = y * width + x;
+      if (buildable[at] !== 1 || (waterAdjacent[at] === 1) !== shoreClass)
+        continue;
+      let s = 0;
+      let i = 0;
+      for (const [dx, dy] of CHEBYSHEV_DIRECTIONS) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+        const n = ny * width + nx;
+        if (buildable[n] !== 1) continue;
+        if (waterAdjacent[n] === 1) s++;
+        else i++;
+      }
+      caps.push(cap(s, i));
+    }
+  }
+  caps.sort((a, b) => b - a);
+
+  const sums = new Float64Array(caps.length + 1);
+  for (let k = 0; k < caps.length; k++) sums[k + 1] = sums[k] + caps[k];
+  return sums;
 }
 
 /**
@@ -882,12 +989,13 @@ function bestHeatForMixedEngineTiles(
  * mixed board has to allow the greedier of each.
  */
 function estimateMixedIslandMaxPower(
-  buildableTiles: number,
+  island: IslandSubGrid,
   shoreTiles: number,
   roster: EffectiveBuilding[],
   multiplier: number,
   pooledCooling: boolean,
 ): number {
+  const buildableTiles = island.tileCount;
   if (buildableTiles <= 0) return 0.0;
   const inlandTiles = buildableTiles - shoreTiles;
 
@@ -905,13 +1013,10 @@ function estimateMixedIslandMaxPower(
   const inlandDpWaste = inland.hasDp ? inland.dpWaste : 0.0;
   const shoreDpWaste = shore.hasDp ? shore.dpWaste : 0.0;
 
-  // One cap for both classes, on the strongest neighbour either class can
-  // offer: which class a tile falls in is a property of *that* tile, and an
-  // inland generator is perfectly free to have shore reactors and shore
-  // coolers around it. Taking the best of each is the only reading that stays
-  // a bound, and it costs nothing — the cap is homogeneous, so a terrain
-  // multiplier moves it and the generator it caps by the same factor and it
-  // goes on not binding. See `neighbourHeatCap`.
+  // A first, island-wide cap on the strongest neighbours either class can
+  // offer. It does bind — a strong generator tier outruns any eight
+  // neighbours — and `intakeSums` below tightens it per tile, by how many of
+  // that tile's neighbours really are shore. See `neighbourHeatCap`.
   const gTake = neighbourHeatCap(
     maxNeighbourTiles(buildableTiles),
     Math.max(inland.rVal, shore.rVal),
@@ -921,6 +1026,27 @@ function estimateMixedIslandMaxPower(
   );
   inland.gVal = Math.min(inland.gVal, gTake);
   shore.gVal = Math.min(shore.gVal, gTake);
+
+  // Each generator is held to what its own neighbours can feed — see
+  // `intakeSums`, which is where this bound's looseness under a binding cap was.
+  const shoreSums = intakeSums(
+    island,
+    true,
+    shore.gVal,
+    inland,
+    shore,
+    wasteRatio,
+    pooledCooling,
+  );
+  const inlandSums = intakeSums(
+    island,
+    false,
+    inland.gVal,
+    inland,
+    shore,
+    wasteRatio,
+    pooledCooling,
+  );
 
   // The same 3-and-2 floors `estimateIslandMaxPower` states, for the same
   // reason, and they must not be allowed to disagree with it.
@@ -961,6 +1087,8 @@ function estimateMixedIslandMaxPower(
         shoreEngine,
         inland,
         shore,
+        shoreSums,
+        inlandSums,
       );
       // Engine tiles that can't form a reactor+generator pair.
       if (nEngine > 0 && heatCap <= 0.0) continue;
@@ -1197,13 +1325,7 @@ function estimateIslandBound(
 
   return Math.min(
     plain * scale,
-    estimateMixedIslandMaxPower(
-      island.tileCount,
-      rated,
-      roster,
-      scale,
-      pooledCooling,
-    ),
+    estimateMixedIslandMaxPower(island, rated, roster, scale, pooledCooling),
   );
 }
 
