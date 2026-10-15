@@ -82,10 +82,16 @@ export function simulateIsland(
   let numCoolers = 0;
   let numOccupied = 0;
 
+  // A role-isolation rule re-rates a layout below; the copy it starts from is
+  // taken in this same pass rather than in one of its own.
+  const isolation = ctx.isolation;
+  const rated = ctx.ratedLayout;
+
   // Ascending tile index is the game's spatial processing order, so every list
   // built here is already sorted the way the distribution rules require.
   for (let t = 0; t < n; t++) {
     const b = placement[t];
+    if (isolation !== null) rated[t] = b;
     if (b === null) continue;
     numOccupied++;
     if (b.type === "generator") {
@@ -122,11 +128,7 @@ export function simulateIsland(
   // rather than the buffer it is filling: the test is on what a neighbour *is*,
   // which no rating changes, so there is no order to get right.
   let layout = placement;
-  const isolation = ctx.isolation;
   if (isolation !== null) {
-    const rated = ctx.ratedLayout;
-    for (let t = 0; t < n; t++) rated[t] = placement[t];
-
     const affected =
       isolation.role === "generator"
         ? generatorTiles

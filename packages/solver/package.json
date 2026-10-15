@@ -38,6 +38,7 @@
     "solve": "tsx bin/solve.ts",
     "fixtures": "tsx scripts/exportFixtures.ts",
     "survey": "tsx scripts/gapSurvey.ts",
+    "profile": "tsx scripts/profile.ts",
     "prepublishOnly": "npm run build"
   }
 }

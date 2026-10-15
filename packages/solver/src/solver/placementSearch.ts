@@ -1,4 +1,4 @@
-import { EPS } from "./constants";
+import { CHEBYSHEV_DIRECTIONS, EPS } from "./constants";
 import {
   generatorEnergyRatio,
   generatorPowerAndWaste,
@@ -91,8 +91,21 @@ const POOL_COOLER_VALUE = Infinity;
 
 /** How many reactor tiers the local-repair pass considers per tile. */
 const POLISH_REACTOR_TIERS = 3;
+/**
+ * How far from an applied repair move the cached gains are re-measured. A
+ * change on a tile is felt through its neighbours' supply and demand, so a
+ * tile two steps away shares a neighbour with it and one three steps away
+ * shares nothing — see `greedyPolish`.
+ */
+const POLISH_DIRTY_RADIUS = 2;
 /** Share of the time budget reserved for repair before and after annealing. */
 const POLISH_SHARE = 0.3;
+/**
+ * The least time the plain-sized seed's repair is given under a role
+ * isolation, when the sized seed's own repair took less (see `solveIsland`).
+ * A 20-tile island repairs in 3ms, and a cap that tight would be timer noise.
+ */
+const PLAIN_SEED_POLISH_MIN_MS = 20;
 /** How many candidate compositions to try arranging, best-scoring first. */
 const COMPOSITION_TARGETS = 3;
 /** Share of the time budget spent arranging those compositions. */
@@ -640,6 +653,82 @@ function bestSharedReactorFit(
   return best;
 }
 
+/** A `SharedFit` with every tile spelled as a direction from its centre. */
+interface RelativeSharedFit {
+  power: number;
+  waste: number;
+  /** Direction index per reactor, or -1 for the centre tile itself. */
+  reactorDirections: number[];
+  reactorTiers: EffectiveBuilding[];
+  genDirections: number[];
+  coolerDirections: number[];
+}
+
+/**
+ * The shape of a tile's free neighbourhood: a bit per `CHEBYSHEV_DIRECTIONS`
+ * entry that holds a free tile, with the maps between tile and direction.
+ */
+function neighbourhoodShape(
+  ctx: IslandContext,
+  tile: number,
+  neighbors: number[],
+): {
+  mask: number;
+  directionOf: Map<number, number>;
+  tileAt: Int32Array;
+} {
+  let mask = 0;
+  const directionOf = new Map<number, number>();
+  const tileAt = new Int32Array(CHEBYSHEV_DIRECTIONS.length).fill(-1);
+  for (const n of neighbors) {
+    const dx = ctx.xs[n] - ctx.xs[tile];
+    const dy = ctx.ys[n] - ctx.ys[tile];
+    for (let d = 0; d < CHEBYSHEV_DIRECTIONS.length; d++) {
+      if (
+        CHEBYSHEV_DIRECTIONS[d][0] === dx &&
+        CHEBYSHEV_DIRECTIONS[d][1] === dy
+      ) {
+        mask |= 1 << d;
+        directionOf.set(n, d);
+        tileAt[d] = n;
+        break;
+      }
+    }
+  }
+  return { mask, directionOf, tileAt };
+}
+
+function toRelativeFit(
+  fit: SharedFit,
+  directionOf: Map<number, number>,
+): RelativeSharedFit {
+  const direction = (t: number): number => directionOf.get(t) ?? -1;
+  return {
+    power: fit.power,
+    waste: fit.waste,
+    reactorDirections: fit.reactorTiles.map(direction),
+    reactorTiers: fit.reactorTiers,
+    genDirections: fit.genPositions.map(direction),
+    coolerDirections: fit.coolerPositions.map(direction),
+  };
+}
+
+function fromRelativeFit(
+  fit: RelativeSharedFit,
+  tile: number,
+  tileAt: Int32Array,
+): SharedFit {
+  const at = (d: number): number => (d < 0 ? tile : tileAt[d]);
+  return {
+    power: fit.power,
+    waste: fit.waste,
+    reactorTiles: fit.reactorDirections.map(at),
+    reactorTiers: fit.reactorTiers,
+    genPositions: fit.genDirections.map(at),
+    coolerPositions: fit.coolerDirections.map(at),
+  };
+}
+
 interface CandidateEntry {
   /**
    * Power PER TILE CLAIMED, which is what candidates are ranked by — not raw
@@ -669,6 +758,7 @@ function constructSeed(
   directProducers: EffectiveBuilding[],
   deadlineMs: number,
   pooled = false,
+  sizeByIsolation = true,
 ): Placement {
   const placement = emptyPlacement(ctx.n);
   const available = new Uint8Array(ctx.n);
@@ -678,12 +768,58 @@ function constructSeed(
   const topReactor = reactors.length > 0 ? reactors[0] : null;
   const topGenerator = generators.length > 0 ? generators[0] : null;
   const topCooler = coolers.length > 0 ? coolers[0] : null;
+
+  // Under a generator isolation a hub is sized with its generator at the
+  // ISOLATED rating, and no hub's generator is put beside another. Sized from
+  // the plain roster, a full-unlock hub is one ecto reactor filling one
+  // generator and the "shared" fit stands three generators round one reactor
+  // — every one of them crowded, on a board where an isolated generator takes
+  // two reactors and makes four times the power. That seed scored 32% of the
+  // Singularity bound on Event Horizon where the base seed scores 60% of its
+  // own (`npm run profile`), and the first repair had to double it. The fit
+  // is sized from the rated figure and the plain entry is what is written, so
+  // `simulateIsland` rates the tile from its neighbours as it always does.
+  // Off under every other rule, so the fixtures reproduce byte for byte.
+  //
+  // Measured with the survey (`--anomaly singularity_isolation --seed 1`):
+  // after the first repair the seed reads 78-88% of the bound on the eight
+  // largest islands against the plain one's 50-64%. At 15s x 5 runs that is
+  // a wash, -1.5% to +2.2% per map and every map inside its band; at 5s x 3
+  // runs, where the budget binds, Event Horizon gains 14% and Shadowspire
+  // 18%, four maps 2-4%, Ash Bay and Magma Rift read 4% and 1% lower inside
+  // their bands. With generator7 at tier 3 — the roster where the bonus is
+  // worth most — every map is inside 0.8%.
+  const isolation = ctx.isolation;
+  const isolatedSeed =
+    sizeByIsolation &&
+    isolation !== null &&
+    isolation.role === "generator" &&
+    topGenerator !== null &&
+    ctx.rateIsolated(topGenerator, true).effectiveValue <
+      ctx.rateIsolated(topGenerator, false).effectiveValue;
+  const fitGenerators = isolatedSeed
+    ? generators.map((g) => ctx.rateIsolated(g, false))
+    : generators;
+  const fitGenerator = fitGenerators.length > 0 ? fitGenerators[0] : null;
+  const plainOf = new Map<EffectiveBuilding, EffectiveBuilding>();
+  for (let i = 0; i < generators.length; i++)
+    plainOf.set(fitGenerators[i], generators[i]);
+  /** Whether a generator written on `tile` would crowd, or be crowded by, one. */
+  const besideGenerator = (tile: number): boolean => {
+    const nb = ctx.neighbors[tile];
+    for (let k = 0; k < nb.length; k++) {
+      const b = placement[nb[k]];
+      if (b !== null && b.type === "generator") return true;
+    }
+    return false;
+  };
+
   const canHub =
     topReactor !== null && topGenerator !== null && topCooler !== null;
   const canDp = directProducers.length > 0 && topCooler !== null;
   const trySharedReactor =
     canHub &&
-    Math.ceil(topReactor!.effectiveValue / topGenerator!.effectiveValue) >= 2;
+    Math.ceil(topReactor!.effectiveValue / fitGenerator!.effectiveValue) >= 2;
 
   // Under a cooling pool a hub is sized with a phantom cooler that covers any
   // waste from nowhere, so every neighbour slot goes to reactors and no cooler
@@ -723,10 +859,59 @@ function constructSeed(
   const dpFitCache = new Map<number, DpFit | null>();
   const sharedScratch = emptyPlacement(ctx.n);
 
+  // A shared fit is simulated on an otherwise empty board, so it is a function
+  // of the neighbourhood's *shape* alone — which of the eight directions hold a
+  // free tile — as long as every tile rates a building the same: the tile
+  // order the distribution runs in is the spatial order, which the same shape
+  // reproduces wherever it sits. That is true under a uniform rating and under
+  // a role scale, which rates every tile alike; a terrain bonus is per tile and
+  // keeps the uncached path. Memoised by that shape, because this is the whole
+  // cost of the seed: it used to re-simulate every generator combination for
+  // every stale tile on every round, 0.5-0.8s on the largest shipped islands.
+  const sharedFitByShape =
+    ctx.uniformRating || ctx.anomaly.rule === "shared_cooling"
+      ? new Map<number, RelativeSharedFit | null>()
+      : null;
+  const sharedFit = (tile: number, neighbors: number[]): SharedFit | null => {
+    if (sharedFitByShape === null) {
+      return bestSharedReactorFit(
+        tile,
+        neighbors,
+        reactors,
+        fitGenerator!,
+        fitCooler!,
+        ctx,
+        sharedScratch,
+        pooled,
+      );
+    }
+    const shape = neighbourhoodShape(ctx, tile, neighbors);
+    let relative = sharedFitByShape.get(shape.mask);
+    if (relative === undefined) {
+      const fit = bestSharedReactorFit(
+        tile,
+        neighbors,
+        reactors,
+        fitGenerator!,
+        fitCooler!,
+        ctx,
+        sharedScratch,
+        pooled,
+      );
+      relative = fit === null ? null : toRelativeFit(fit, shape.directionOf);
+      sharedFitByShape.set(shape.mask, relative);
+    }
+    return relative === null
+      ? null
+      : fromRelativeFit(relative, tile, shape.tileAt);
+  };
+
   const hubFit = (slots: number): HubFit | null => {
     let fit = hubFitCache.get(slots);
     if (fit === undefined) {
-      fit = canHub ? bestHubFit(slots, generators, reactors, fitCooler!) : null;
+      fit = canHub
+        ? bestHubFit(slots, fitGenerators, reactors, fitCooler!)
+        : null;
       hubFitCache.set(slots, fit);
     }
     return fit;
@@ -758,10 +943,15 @@ function constructSeed(
         if (entry === null || candidate.powerPerTile > entry.powerPerTile)
           entry = candidate;
       };
+      // A hub's generator stands on `tile`; beside a placed generator it
+      // would be crowded, and crowd that one. Only the stale tiles are
+      // re-read here and a claim marks every tile beside it stale, so this
+      // sees each generator as it lands.
+      const crowds = isolatedSeed && besideGenerator(tile);
 
       // Under a pool the fit shrinks until its reactors and its coolers both
       // fit in what is left; under the base rules the first fit is the one.
-      let hub = hubFit(neighbors.length);
+      let hub = crowds ? null : hubFit(neighbors.length);
       while (hub !== null && !reserves(1 + hub.r, hub.waste)) {
         hub = hub.r > 1 ? hubFit(hub.r - 1) : null;
       }
@@ -793,17 +983,11 @@ function constructSeed(
       }
 
       if (trySharedReactor && neighbors.length >= 3) {
-        const shared = bestSharedReactorFit(
-          tile,
-          neighbors,
-          reactors,
-          topGenerator!,
-          fitCooler!,
-          ctx,
-          sharedScratch,
-          pooled,
-        );
-        if (shared !== null) {
+        const shared = sharedFit(tile, neighbors);
+        if (
+          shared !== null &&
+          !(isolatedSeed && shared.genPositions.some(besideGenerator))
+        ) {
           const tilesUsed =
             shared.reactorTiles.length +
             shared.genPositions.length +
@@ -865,7 +1049,7 @@ function constructSeed(
     const claimed: number[] = [];
     if (best.kind === "hub") {
       const { generator, reactor, r, c } = best.hub!;
-      put(placement, ctx, best.tile, generator);
+      put(placement, ctx, best.tile, plainOf.get(generator) ?? generator);
       claimed.push(best.tile);
       for (let i = 0; i < r; i++) {
         put(placement, ctx, best.neighbors[i], reactor);
@@ -964,6 +1148,11 @@ function constructSeed(
   return placement;
 }
 
+/**
+ * `sizeByIsolation` is `constructSeed`'s: false builds the plain-sized seed
+ * under a role isolation, which `solveIsland` compares against the sized one.
+ * It means nothing under any other rule.
+ */
 function constructMultiStartSeed(
   ctx: IslandContext,
   reactors: EffectiveBuilding[],
@@ -971,10 +1160,14 @@ function constructMultiStartSeed(
   coolers: EffectiveBuilding[],
   directProducers: EffectiveBuilding[],
   deadlineMs: number,
+  sizeByIsolation = true,
 ): Placement {
   const buildable = Array.from(ctx.tiles);
 
-  const passes = (pooled: boolean): { seed: Placement; power: number } => {
+  const passes = (
+    pooled: boolean,
+    sizeByIsolation = true,
+  ): { seed: Placement; power: number } => {
     let bestSeed = constructSeed(
       buildable,
       ctx,
@@ -984,14 +1177,16 @@ function constructMultiStartSeed(
       directProducers,
       deadlineMs,
       pooled,
+      sizeByIsolation,
     );
     let bestPower = simulateIsland(bestSeed, ctx).totalPower;
 
     if (bestPower <= EPS) {
       // The deadline elapsed mid-construction and left a seed that powers
-      // nothing. One full greedy pass costs ~2ms even on the largest island in
-      // the game, so finish it: refining a degenerate seed wastes the whole
-      // budget and can return an empty layout for a solvable island.
+      // nothing. One full greedy pass costs about 25ms on the largest island
+      // in the game (`npm run profile`), so finish it: refining a degenerate
+      // seed wastes the whole budget and can return an empty layout for a
+      // solvable island.
       bestSeed = constructSeed(
         buildable,
         ctx,
@@ -1001,6 +1196,7 @@ function constructMultiStartSeed(
         directProducers,
         performance.now() + 1000,
         pooled,
+        sizeByIsolation,
       );
       bestPower = simulateIsland(bestSeed, ctx).totalPower;
     }
@@ -1018,6 +1214,7 @@ function constructMultiStartSeed(
       directProducers,
       deadlineMs,
       pooled,
+      sizeByIsolation,
     );
     const powerRev = simulateIsland(seedRev, ctx).totalPower;
     if (powerRev > bestPower + EPS) {
@@ -1038,6 +1235,7 @@ function constructMultiStartSeed(
         directProducers,
         deadlineMs,
         pooled,
+        sizeByIsolation,
       );
       const powerRand = simulateIsland(seedRand, ctx).totalPower;
       if (powerRand > bestPower + EPS) {
@@ -1049,7 +1247,7 @@ function constructMultiStartSeed(
     return { seed: bestSeed, power: bestPower };
   };
 
-  const local = passes(false);
+  const local = passes(false, sizeByIsolation);
   if (ctx.anomaly.rule !== "shared_cooling") return local.seed;
 
   // Under a pool the same three orders are run engine-first as well, and the
@@ -1175,7 +1373,6 @@ async function hillClimb(
   const pools = [reactors, generators, coolers, directProducers].filter(
     (p) => p.length > 0,
   );
-
   const startMs = performance.now();
   const deadlineMs = startMs + timeBudgetMs;
 
@@ -1414,7 +1611,21 @@ function targetCompositions(
 
   const generator = generators[0];
   const cooler = coolers[0];
+  // Only the `topK` best are kept as they are found, and a composition's
+  // array is built only once it has earned a place. Materialising all
+  // O(tiles^2) of them and sorting afterwards cost 80-130ms on the largest
+  // shipped islands, nearly all of it allocation. Insertion goes after every
+  // entry of equal power, which is exactly what the stable descending sort it
+  // replaces produced: equal scores in enumeration order.
   const scored: ScoredComposition[] = [];
+  const earnsPlace = (power: number): boolean =>
+    scored.length < topK || power > scored[scored.length - 1].power;
+  const keep = (entry: ScoredComposition): void => {
+    let at = scored.length;
+    while (at > 0 && scored[at - 1].power < entry.power) at--;
+    scored.splice(at, 0, entry);
+    if (scored.length > topK) scored.pop();
+  };
 
   for (let nGen = 1; nGen < tileCount - 1; nGen++) {
     for (let nCool = 1; nCool < tileCount - nGen; nCool++) {
@@ -1467,20 +1678,17 @@ function targetCompositions(
         for (const b of fill) fillHeat += b.effectiveValue;
         const absorbed = Math.min(fillHeat, budget);
         const power = absorbed * generatorEnergyRatio(generator);
-        if (power > EPS) {
+        if (power > EPS && earnsPlace(power)) {
           const composition = fill.slice();
           for (let i = 0; i < nGen; i++) composition.push(generator);
           for (let i = 0; i < nCool; i++) composition.push(cooler);
-          scored.push({ power, composition });
+          keep({ power, composition });
         }
       }
     }
   }
 
-  // Stable sort, so equal-scoring compositions keep the order they were
-  // enumerated in and the walk is reproducible.
-  scored.sort((a, b) => b.power - a.power);
-  return scored.slice(0, topK);
+  return scored;
 }
 
 /**
@@ -1867,44 +2075,103 @@ async function greedyPolish(
     bestPower = stabilized.power;
   }
 
-  while (performance.now() < deadlineMs && !pacer.stopRequested) {
-    let bestGain = 0.0;
-    let bestTile = -1;
-    let bestBuilding: EffectiveBuilding | null = null;
+  // The gain of every (tile, candidate) change, measured against the layout
+  // as it stood when that tile was last swept. A full sweep after every
+  // accepted move was the whole cost of this stage — |tiles| x |candidates|
+  // simulations per move, 2-3s for one repair on the largest shipped islands
+  // — and nearly all of it re-measured changes far from the move, whose gain
+  // the move cannot have touched: a single-tile change is felt through its
+  // neighbours' supply and demand, so only tiles within `POLISH_DIRTY_RADIUS`
+  // of an applied move are swept again. The rest keep their figure, which is
+  // approximate once anything nearby has moved, so a cached winner is always
+  // re-simulated before it is applied and dropped back into the sweep if it
+  // no longer holds. Every applied change is therefore verified exactly;
+  // only the order the changes are found in can differ from a full sweep.
+  //
+  // Measured with the survey (`--runs 3 --seed 1`, every map and anomaly):
+  // at 15s per map it is a wash, every map inside the noise band; at 5s —
+  // where the polish share binds, as it does on a phone at any budget — Tidal
+  // gains 5-9% on six of the eight maps and Shadowspire under Singularity
+  // 16%, against one 83-tile island down 0.7%. One repair on the seed of the
+  // largest island went from 950ms to 180ms (`npm run profile`).
+  const nCandidates = candidates.length;
+  const gains = new Float64Array(ctx.n * nCandidates).fill(-Infinity);
+  const dirty = new Uint8Array(ctx.n).fill(1);
 
+  while (performance.now() < deadlineMs && !pacer.stopRequested) {
+    let cut = false;
     for (let tile = 0; tile < ctx.n; tile++) {
+      if (dirty[tile] === 0) continue;
       const now = performance.now();
-      if (now >= deadlineMs) break;
+      if (now >= deadlineMs) {
+        cut = true;
+        break;
+      }
       if (pacer.due(now)) {
         await pacer.pump(now, () => islandProgress(current, ctx));
-        if (pacer.stopRequested) break;
+        if (pacer.stopRequested) {
+          cut = true;
+          break;
+        }
       }
 
+      dirty[tile] = 0;
       const held = current[tile];
-      for (const building of candidates) {
+      for (let k = 0; k < nCandidates; k++) {
+        const building = candidates[k];
+        let gain = -Infinity;
         // The candidate list is the plain roster, `held` is rated for this tile:
         // asked the wrong way round, a scaled tile re-simulates its own layout
         // once per sweep for nothing. See `ratedFor`.
-        if (ratedFor(ctx, tile, building) === held) continue;
-
-        put(current, ctx, tile, building);
-        const trial = simulateIsland(current, ctx);
-        if (
-          trial.totalPower - bestPower > bestGain &&
-          !anyOfflineProducer(current, trial.placements) &&
-          planHolds(current, ctx)
-        ) {
-          bestGain = trial.totalPower - bestPower;
-          bestTile = tile;
-          bestBuilding = building;
+        if (ratedFor(ctx, tile, building) !== held) {
+          put(current, ctx, tile, building);
+          const trial = simulateIsland(current, ctx);
+          if (
+            trial.totalPower - bestPower > 0 &&
+            !anyOfflineProducer(current, trial.placements) &&
+            planHolds(current, ctx)
+          ) {
+            gain = trial.totalPower - bestPower;
+          }
+          put(current, ctx, tile, held);
         }
-        put(current, ctx, tile, held);
+        gains[tile * nCandidates + k] = gain;
       }
     }
+    if (cut) break;
 
+    let bestGain = 0.0;
+    let bestTile = -1;
+    let bestCandidate = -1;
+    for (let i = 0; i < gains.length; i++) {
+      if (gains[i] > bestGain) {
+        bestGain = gains[i];
+        bestTile = (i / nCandidates) | 0;
+        bestCandidate = i - bestTile * nCandidates;
+      }
+    }
     if (bestTile < 0) break;
-    put(current, ctx, bestTile, bestBuilding);
-    bestPower += bestGain;
+
+    // Exact, whether the figure was fresh or cached: the one simulation that
+    // decides what this stage hands on.
+    const held = current[bestTile];
+    put(current, ctx, bestTile, candidates[bestCandidate]);
+    const trial = simulateIsland(current, ctx);
+    if (
+      trial.totalPower - bestPower > 0 &&
+      !anyOfflineProducer(current, trial.placements) &&
+      planHolds(current, ctx)
+    ) {
+      bestPower = trial.totalPower;
+      for (let tile = 0; tile < ctx.n; tile++) {
+        if (chebyshev(ctx, tile, bestTile) <= POLISH_DIRTY_RADIUS)
+          dirty[tile] = 1;
+      }
+    } else {
+      // Stale: the layout moved under it. Back to the sweep for a fresh figure.
+      put(current, ctx, bestTile, held);
+      dirty[bestTile] = 1;
+    }
   }
 
   return { placement: current, power: bestPower };
@@ -2589,13 +2856,14 @@ function gatherPooledCoolers(
  * onto the same handful of tiles. This is the gate that actually holds — it is
  * the last place the layouts change shape.
  */
-function finalizeAlternates(
+async function finalizeAlternates(
   collector: AlternateCollector,
   primaryRows: PlacedBuilding[],
   primaryPower: number,
   effectiveBuildings: EffectiveBuilding[],
   ctx: IslandContext,
-): IslandLayout[] {
+  pacer: Pacer,
+): Promise<IslandLayout[]> {
   const kept: PlacedBuilding[][] = [primaryRows];
   const out: IslandLayout[] = [];
   // One gathering budget for the whole shortlist rather than one each, so a
@@ -2605,6 +2873,16 @@ function finalizeAlternates(
     performance.now() + EVACUATE_BUDGET_MS + GATHER_BUDGET_MS;
 
   for (const layout of collector.layouts()) {
+    // This runs after the search's deadline, and each alternate is a few
+    // hundred simulations — up to a second under a cooling pool — so come up
+    // for air between them: a STOP that arrives here ends the shortlist where
+    // it stands rather than waiting for ten more layouts to be finished.
+    const now = performance.now();
+    if (pacer.due(now)) {
+      await pacer.pump(now);
+      if (pacer.stopRequested) break;
+    }
+
     const pruned = pruneDeadWeight(layout, ctx);
     const downsized = downgradeOversized(
       pruned.rows,
@@ -2866,11 +3144,48 @@ export async function solveIsland(
     Math.min(deadlineMs, polishStartedMs + polishBudgetMs),
     pacer,
   );
-  let placement = polished.placement;
-  let bestPower = polished.power;
   // How long a full repair actually took here, used below to reserve just
   // enough for the closing pass instead of a fixed (over-generous) share.
   const polishElapsedMs = performance.now() - polishStartedMs;
+
+  // Under a role isolation the seed above was sized for it (`constructSeed`),
+  // and the plain-sized seed is built and repaired as well; the search starts
+  // from whichever repairs higher, the plain one on a tie. Judged after the
+  // repair rather than before it, because the raw figure picks wrong: on
+  // Entropy Isles' 20-tile island both seeds repair to five full hubs at the
+  // same power, and from the sized one — 20 tiles of 20 used, every
+  // generator already full — the later stages never reach the six-generator
+  // optimum the plain one leads them to (2.36AD against 2.54AD at its 0.3s
+  // budget). On every large shipped island the sized seed repairs to 78-88%
+  // of the bound against the plain one's 50-64%, so the tie rule only
+  // decides where the sizing did not help, and there the search starts where
+  // every other rule starts. The plain repair gets the time the sized one
+  // took, so this costs at most one more repair; cut short it only reads
+  // lower, and the sized seed wins as it should.
+  if (ctx.isolation !== null) {
+    const plainSeed = constructMultiStartSeed(
+      ctx,
+      reactors,
+      generators,
+      coolers,
+      directProducers,
+      deadlineMs,
+      false,
+    );
+    const plainPolished = await greedyPolish(
+      plainSeed,
+      ctx,
+      candidates,
+      Math.min(
+        deadlineMs,
+        performance.now() + Math.max(polishElapsedMs, PLAIN_SEED_POLISH_MIN_MS),
+      ),
+      pacer,
+    );
+    if (plainPolished.power + EPS >= polished.power) polished = plainPolished;
+  }
+  let placement = polished.placement;
+  let bestPower = polished.power;
 
   // Composition-first attempt, BEFORE annealing so its result becomes the
   // walk's starting point rather than competing with it for time. What to build
@@ -2955,6 +3270,13 @@ export async function solveIsland(
     RECLAIM_MIN_ROUND_MS,
     timeBudgetMs * RECLAIM_MIN_ROUND_SHARE,
   );
+  //
+  // Each round reheats to the walk's full starting temperature. Starting the
+  // reclaimed rounds at a tenth of it — on the reasoning that a short round
+  // from a repaired layout spends most of itself wandering off a layout it
+  // then hands straight back — was measured with the survey at 15s over three
+  // runs on every map and anomaly: every map inside the noise band, so the
+  // one schedule is kept.
   for (;;) {
     if (annealMs > 0 && !pacer.stopRequested) {
       placement = await hillClimb(
@@ -2998,6 +3320,14 @@ export async function solveIsland(
     if (annealMs < minRoundMs) break;
   }
 
+  // Everything from here runs past the deadline and none of it yields on its
+  // own, so yield once before it: the walk's last pump may be most of a yield
+  // interval ago, and the cleanup below is a second of work under a pool.
+  {
+    const now = performance.now();
+    if (pacer.due(now)) await pacer.pump(now);
+  }
+
   // Post-search cleanup pass...
   const pruned = pruneDeadWeight(placement, ctx);
   // ...and then right-size what survived. The search had no reason to prefer
@@ -3022,12 +3352,13 @@ export async function solveIsland(
   return {
     placements,
     powerOutput: sized.power,
-    alternates: finalizeAlternates(
+    alternates: await finalizeAlternates(
       collector,
       placements,
       sized.power,
       effectiveBuildings,
       ctx,
+      pacer,
     ),
   };
 }

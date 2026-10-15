@@ -14,7 +14,8 @@ packages/solver/
   src/utils/      the game's number ladder
   src/grid.ts     tile predicates and the ASCII alphabet the tests are written in
   bin/            the CLI (`npm run solve`)
-  scripts/        the fixture exporter (`npm run fixtures`)
+  scripts/        the fixture exporter (`npm run fixtures`), the gap survey (`npm run survey`)
+                  and the stage profiler (`npm run profile`)
   tests/          vitest, run by the repo's `npm test`
   fixtures/       golden fixtures, committed
 ```
@@ -499,6 +500,27 @@ three. Nothing came back lower anywhere. `anomalies.test.ts` pins the seed on a 
 scraps: every cooler on a scrap and none beside a generator under the pool, the reverse under the
 base rules, and a seed that simulates alive.
 
+**Under Singularity the seed is sized for the rule, and the plain seed is kept beside it.** Sized
+from the plain roster, a full-unlock hub is one ecto reactor filling one generator, and the "shared"
+fit stands three generators round one reactor — every one of them crowded, on a board where an
+isolated generator takes two reactors and makes four times the power. That seed scored 32% of the
+Singularity bound on Event Horizon where the base seed scores 60% of its own, and the first repair
+had to double it. So under a generator isolation `constructSeed` sizes each hub fit with the
+generator at its `isolated` rating (the plain entry is still what is written, and `simulateIsland`
+rates it from its neighbours as always), and claims no hub whose generator would stand beside one.
+After the first repair that seed reads 78–88% of the bound on the eight largest islands against the
+plain one's 50–64%. `solveIsland` builds and repairs the plain-sized seed too and starts from
+whichever repairs higher, the plain one on a tie — judged after the repair rather than before,
+because on Entropy Isles' 20-tile island both repair to the same five full hubs and only the plain
+one's looser arrangement leads the later stages to the six-generator optimum (2.54AD against 2.36AD
+at its 0.3s budget). The plain repair is given the time the sized one took, so this costs at most
+one more repair. Measured with the survey: at 15s × 5 runs a wash, −1.5% to +2.2% per map; at 5s × 3
+runs Event Horizon +14% and Shadowspire +18%, four maps +2–4%, Ash Bay and Magma Rift 4% and 1%
+lower inside their bands; with generator7 at tier 3 every map inside 0.8%. An un-crowding move in
+the walk — a crowded generator swapped onto a tile with no generator beside it — was measured at the
+same time and came back inside the noise band on every map (−2.0% to +1.7% at 15s × 3), so it is not
+in.
+
 **Two calibrations were measured under the rules and left as they are.** `hillClimb`'s
 `moveScale` — the figure the annealing temperature is derived from — is read off the **plain**
 roster, so under a rule that rates a tile above it the walk runs colder than intended, up to `multiplier`
@@ -550,10 +572,13 @@ property of the rules in force rather than of the grid, so it cannot be applied 
 
 Two shapes in it are load-bearing and look like details:
 
-- A supplier expands **every** unvisited adjacent consumer instead of shortcutting to the sink
-  when it finds one with room. The shortcut marks later consumers visited and can pick a
-  different equal-length augmenting path — same maximum flow, different split, and the split
-  decides which buildings clear their cooling.
+- The sink is reached by the **first** consumer with room to be enqueued, through the supplier
+  that enqueued it — the queue is FIFO, so that is the one Unity's consumer node connects from.
+  The search ends at that enqueue, which saves the expansions in between and nothing else. A
+  supplier must never pick the sink on its own terms (scan its edge list for a consumer with
+  room, or mark later consumers visited without enqueuing them): that can pick a different
+  equal-length augmenting path — same maximum flow, different split, and the split decides
+  which buildings clear their cooling.
 - Supply and demand are counted **down** rather than accumulated up, because `cap - sent` is not
   bit-identical to a decremented remainder and the fixtures assert exactly.
 
