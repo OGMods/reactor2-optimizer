@@ -76,15 +76,19 @@ export function violationFor(specifier: string, from: string): string | null {
   if (!from.startsWith("solver/")) {
     return null;
   }
-  if (specifier.startsWith("./")) {
-    return null; // within src/solver/
-  }
-  const sibling = /^\.\.\/([^/]+)/.exec(specifier)?.[1];
-  if (sibling === undefined) {
+  // Resolved against the importing file's own folder, so a module in a
+  // subfolder of src/solver/ reaching `../constants` is still within the
+  // engine, and one reaching `../../encoding/x` is caught like any other.
+  const target = posix.normalize(posix.join(posix.dirname(from), specifier));
+  if (target.startsWith("../") || target === "..") {
     return "escapes src/ entirely";
   }
-  if (!ALLOWED_SIBLING_FOLDERS.includes(sibling)) {
-    return `reaches into src/${sibling}/, which the engine may not depend on`;
+  const folder = target.split("/")[0];
+  if (folder === "solver") {
+    return null; // within src/solver/
+  }
+  if (!ALLOWED_SIBLING_FOLDERS.includes(folder)) {
+    return `reaches into src/${folder}/, which the engine may not depend on`;
   }
   return null;
 }
@@ -133,6 +137,14 @@ describe("worker safety", () => {
     );
     expect(violationFor("../utils/formatters", from)).toMatch(/src\/utils/);
     expect(violationFor("pixi.js", from)).toMatch(/bare package/);
+    // A subfolder of the engine is held to the same rule, resolved from where
+    // it stands rather than read off the specifier's first segment.
+    expect(
+      violationFor("../../encoding/blueprint", "solver/search/seed.ts"),
+    ).toMatch(/src\/encoding/);
+    expect(violationFor("../../../x", "solver/search/seed.ts")).toMatch(
+      /escapes src/,
+    );
     // A bare specifier is refused wherever it is written, not only in solver/.
     expect(violationFor("pako", "encoding/blueprint.ts")).toMatch(
       /bare package/,
@@ -142,6 +154,11 @@ describe("worker safety", () => {
   it("allows what each layer legitimately needs", () => {
     expect(violationFor("./types", "solver/placementSearch.ts")).toBeNull();
     expect(violationFor("./constants", "solver/island.ts")).toBeNull();
+    expect(violationFor("../constants", "solver/search/seed.ts")).toBeNull();
+    expect(violationFor("./placement", "solver/search/seed.ts")).toBeNull();
+    expect(
+      violationFor("../../data/anomalies", "solver/search/seed.ts"),
+    ).toBeNull();
     expect(
       violationFor("../data/effectiveBuildings", "solver/solver.ts"),
     ).toBeNull();

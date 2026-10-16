@@ -300,7 +300,7 @@ CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
   figures are read: a step of the walk writes one or two tiles and then
   simulates the island, which reads every occupied tile, so the write is some
   25x less work and `simulateIsland` stays untouched. `put()` in
-  `placementSearch.ts` is the only way a building enters a placement, so the
+  `search/placement.ts` is the only way a building enters a placement, so the
   bonus cannot be missed at one of three dozen sites — and a miss would be
   silent, since the layout would simply be worth less than it is.
 
@@ -585,8 +585,13 @@ is the entry point. `planSolve()` does the shared setup:
    **seed → repair → composition retarget → (annealing → repair)\* → pruning →
    right-sizing**. The starred pair repeats until the deadline: repair's slice is
    reserved before the layout exists and converges long before its cap, so what
-   it hands back becomes another short walk rather than idle time. The reasoning
-   for each stage is in the file header and `docs/SOLVER.md`; the short
+   it hands back becomes another short walk rather than idle time. Each stage
+   is a file under `search/` (`seed`, `anneal`, `composition`, `repair`,
+   `rightSize`, `pooledCoolers`, over the shared `placement` and `stability`
+   primitives); `placementSearch.ts` keeps `solveIsland`, the budget split,
+   the deterministic replay and `internals`, and stays the one module anything
+   outside imports the search from. The reasoning for each stage is in
+   `placementSearch.ts`'s header and `docs/SOLVER.md`; the short
    version is that seeding builds self-sufficient hubs and systematically misses
    layouts where hubs _share_ a cooler or reactor, and the other stages cover
    that from different directions.

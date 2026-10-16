@@ -7,7 +7,11 @@ the terminal.
 
 ```
 packages/solver/
-  src/solver/     the engine: types, island split, simulation, distribution, search
+  src/solver/     the engine: types, island split, simulation, distribution, and
+                  placementSearch.ts, the search's entry point (solveIsland)
+  src/solver/search/  one file per search stage: seed, anneal, composition, repair,
+                  rightSize, pooledCoolers, and the placement and stability primitives
+                  they share
   src/data/       the authored building tables, the anomaly table, the shipped island codes,
                   unlock resolution, mapping a game export onto all of that
   src/encoding/   the blueprint wire format, and a reader for the game's export code
@@ -65,9 +69,11 @@ gone; the reasoning is not.
 `DistributionScratch` **must never change a number.** It is an allocation optimization and
 nothing else.
 
-Search _tuning_ constants (`SWAP_RADIUS`, `POLISH_SHARE`, and the rest) deliberately stay private
-to `placementSearch.ts` rather than moving to `constants.ts`: they are meaningless apart from the
-stage they tune.
+Search _tuning_ constants (`SWAP_RADIUS`, `POLISH_SHARE`, and the rest) deliberately stay beside
+the stage they tune rather than moving to `constants.ts`: they are meaningless apart from it. Each
+stage of the search is a file of its own under `src/solver/search/`, and its constants are private
+to that file; the budget shares that divide the time between stages live in `placementSearch.ts`
+with `solveIsland`, and the one constant two stages share, `SWAP_RADIUS`, in `search/placement.ts`.
 
 ### `anomalies.ts` — the prestige rule changes
 
