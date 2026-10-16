@@ -216,10 +216,8 @@ describe("a three-tile row", () => {
    * the ecto's 2.88e23 and the rest goes nowhere; the cooler is idling at 7%.
    * Power is the generator's full rated 1.06e23.
    */
-  golden(
-    ["XGC"],
-    { ecto_compressor: 1, generator7: 1, cooler8: 1 },
-    () => sharedOutput(1, 1),
+  golden(["XGC"], { ecto_compressor: 1, generator7: 1, cooler8: 1 }, () =>
+    sharedOutput(1, 1),
   );
 });
 
@@ -231,10 +229,8 @@ describe("a four-tile square", () => {
    * The fourth tile goes to a second generator, not a second reactor: the
    * first ecto was already spilling more than a whole generator's worth.
    */
-  golden(
-    ["GC", "XG"],
-    { ecto_compressor: 1, generator7: 2, cooler8: 1 },
-    () => sharedOutput(1, 2),
+  golden(["GC", "XG"], { ecto_compressor: 1, generator7: 2, cooler8: 1 }, () =>
+    sharedOutput(1, 2),
   );
 
   it("doubles the three-tile row exactly", () => {
@@ -253,10 +249,8 @@ describe("a five-tile island", () => {
    * converted, is 2.1499e23 against 2.12e23.
    */
   const LAYOUT = ["GCG", "GX."];
-  golden(
-    LAYOUT,
-    { ecto_compressor: 1, generator7: 3, cooler8: 1 },
-    () => sharedOutput(1, 3),
+  golden(LAYOUT, { ecto_compressor: 1, generator7: 3, cooler8: 1 }, () =>
+    sharedOutput(1, 3),
   );
 
   it("beats the four-tile square by only the ecto's overflow", () => {
@@ -311,10 +305,8 @@ describe("an eight-tile island", () => {
    * last 8e21 — 4.2997e23, beating 3 ectos + 4 generators' 4.24e23.
    */
   const LAYOUT = ["GXG", "XCG", "GG."];
-  golden(
-    LAYOUT,
-    { ecto_compressor: 2, generator7: 5, cooler8: 1 },
-    () => sharedOutput(2, 5),
+  golden(LAYOUT, { ecto_compressor: 2, generator7: 5, cooler8: 1 }, () =>
+    sharedOutput(2, 5),
   );
 
   it("prefers a fifth generator to a third reactor", () => {

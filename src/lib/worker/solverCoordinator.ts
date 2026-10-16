@@ -7,7 +7,7 @@ import {
 } from "@reactor2/solver";
 import { buildSolveVariants } from "./variants";
 import { IslandBest } from "./islandBest";
-import { countGrassTiles } from "@reactor2/solver";
+import { countGrassTiles, fitBudgetsToPool } from "@reactor2/solver";
 import type { IslandSolution } from "@reactor2/solver";
 import type {
   BuildingDefinition,
@@ -66,7 +66,8 @@ export function defaultPoolSize(): number {
  * Runs one island-search per worker, mirroring the process pool the reference
  * pipeline uses: islands cannot influence each other, so wall-clock time
  * becomes ~max(island budget) instead of the sum of them, and every island
- * still gets its full share of the budget (`islandBudgetsS`).
+ * still gets its full share of the budget (`islandBudgetsS`) — stretched to
+ * the whole of it when the run fits the pool at once (`fitBudgetsToPool`).
  *
  * A multi-attempt run rides the same queue. Nothing about a second search of
  * an island differs from a first, so `attempts × islands` tasks go into the
@@ -109,11 +110,16 @@ export class SolverCoordinator {
       return [createEmptyResult(grid?.[0]?.length ? countGrassTiles(grid) : 0)];
 
     this.ensurePool();
-    const solutions = await this.runQueue(
-      plan,
-      Math.max(1, options?.attempts ?? 1),
-      options,
+    const attempts = Math.max(1, options?.attempts ?? 1);
+    // A run whose every task has a worker of its own takes its largest slice,
+    // not the sum, so the slices are stretched to the whole budget.
+    plan.budgetsS = fitBudgetsToPool(
+      plan.budgetsS,
+      timeBudgetS,
+      attempts,
+      this.poolSize,
     );
+    const solutions = await this.runQueue(plan, attempts, options);
 
     return buildSolveVariants(plan, solutions);
   }
@@ -168,8 +174,40 @@ export class SolverCoordinator {
     let remaining = tasks.length;
     let stopSignaled = false;
 
-    const emitProgress = () => {
+    /*
+     * Progress reaches the page at most once per report interval, however
+     * many workers are reporting.
+     *
+     * Every worker reports on its own clock, so a pool of eight hands the
+     * main thread up to eight boards a second, and each one is a full board
+     * rebuilt, re-scored and redrawn there. On a fast machine that is noise;
+     * on a page slowed 6x it kept the main thread 85% busy with single tasks
+     * up to 0.7s, and a main thread that cannot keep up is one that cannot
+     * read the next message either — the board stops updating, Stop is never
+     * forwarded, and a queued task waits on a DONE nobody has read. The
+     * workers' rate does not slow with the machine; this does, so it is
+     * capped here. `display` keeps absorbing every report in between, so what
+     * is drawn is always the best anything has reported so far.
+     *
+     * A trailing update carries whatever arrived inside the window, and it is
+     * cancelled when the run settles: one landing after the finished result
+     * would draw a snapshot of a search over the answer it produced.
+     */
+    const progressIntervalMs = options?.reportIntervalMs ?? 1000;
+    let lastProgressMs = -Infinity;
+    let progressTimer: ReturnType<typeof setTimeout> | null = null;
+    let settled = false;
+    const flushProgress = () => {
+      progressTimer = null;
+      if (settled) return;
+      lastProgressMs = performance.now();
       options?.onProgress?.(buildOptimizationResult(plan, display));
+    };
+    const emitProgress = () => {
+      if (!options?.onProgress || settled || progressTimer !== null) return;
+      const waitMs = lastProgressMs + progressIntervalMs - performance.now();
+      if (waitMs <= 0) flushProgress();
+      else progressTimer = setTimeout(flushProgress, waitMs);
     };
 
     /** Monotonic: only a layout that beats what is drawn replaces it. */
@@ -185,6 +223,11 @@ export class SolverCoordinator {
 
     return new Promise((resolve) => {
       const settle = () => {
+        settled = true;
+        if (progressTimer !== null) {
+          clearTimeout(progressTimer);
+          progressTimer = null;
+        }
         // An island whose every attempt errored has no finished answer; the
         // last thing it streamed is better than nothing, and better than the
         // empty board it would otherwise contribute.

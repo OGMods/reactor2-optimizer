@@ -18,11 +18,17 @@ import type { IslandContext } from "./context";
  *
  * Two shapes here are load-bearing and neither is arbitrary:
  *
- * - A supplier does **not** jump straight to the sink on finding a consumer
- *   with room. It enqueues the consumer and lets the consumer node connect,
- *   because the shortcut marks later consumers visited and can select a
- *   different equal-length augmenting path — same maximum flow, different
- *   split, and the split is what decides which buildings clear their cooling.
+ * - The sink is reached by the consumer with room that was enqueued
+ *   **first**, with the supplier that enqueued it as its parent — the queue is
+ *   FIFO, so that is the one Unity's consumer node connects from, and every
+ *   node before it on the path was already parented when it was enqueued.
+ *   The search here ends at that enqueue rather than at the dequeue, which
+ *   skips the expansions in between and nothing else. What it must never do
+ *   is let a supplier pick the sink on its own terms — scanning its edge list
+ *   for a consumer with room, or marking later consumers visited without
+ *   enqueuing them — because that can select a different equal-length
+ *   augmenting path: same maximum flow, different split, and the split is
+ *   what decides which buildings clear their cooling.
  * - Supply and demand are counted DOWN. `cap - sent` accumulated separately is
  *   not bit-identical to a decremented remainder, and the parity fixtures are
  *   asserted exactly.
@@ -256,6 +262,7 @@ export function runDistribution(
   const visitedToken = d.visitedToken;
   const parentNode = d.parentNode;
   const queue = d.queue;
+  const live = d.liveSuppliers;
   visitedToken.fill(0, 0, sink + 1);
   let token = 0;
 
@@ -279,59 +286,75 @@ export function runDistribution(
     const memberFrom = componentStart[comp];
     const memberTo = componentStart[comp + 1];
 
-    for (;;) {
-      let anyLeft = false;
-      for (let m = memberFrom; m < memberTo; m++) {
-        if (supRem[componentMembers[m]] > EPS) {
-          anyLeft = true;
-          break;
-        }
-      }
-      if (!anyLeft) break;
+    // The suppliers the source would enqueue, kept in ascending index order
+    // and compacted as they run dry. Supply only ever goes down, so a supplier
+    // dropped here is never enqueued again — the same set, in the same order,
+    // as a scan of the whole component, read from the few that are left rather
+    // than from every member on every search. Under a Cryo Nexus board the
+    // heat graph repairs with some sixty searches over a component of thirty
+    // suppliers, eight of which still hold anything.
+    let liveCount = 0;
+    for (let m = memberFrom; m < memberTo; m++) {
+      const sIdx = componentMembers[m];
+      if (supRem[sIdx] > EPS) live[liveCount++] = sIdx;
+    }
 
+    for (;;) {
       token += 1;
       visitedToken[source] = token;
-      queue[0] = source;
+
+      // Source -> every supplier with remaining supply: the source's own
+      // expansion, done in place rather than through the queue.
+      let qTail = 0;
+      let keep = 0;
+      for (let m = 0; m < liveCount; m++) {
+        const sIdx = live[m];
+        if (supRem[sIdx] > EPS) {
+          live[keep++] = sIdx;
+          visitedToken[sIdx] = token;
+          parentNode[sIdx] = source;
+          queue[qTail++] = sIdx;
+        }
+      }
+      liveCount = keep;
+      if (liveCount === 0) break;
+
       let qHead = 0;
-      let qTail = 1;
       let reachedSink = false;
 
       while (qHead < qTail && !reachedSink) {
         const node = queue[qHead++];
 
-        if (node === source) {
-          for (let m = memberFrom; m < memberTo; m++) {
-            const sIdx = componentMembers[m];
-            if (visitedToken[sIdx] === token) continue;
-            if (supRem[sIdx] > EPS) {
-              visitedToken[sIdx] = token;
-              parentNode[sIdx] = source;
-              queue[qTail++] = sIdx;
-            }
-          }
-        } else if (node < numSuppliers) {
-          // Supplier -> every unvisited adjacent consumer. Forward residual is
-          // unbounded, and the sink is deliberately NOT reached from here.
+        if (node < numSuppliers) {
+          // Supplier -> every unvisited adjacent consumer, in edge order.
+          // Forward residual is unbounded. The first consumer with room to be
+          // enqueued is the one that would connect to the sink when dequeued
+          // (FIFO), with this supplier as its parent, so the search is over
+          // the moment it is enqueued; the file header says why it must be
+          // the first *enqueued* and not any other consumer with room.
           for (let k = supAdjStart[node]; k < supAdjStart[node + 1]; k++) {
-            const conNode = numSuppliers + supAdjItems[k];
+            const cIdx = supAdjItems[k];
+            const conNode = numSuppliers + cIdx;
             if (visitedToken[conNode] === token) continue;
             visitedToken[conNode] = token;
             parentNode[conNode] = node;
             queue[qTail++] = conNode;
+            if (demRem[cIdx] > EPS) {
+              parentNode[sink] = conNode;
+              reachedSink = true;
+              break;
+            }
           }
-        } else if (node < source) {
+        } else {
+          // A consumer without room (one with room ended the search above):
+          // walk back-edges to the suppliers already sending to it. The
+          // visited test comes first because it is the cheaper load, and
+          // either test skipping the edge is the same skip.
           const cIdx = node - numSuppliers;
-          if (visitedToken[sink] !== token && demRem[cIdx] > EPS) {
-            visitedToken[sink] = token;
-            parentNode[sink] = node;
-            reachedSink = true;
-            break;
-          }
-
           for (let m = conAdjStart[cIdx]; m < conAdjStart[cIdx + 1]; m++) {
             const sIdx = conAdjItems[m];
-            if (flow[sIdx * numConsumers + cIdx] <= EPS) continue;
             if (visitedToken[sIdx] === token) continue;
+            if (flow[sIdx * numConsumers + cIdx] <= EPS) continue;
             visitedToken[sIdx] = token;
             parentNode[sIdx] = node;
             queue[qTail++] = sIdx;

@@ -6,14 +6,14 @@
    * How the next run spends its time, offered as a choice rather than picked
    * for the user.
    *
-   * The search is stochastic, so one 30s walk is a single sample and ten 10s
-   * walks are ten — usually the better answer, and reliably the better
+   * The search is stochastic, so one 30s walk is a single sample and five 20s
+   * walks are five — usually the better answer, and reliably the better
    * *shortlist*, since ties found by different attempts are pooled. What it
    * costs is wall-clock, and how much depends on the machine: the attempts go
    * through the same worker pool the islands already use, so a browser
    * reporting eight cores overlaps most of them and a single-core one pays the
    * full serial price. That is the whole reason the estimate is printed here —
-   * "10 × 10s" is not a duration on its own.
+   * "5 × 20s" is not a duration on its own.
    *
    * It sits directly above the Run button rather than inside the re-run dialog
    * because it has to be answerable on a first run too, when no dialog opens.

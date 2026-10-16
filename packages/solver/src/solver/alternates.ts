@@ -189,7 +189,12 @@ export class AlternateCollector {
    * converged walk mostly produces, and it only ever reads the layout's tiles.
    */
   accepts(placement: Placement): boolean {
-    if (this.#layouts.has(placementKey(placement))) return false;
+    // An identical board is at distance 0 and fails the loop below, so the key
+    // lookup is only needed when the distance rule is off. It is an O(n)
+    // string build, asked on every tied step of a converged walk, where it was
+    // a fifth of the cost of the simulation that produced the tie.
+    if (this.#minDistance <= 0 && this.#layouts.has(placementKey(placement)))
+      return false;
     for (const held of this.#layouts.values()) {
       if (
         placementDistance(placement, held, this.#minDistance) <

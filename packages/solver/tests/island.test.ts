@@ -1175,6 +1175,59 @@ describe("the theoretical max-power bound", () => {
       expect(totalPower).toBeGreaterThan(0);
     });
 
+    it("is not beaten where the neighbour cap binds", () => {
+      /*
+       * A generator far stronger than its neighbours can feed, so each one is
+       * held to what its own ring can supply — and the bound now counts that
+       * ring by class, crediting an inland generator only the shore reactors
+       * and coolers it actually touches. The layouts here put generators on
+       * every kind of tile, beside shore neighbours and away from them; any
+       * that beat the bound would mean a ring had been under-counted.
+       */
+      const roster = basicRoster({ generatorValue: 1000 });
+      const island = islandFor(
+        ["GGGGGG", "GGGGGG", "GGGGGG", "GGGGGG", "GGGGGG"],
+        roster,
+      );
+      const bound = estimateTotalMaxPower([island], roster, tidal);
+      const ctx = buildIslandContext(
+        island.grid,
+        island.buildable,
+        tidal,
+        island.waterAdjacent,
+      );
+      const byLetter = { R: roster[0], G: roster[1], C: roster[2] };
+      const score = (rows: string[]) => {
+        const shape = placeOn(ctx, rows, byLetter);
+        return simulateIsland(
+          shape.map((b, t) => (b === null ? null : ctx.rate(t, b))),
+          ctx,
+        ).totalPower;
+      };
+
+      const handBuilt = [
+        ["RCRCRC", "CGRGRG", "RCRCRC", "CGRGRG", "RCRCRC"],
+        ["RRCRRC", "RGCRGC", "RRCRRC", "RGCRGC", "RRCRRC"],
+      ];
+      const powers = handBuilt.map(score);
+      for (const power of powers)
+        expect(power).toBeLessThanOrEqual(bound + EPS);
+      // Not vacuous: both run, the better at about three-quarters of the bound.
+      for (const power of powers) expect(power).toBeGreaterThan(0);
+
+      // And a spread of arbitrary ones, from a fixed stream.
+      let seed = 12345;
+      const next = () => (seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32;
+      for (let n = 0; n < 300; n++) {
+        const rows = Array.from({ length: 5 }, () =>
+          Array.from({ length: 6 }, () => "RGC"[Math.floor(next() * 3)]).join(
+            "",
+          ),
+        );
+        expect(score(rows)).toBeLessThanOrEqual(bound + EPS);
+      }
+    });
+
     it("comes in under the whole-island figure once an island has inland tiles", () => {
       const roster = basicRoster();
       // The bare 3x3's centre is the only inland tile, and it is enough.

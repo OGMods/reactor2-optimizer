@@ -44,6 +44,7 @@ import {
 import { verify } from "../src/solver/report";
 import {
   buildOptimizationResult,
+  fitBudgetsToPool,
   planSolve,
   solve,
 } from "../src/solver/solver";
@@ -142,9 +143,12 @@ function offsetSeed(
 /**
  * One solve, with the islands farmed out to `pool` when there is more than one.
  *
- * Islands never interact, so this is the same search either way — each island
- * still gets its own slice of the budget (`islandBudgetsS`). Only the wall clock
- * changes: concurrently it is ~max(slice) instead of the whole budget.
+ * Islands never interact, so each one gets its own slice of the budget
+ * (`islandBudgetsS`) either way. Not the same search, though: when every island
+ * has a worker the pooled run stretches the slices until the largest is the
+ * whole budget (`fitBudgetsToPool`), while the serial fallback — one island, or
+ * a pool of one — keeps them summing to it. So on a board of several islands
+ * the core count decides how long each one is searched.
  */
 async function solveWithPool(
   grid: Tile[][],
@@ -176,6 +180,10 @@ async function solveWithPool(
     placements: [],
     powerOutput: 0,
   }));
+  // When every island has a worker of its own the run lasts as long as its
+  // largest slice, so the app's Quick rule stretches them to the budget;
+  // `fitBudgetsToPool` checks that and leaves a run that queues alone.
+  const budgetsS = fitBudgetsToPool(plan.budgetsS, timeBudgetS, 1, pool.size);
 
   await pool.run(
     plan.islands.map((island, i) => ({
@@ -184,7 +192,7 @@ async function solveWithPool(
         kind: "island" as const,
         island,
         effectiveBuildings: plan.effectiveBuildings,
-        budgetS: plan.budgetsS[i],
+        budgetS: budgetsS[i],
         seed: plan.seeds[i],
         // The resolved definition rather than the id: the plan has already
         // resolved it, and a worker re-resolving would be a second reading of

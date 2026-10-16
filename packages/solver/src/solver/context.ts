@@ -41,7 +41,6 @@ export class DistributionScratch {
    *  exactly. */
   readonly remSupplierCap: Float64Array;
   readonly remConsumerCap: Float64Array;
-  readonly eligible: Int32Array;
 
   /** CSR-style adjacency: items[start[i] .. start[i + 1]) */
   readonly supAdjStart: Int32Array;
@@ -52,6 +51,11 @@ export class DistributionScratch {
   readonly visitedToken: Int32Array;
   readonly parentNode: Int32Array;
   readonly queue: Int32Array;
+  /**
+   * Augmenting Repair's suppliers with supply left, for the component being
+   * repaired, in ascending index order. Compacted as suppliers run dry.
+   */
+  readonly liveSuppliers: Int32Array;
 
   /**
    * Per-supplier FairShare round budget: the number of suppliers sharing that
@@ -80,7 +84,6 @@ export class DistributionScratch {
     this.consumerReceived = new Float64Array(n);
     this.remSupplierCap = new Float64Array(n);
     this.remConsumerCap = new Float64Array(n);
-    this.eligible = new Int32Array(n);
     this.supAdjStart = new Int32Array(n + 1);
     this.supAdjItems = new Int32Array(maxAdj);
     this.conAdjStart = new Int32Array(n + 1);
@@ -88,6 +91,7 @@ export class DistributionScratch {
     this.visitedToken = new Int32Array(totalNodes);
     this.parentNode = new Int32Array(totalNodes);
     this.queue = new Int32Array(totalNodes);
+    this.liveSuppliers = new Int32Array(n);
     this.supRoundBudget = new Int32Array(n);
     this.componentOf = new Int32Array(n);
     this.componentMembers = new Int32Array(n);

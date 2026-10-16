@@ -7,14 +7,19 @@ the terminal.
 
 ```
 packages/solver/
-  src/solver/     the engine: types, island split, simulation, distribution, search
+  src/solver/     the engine: types, island split, simulation, distribution, and
+                  placementSearch.ts, the search's entry point (solveIsland)
+  src/solver/search/  one file per search stage: seed, anneal, composition, repair,
+                  rightSize, pooledCoolers, and the placement and stability primitives
+                  they share
   src/data/       the authored building tables, the anomaly table, the shipped island codes,
                   unlock resolution, mapping a game export onto all of that
   src/encoding/   the blueprint wire format, and a reader for the game's export code
   src/utils/      the game's number ladder
   src/grid.ts     tile predicates and the ASCII alphabet the tests are written in
   bin/            the CLI (`npm run solve`)
-  scripts/        the fixture exporter (`npm run fixtures`)
+  scripts/        the fixture exporter (`npm run fixtures`), the gap survey (`npm run survey`)
+                  and the stage profiler (`npm run profile`)
   tests/          vitest, run by the repo's `npm test`
   fixtures/       golden fixtures, committed
 ```
@@ -64,9 +69,11 @@ gone; the reasoning is not.
 `DistributionScratch` **must never change a number.** It is an allocation optimization and
 nothing else.
 
-Search _tuning_ constants (`SWAP_RADIUS`, `POLISH_SHARE`, and the rest) deliberately stay private
-to `placementSearch.ts` rather than moving to `constants.ts`: they are meaningless apart from the
-stage they tune.
+Search _tuning_ constants (`SWAP_RADIUS`, `POLISH_SHARE`, and the rest) deliberately stay beside
+the stage they tune rather than moving to `constants.ts`: they are meaningless apart from it. Each
+stage of the search is a file of its own under `src/solver/search/`, and its constants are private
+to that file; the budget shares that divide the time between stages live in `placementSearch.ts`
+with `solveIsland`, and the one constant two stages share, `SWAP_RADIUS`, in `search/placement.ts`.
 
 ### `anomalies.ts` — the prestige rule changes
 
@@ -499,6 +506,27 @@ three. Nothing came back lower anywhere. `anomalies.test.ts` pins the seed on a 
 scraps: every cooler on a scrap and none beside a generator under the pool, the reverse under the
 base rules, and a seed that simulates alive.
 
+**Under Singularity the seed is sized for the rule, and the plain seed is kept beside it.** Sized
+from the plain roster, a full-unlock hub is one ecto reactor filling one generator, and the "shared"
+fit stands three generators round one reactor — every one of them crowded, on a board where an
+isolated generator takes two reactors and makes four times the power. That seed scored 32% of the
+Singularity bound on Event Horizon where the base seed scores 60% of its own, and the first repair
+had to double it. So under a generator isolation `constructSeed` sizes each hub fit with the
+generator at its `isolated` rating (the plain entry is still what is written, and `simulateIsland`
+rates it from its neighbours as always), and claims no hub whose generator would stand beside one.
+After the first repair that seed reads 78–88% of the bound on the eight largest islands against the
+plain one's 50–64%. `solveIsland` builds and repairs the plain-sized seed too and starts from
+whichever repairs higher, the plain one on a tie — judged after the repair rather than before,
+because on Entropy Isles' 20-tile island both repair to the same five full hubs and only the plain
+one's looser arrangement leads the later stages to the six-generator optimum (2.54AD against 2.36AD
+at its 0.3s budget). The plain repair is given the time the sized one took, so this costs at most
+one more repair. Measured with the survey: at 15s × 5 runs a wash, −1.5% to +2.2% per map; at 5s × 3
+runs Event Horizon +14% and Shadowspire +18%, four maps +2–4%, Ash Bay and Magma Rift 4% and 1%
+lower inside their bands; with generator7 at tier 3 every map inside 0.8%. An un-crowding move in
+the walk — a crowded generator swapped onto a tile with no generator beside it — was measured at the
+same time and came back inside the noise band on every map (−2.0% to +1.7% at 15s × 3), so it is not
+in.
+
 **Two calibrations were measured under the rules and left as they are.** `hillClimb`'s
 `moveScale` — the figure the annealing temperature is derived from — is read off the **plain**
 roster, so under a rule that rates a tile above it the walk runs colder than intended, up to `multiplier`
@@ -550,10 +578,13 @@ property of the rules in force rather than of the grid, so it cannot be applied 
 
 Two shapes in it are load-bearing and look like details:
 
-- A supplier expands **every** unvisited adjacent consumer instead of shortcutting to the sink
-  when it finds one with room. The shortcut marks later consumers visited and can pick a
-  different equal-length augmenting path — same maximum flow, different split, and the split
-  decides which buildings clear their cooling.
+- The sink is reached by the **first** consumer with room to be enqueued, through the supplier
+  that enqueued it — the queue is FIFO, so that is the one Unity's consumer node connects from.
+  The search ends at that enqueue, which saves the expansions in between and nothing else. A
+  supplier must never pick the sink on its own terms (scan its edge list for a consumer with
+  room, or mark later consumers visited without enqueuing them): that can pick a different
+  equal-length augmenting path — same maximum flow, different split, and the split decides
+  which buildings clear their cooling.
 - Supply and demand are counted **down** rather than accumulated up, because `cap - sent` is not
   bit-identical to a decremented remainder and the fixtures assert exactly.
 
@@ -840,9 +871,14 @@ could not see would restart numbering at 1 and overwrite an untagged run.
 `--attempts` runs a batch session: N whole solves through a worker pool, with a leaderboard of
 distinct layouts at the end. Ctrl-C stops it and still prints the report.
 
-Cores are spent on two axes and the flags pick which. A **run** farms its islands out to the pool
-— the same search either way, since each island still gets its own slice (`islandBudgetsS`) of
-the budget, so only wall clock changes. A **session** runs whole attempts in the pool with islands
+Cores are spent on two axes and the flags pick which. A **run** farms its islands out to the pool,
+each with its own slice (`islandBudgetsS`) of the budget. When every island has a worker of its
+own the slices are stretched until the largest is the whole budget (`fitBudgetsToPool`), since a
+run that fits the pool lasts as long as its largest slice anyway — the app's Quick does the same.
+That makes it a different search from the serial fallback (one island, or a pool of one), which
+keeps the summed split, so on a multi-island board the core count decides how long each island is
+searched. `npm run survey` keeps the summed split too: it measures one attempt's slices, which is
+what a queued Deep or Max run spends. A **session** runs whole attempts in the pool with islands
 serial inside each; the pool already owns the cores, and a nested pool per island would
 oversubscribe the machine.
 

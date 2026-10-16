@@ -83,18 +83,20 @@ the run length is a choice you make:
 | Mode  | Shape    | For                                                      |
 | ----- | -------- | -------------------------------------------------------- |
 | Quick | 1 × 30s  | A board you are still changing                           |
-| Deep  | 10 × 10s | The usual answer — ten short walks beat one long one     |
-| Max   | 50 × 10s | Settling a board; mostly buys a fuller shortlist of ties |
+| Deep  | 5 × 20s  | The usual answer — the best of five walks, kept          |
+| Max   | 25 × 20s | Settling a board; mostly buys a fuller shortlist of ties |
 
-Ten short attempts usually beat one long one because past the first few seconds
+Several attempts usually beat one long one because past the first few seconds
 the annealing temperature has fallen far enough that a long walk mostly polishes
-the basin it is already in. Attempts run as independent tasks across a worker
-pool, so the wall-clock cost of "10 × 10s" depends on how many cores the browser
-gives you — the control prints the estimate.
+the basin it is already in. Not too short, though: on a large island a 10s walk
+is still climbing, and five 20s walks beat ten 10s ones at the same cost.
+Attempts run as independent tasks across a worker pool, so the wall-clock cost
+of "5 × 20s" depends on how many cores the browser gives you — the control
+prints the estimate.
 
 Under Singularity Isolation every attempt runs twice as long (Quick 1 × 60s,
-Deep 10 × 20s, Max 50 × 20s): a generator's output depends on its neighbours
-there, and a 10s walk does not have time to find layouts that keep them apart.
+Deep 5 × 40s, Max 25 × 40s): a generator's output depends on its neighbours
+there, and a short walk does not have time to find layouts that keep them apart.
 
 ## Quick start
 

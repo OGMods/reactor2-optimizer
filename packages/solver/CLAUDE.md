@@ -159,7 +159,7 @@ CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
   at 98% of its bound — is unchanged. The `coolerMultiplier` has to be earned
   back before any of that shows.
 
-  **The seed is the one stage that branches on the rule.** Under a pool
+  **The seed branches on the rule.** Under a pool
   `constructSeed` builds every hub engine-first — a phantom cooler sizes the
   fit, so the neighbour slots all go to reactors — charges the cooling as a
   board-wide debt in each candidate's rank, reserves the tiles for it, and pays
@@ -245,6 +245,16 @@ CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
   The neighbour scan reads the _original_ placement, since the test is on what a
   neighbour is and no rating changes that — so there is no order to get right.
 
+  **The seed branches on this rule too.** Sized from the plain roster, a
+  full-unlock hub is one reactor filling one generator and the shared fit
+  stands three generators round one reactor, all crowded; that seed scored 32%
+  of the bound on Event Horizon. Under a generator isolation `constructSeed`
+  sizes each hub with the generator at `isolated` and claims no hub whose
+  generator would stand beside one, and `solveIsland` repairs the plain-sized
+  seed too and starts from whichever repairs higher, the plain one on a tie.
+  `docs/SOLVER.md` has the measurements: a wash at 15s, +14-18% on the two
+  largest maps at 5s.
+
   **The bonus is on a capacity, which is why the rule is close to power-neutral
   at full unlocks.** `isolated` scales a generator's _intake_, and a generator
   fed by the reactors it already had simply fills to `1/isolated` and produces
@@ -290,7 +300,7 @@ CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
   figures are read: a step of the walk writes one or two tiles and then
   simulates the island, which reads every occupied tile, so the write is some
   25x less work and `simulateIsland` stays untouched. `put()` in
-  `placementSearch.ts` is the only way a building enters a placement, so the
+  `search/placement.ts` is the only way a building enters a placement, so the
   bonus cannot be missed at one of three dozen sites — and a miss would be
   silent, since the layout would simply be worth less than it is.
 
@@ -575,8 +585,13 @@ is the entry point. `planSolve()` does the shared setup:
    **seed → repair → composition retarget → (annealing → repair)\* → pruning →
    right-sizing**. The starred pair repeats until the deadline: repair's slice is
    reserved before the layout exists and converges long before its cap, so what
-   it hands back becomes another short walk rather than idle time. The reasoning
-   for each stage is in the file header and `docs/SOLVER.md`; the short
+   it hands back becomes another short walk rather than idle time. Each stage
+   is a file under `search/` (`seed`, `anneal`, `composition`, `repair`,
+   `rightSize`, `pooledCoolers`, over the shared `placement` and `stability`
+   primitives); `placementSearch.ts` keeps `solveIsland`, the budget split,
+   the deterministic replay and `internals`, and stays the one module anything
+   outside imports the search from. The reasoning for each stage is in
+   `placementSearch.ts`'s header and `docs/SOLVER.md`; the short
    version is that seeding builds self-sufficient hubs and systematically misses
    layouts where hubs _share_ a cooler or reactor, and the other stages cover
    that from different directions.
@@ -619,11 +634,13 @@ building sits on a tile and nothing else. Tied layouts go through it too.
 **`distribution.ts` is a port of Unity's `FlowNetwork.cs`.** Two shapes in it are
 load-bearing and look like details:
 
-- A supplier expands **every** unvisited adjacent consumer instead of
-  shortcutting to the sink when it finds one with room. The shortcut marks later
-  consumers visited and can pick a different equal-length augmenting path — same
-  maximum flow, different split, and the split decides which buildings clear
-  their cooling.
+- The sink is reached by the **first** consumer with room to be enqueued,
+  through the supplier that enqueued it — the queue is FIFO, so that is the one
+  Unity's consumer node connects from, and the search ends at that enqueue. A
+  supplier must never pick the sink on its own terms (scan its edge list for a
+  consumer with room, or mark later consumers visited without enqueuing them):
+  that can pick a different equal-length augmenting path — same maximum flow,
+  different split, and the split decides which buildings clear their cooling.
 - Supply and demand are counted **down** rather than accumulated up, because
   `cap - sent` is not bit-identical to a decremented remainder and the golden
   fixtures assert exactly.
@@ -737,6 +754,16 @@ it. Same `--time`, `--runs` and `--seed` on both sides, same machine, same load 
 it warns if the first three differ. Expect about ±0.8% per map at 15s × 5 runs,
 so a gain smaller than that needs more runs to show; "no island got worse" is
 the claim it can make at any size.
+
+**For a change to what a stage costs, use the profiler before and after.**
+`npm run profile` times each stage of the search on the largest shipped island
+under each anomaly — the bound, the composition targets, seed construction,
+one simulation, the collector's tie check, one full repair — on the same
+deterministic seed layout both times, so two runs taken back to back on an
+idle machine measure the same work. It is how the seed was found to cost some 40x
+what its comment claimed, and how a repair was found to cost more than the
+polish share of a Quick attempt on a phone: the fixtures cannot see either,
+since neither changes a number.
 
 The survey solves at full unlocks unless told otherwise. `--unlock ID=LEVEL`
 (0-based, `-1` to lock) surveys another roster, and a rule that rates one role

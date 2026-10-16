@@ -539,6 +539,21 @@ class LayoutState {
   }
 
   /**
+   * The terrain an island would load with — its saved layout's, or its map's —
+   * without putting it on screen. Null for an id that names no island, or a
+   * board that cannot be read.
+   */
+  async boardOf(templateId: string): Promise<Tile[][] | null> {
+    const template = this.findTemplate(templateId);
+    if (!template) return null;
+    const saved = await this.#decodeSaved(
+      templateId,
+      this.savedGrids[templateId],
+    );
+    return (saved ?? (await this.#decodeTemplate(template)))?.grid ?? null;
+  }
+
+  /**
    * Switches templates: pristine terrain, then the user's saved layout for it
    * — terrain *and* placements — if they have one, landing as one write.
    */

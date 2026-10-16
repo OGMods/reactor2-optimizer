@@ -713,9 +713,18 @@ class UIState {
     this.#beginSolve();
   }
 
-  /** Answers the dialog: `keepBest` defends the layout already on screen. */
+  /**
+   * Answers the dialog: `keepBest` defends the layout already on screen.
+   *
+   * Discarding deletes it here, from the screen and from storage, before the
+   * run starts rather than when its result lands. A layout the player chose
+   * to throw away should not stay on the board through a 20s run, and a run
+   * stopped before it reports anything would otherwise hand it back as if
+   * nothing had been chosen.
+   */
   startSolve(keepBest: boolean) {
     this.activeModal = null;
+    if (!keepBest) solverState.clearResult();
     this.#beginSolve({ keepBest });
   }
 
@@ -1056,8 +1065,9 @@ class UIState {
     this.isImporting = true;
     this.importError = null;
     try {
-      // The run belongs to a board and a roster this is about to replace.
-      solverState.stopOptimizer();
+      // The run belongs to a board and a roster this is about to replace, so
+      // it has to have landed before either changes — see `settleOptimizer`.
+      await solverState.settleOptimizer();
       configState.applyGameImport(
         applyInProgress(resolved, this.gameImportMode),
         resolved.anomalyId,
@@ -1067,11 +1077,12 @@ class UIState {
         configState.buildingUpgrades,
         resolved.lockedTemplateIds,
       );
+      // Every stored solve was found under the old roster: keep each one the
+      // import left buildable, re-scored, before restore() reads the store.
+      await solverState.carryOverSolves(resolved.lockedTemplateIds);
       this.activeModal = null;
       this.importCode = "";
       this.gameImport = null;
-      // The board on screen may have been replaced, and every stored solve was
-      // found under the old roster — restore() hangs the right one, as stale.
       solverState.restore();
       this.closeInspector();
       this.recenterCanvas();

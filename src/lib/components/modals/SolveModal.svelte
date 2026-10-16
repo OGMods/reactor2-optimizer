@@ -60,8 +60,8 @@
       <span class="choice-text">
         <span class="choice-title">Discard this layout</span>
         <span class="choice-sub">
-          Start fresh — whatever the run finds stands, higher or lower, and this
-          island's other layouts go with it.
+          Deleted now, with this island's other layouts — whatever the run finds
+          stands, higher or lower.
         </span>
       </span>
     </button>
