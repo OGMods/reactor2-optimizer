@@ -128,8 +128,6 @@ interface BoardLayout {
   placement: Placement;
   /** Tile index -> the row that placement came from, or -1. */
   rowOf: Int32Array;
-  /** `(x, y)` -> tile index, for the placements that landed on one. */
-  tileOf: (x: number, y: number) => number | undefined;
 }
 
 /**
@@ -171,11 +169,7 @@ function layoutFor(
     rowOf[t] = i;
   }
 
-  return {
-    placement,
-    rowOf,
-    tileOf: (x, y) => tileAt.get(y * stride + x),
-  };
+  return { placement, rowOf };
 }
 
 /**
@@ -263,26 +257,113 @@ export function ratedPlacementAt(
   prestige?: PrestigeScales,
   anomaly: AnomalyDefinition = getAnomaly(undefined),
 ): EffectiveBuilding | null {
+  const rated = ratedPlacements(
+    grid,
+    buildings,
+    placedBuildings,
+    prestige,
+    anomaly,
+  );
+  // The later of two placements on one tile is the one that stands — the same
+  // tie-break `layoutFor` applies.
+  for (let i = placedBuildings.length - 1; i >= 0; i--) {
+    const p = placedBuildings[i];
+    if (p.x === x && p.y === y) return rated[i];
+  }
+  return null;
+}
+
+/**
+ * `ratedPlacementAt` for every building at once: what each row of
+ * `placedBuildings` was rated for, in the same order, or null where nothing
+ * buildable stands.
+ *
+ * The canvas needs every ceiling on the board each time it changes — the status
+ * badges are a fill against it — and asking tile by tile would lay the board
+ * out and score it once per building. This lays it out once, and resolves a
+ * role isolation with the one `simulateIsland` call it costs, which is the
+ * single reading of the rules `ratedPlacementAt` itself now goes through.
+ */
+export function ratedPlacements(
+  grid: Tile[][],
+  buildings: readonly BuildingDefinition[],
+  placedBuildings: readonly PlacedBuilding[],
+  prestige?: PrestigeScales,
+  anomaly: AnomalyDefinition = getAnomaly(undefined),
+): (EffectiveBuilding | null)[] {
+  const out: (EffectiveBuilding | null)[] = new Array(
+    placedBuildings.length,
+  ).fill(null);
   if (!grid?.length || !grid[0]?.length || placedBuildings.length === 0) {
-    return null;
+    return out;
   }
 
   const ctx = contextFor(grid, anomaly);
-  if (ctx.n === 0) return null;
+  if (ctx.n === 0) return out;
 
-  const { placement, tileOf } = layoutFor(
+  const { placement, rowOf } = layoutFor(
     ctx,
     buildings,
     placedBuildings,
     prestige,
   );
-  const t = tileOf(x, y);
-  if (t === undefined) return null;
+  if (ctx.isolation !== null) simulateIsland(placement, ctx, true);
 
-  const rated = placement[t];
-  if (rated === null) return null;
-  if (ctx.isolation === null) return rated;
+  for (let t = 0; t < ctx.n; t++) {
+    const i = rowOf[t];
+    const rated = placement[t];
+    if (i < 0 || rated === null) continue;
+    out[i] = ctx.isolation === null ? rated : (ctx.ratedLayout[t] ?? rated);
+  }
+  return out;
+}
 
-  simulateIsland(placement, ctx, true);
-  return ctx.ratedLayout[t] ?? rated;
+/** Which way the board's rules moved a building off its plain tier. */
+export type RatingShift = "up" | "down";
+
+/**
+ * For each row of `placedBuildings`, whether the tile it stands on rates it
+ * above or below its plain tier — the question the game answers with the
+ * anomaly icon at a building's foot — or null where nothing moved it.
+ *
+ * Read off the scorer rather than off the anomaly's rule, so the icon can only
+ * appear where the figures it explains actually changed: a waterside bonus, an
+ * isolated or crowded generator, a pooled cooler's scale. Research is in both
+ * sides of the comparison and so cancels; what is left is the tile and the
+ * board around it.
+ *
+ * Compared on the building's headline figure — energy for a direct producer,
+ * whose `effectiveValue` is not what it is rated by, and `effectiveValue` for
+ * every other role — with a relative tolerance, so float noise in a scale that
+ * comes out at exactly 1 never paints an icon.
+ */
+export function ratingShifts(
+  grid: Tile[][],
+  buildings: readonly BuildingDefinition[],
+  placedBuildings: readonly PlacedBuilding[],
+  prestige?: PrestigeScales,
+  anomaly: AnomalyDefinition = getAnomaly(undefined),
+): (RatingShift | null)[] {
+  const rated = ratedPlacements(
+    grid,
+    buildings,
+    placedBuildings,
+    prestige,
+    anomaly,
+  );
+  return placedBuildings.map((pb, i) => {
+    const r = rated[i];
+    if (r === null) return null;
+    const def = buildings.find((b) => b.id === pb.buildingId);
+    if (!def) return null;
+    const plain = tierAtValue(def, pb.baseValue, prestige);
+    const figure = (b: EffectiveBuilding) =>
+      b.type === "direct_producer" ? b.energy : b.effectiveValue;
+    const was = figure(plain);
+    const now = figure(r);
+    if (!(was > 0)) return null;
+    const ratio = now / was;
+    if (Math.abs(ratio - 1) < 1e-9) return null;
+    return ratio > 1 ? "up" : "down";
+  });
 }

@@ -1,4 +1,5 @@
 import type { PlacedBuilding } from "../types";
+import type { EffectiveBuilding } from "@reactor2/solver";
 import { findBuilding, levelValue } from "@reactor2/solver";
 import { wasteIsCovered } from "@reactor2/solver";
 
@@ -176,4 +177,169 @@ export function placementStatus(p: PlacedBuilding): PlacementStatus {
     return "idle";
   }
   return "active";
+}
+
+/**
+ * How hard a scored building is working, as a whole percentage of what its
+ * tile rated it for — the gauge the game prints over every building.
+ *
+ * One figure per role, and it is the one the game fills: the heat a reactor
+ * sends out, the heat a generator takes in (600 of 852 reads 70%), the cooling
+ * a cooler gives, the energy a direct producer makes. A generator is gauged by
+ * its *input* rather than its energy so a starved one still says how much heat
+ * is reaching it — its pad already says that none of it is turning into power.
+ *
+ * `rated` must come from the scorer (`ratedPlacements`), not the roster: the
+ * figure is only a fraction of the ceiling it was measured against.
+ */
+export function placementFillPercent(
+  p: PlacedBuilding,
+  rated: EffectiveBuilding,
+): number {
+  let used: number;
+  let max: number;
+  switch (rated.type) {
+    case "cooler":
+      used = p.coolingProvided;
+      max = rated.effectiveValue;
+      break;
+    case "reactor":
+      used = p.heatProduced;
+      max = rated.effectiveValue;
+      break;
+    case "generator":
+      used = p.heatConsumed;
+      max = rated.effectiveValue;
+      break;
+    case "direct_producer":
+      used = p.powerGenerated;
+      max = rated.energy;
+      break;
+  }
+  if (!(max > 0)) return 0;
+  return Math.max(0, Math.min(100, Math.round((used / max) * 100)));
+}
+
+/**
+ * What the game would call a placed building's state — the finer reading its
+ * status panel and board icons use, where `PlacementStatus` is the three-way
+ * one the pads and the readout's counts speak.
+ *
+ * Every case is the game's own term, defined by its own description text:
+ *
+ * - `offline` — nothing it can work with is adjacent. "Place a Generator on an
+ *   adjacent tile to power it up." A generator with no heat source beside it,
+ *   a reactor with no generator, a cooler with no power source.
+ * - `idle` — partners are adjacent but nothing flows, so it is not needed:
+ *   "Generators are nearby but don't need heat. They may be saturated."
+ * - `overheated` — a power source whose waste the cooling does not cover, and
+ *   which has shut down. (`starved`, in `PlacementStatus`.)
+ * - `wasting_heat` — a generator "running at full capacity, but nearby heat
+ *   producers are generating more heat than it can handle". The game only
+ *   says so once a reactor beside it leaves more than `WASTING_UNUSED_SHARE`
+ *   of its heat unsent: a reactor at 91% does not trip it.
+ * - `stable` / `online` — working: `stable` for a power source, `online` for
+ *   a reactor or cooler, as the game words it.
+ */
+export type GameStatus =
+  "offline" | "idle" | "overheated" | "wasting_heat" | "stable" | "online";
+
+/** Within this fraction of a ceiling counts as at it — float noise, not slack. */
+const AT_CAPACITY = 1e-6;
+
+/**
+ * How much of an adjacent reactor's heat has to go unsent before the game
+ * calls a full generator "wasting heat" — more than a tenth. Below that it
+ * still reads Stable, so a reactor at 91% use beside a full generator shows
+ * nothing.
+ */
+const WASTING_UNUSED_SHARE = 0.1;
+
+/**
+ * The game's state for each placement, aligned with `placements`.
+ *
+ * `rated` is `ratedPlacements` over the same rows — a generator is only at full
+ * capacity, and a reactor only has heat left over, against what its tile rated
+ * it for. `sharedCooling` is the Cryo Nexus pool, under which a cooler serves
+ * every power source on the board rather than its neighbours, so being offline
+ * is a question about the board and not about the tiles around it.
+ *
+ * Adjacency is the game's: the eight tiles around, corners included.
+ */
+export function gameStatuses(
+  placements: readonly PlacedBuilding[],
+  rated: readonly (EffectiveBuilding | null)[],
+  sharedCooling = false,
+): GameStatus[] {
+  const at = new Map<string, number>();
+  placements.forEach((p, i) => at.set(`${p.x},${p.y}`, i));
+  const roleOf = (i: number) =>
+    rated[i]?.type ?? findBuilding(placements[i].buildingId)?.type;
+
+  function neighbours(p: PlacedBuilding): number[] {
+    const out: number[] = [];
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const j = at.get(`${p.x + dx},${p.y + dy}`);
+        if (j !== undefined) out.push(j);
+      }
+    return out;
+  }
+
+  const isPowerSource = (i: number) => {
+    const r = roleOf(i);
+    return r === "generator" || r === "direct_producer";
+  };
+  const anyPowerSource = placements.some((_, i) => isPowerSource(i));
+
+  /** Whether anything this building can work with is in reach. */
+  function hasPartner(i: number): boolean {
+    const near = neighbours(placements[i]);
+    switch (roleOf(i)) {
+      case "generator":
+        return near.some((j) => roleOf(j) === "reactor");
+      case "reactor":
+        return near.some((j) => roleOf(j) === "generator");
+      case "cooler":
+        return sharedCooling ? anyPowerSource : near.some(isPowerSource);
+      default:
+        return false;
+    }
+  }
+
+  /** A full generator beside a reactor leaving over a tenth of its heat. */
+  function isWastingHeat(i: number): boolean {
+    const max = rated[i];
+    if (!max || max.type !== "generator" || !(max.effectiveValue > 0)) {
+      return false;
+    }
+    const full =
+      placements[i].heatConsumed >= max.effectiveValue * (1 - AT_CAPACITY);
+    if (!full) return false;
+    return neighbours(placements[i]).some((j) => {
+      const r = rated[j];
+      return (
+        r?.type === "reactor" &&
+        placements[j].heatProduced <
+          r.effectiveValue * (1 - WASTING_UNUSED_SHARE)
+      );
+    });
+  }
+
+  return placements.map((p, i) => {
+    switch (placementStatus(p)) {
+      case "starved":
+        return "overheated";
+      case "idle":
+        return hasPartner(i) ? "idle" : "offline";
+      case "active": {
+        const role = roleOf(i);
+        if (role === "generator" || role === "direct_producer") {
+          return isWastingHeat(i) ? "wasting_heat" : "stable";
+        }
+        return "online";
+      }
+    }
+  });
 }
