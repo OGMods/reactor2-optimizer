@@ -20,6 +20,50 @@ import {
 } from "./atlas";
 import { placementStatus, type PlacementStatus } from "../data/placements";
 import { pulseAlpha, STATUS_PULSE, type Pulse } from "./statusPulse";
+import { createStatusBadge } from "./statusBadge";
+import { createIconSprite } from "./atlas";
+import type { BoardIcon } from "../data/boardIcons";
+
+/**
+ * Where a badge sits over its building, in world pixels from the tile's
+ * centre: on the front of the building, low enough that it does not cover the
+ * roof of the one behind — where the game puts its own.
+ */
+const BADGE_OFFSET_Y = -TILE_HEIGHT * 0.55;
+
+/**
+ * Where the game's two building icons sit, and how wide, in world pixels from
+ * the tile's centre.
+ *
+ * Taken from the building prefab: `anomalyIcon` at (0, -0.073) and the
+ * not-working icon at (0.19, 0.118) under the building's visual root, at
+ * scales 0.12 and 0.15 of 128px / 102px art authored at 100px per unit. That
+ * puts the anomaly icon at the building's foot — the tile's front corner on
+ * screen — and the state icon up and to the right of its body. Converted at
+ * `PIXELS_PER_WORLD_UNIT`. `ICON_SCALE` is the knob for sizing them all at
+ * once; at 1 they are the size the prefab authors.
+ */
+const ICON_SCALE = 1.0;
+const ANOMALY_ICON = { x: 0, y: TILE_HEIGHT * 0.18, width: 31 * ICON_SCALE };
+const STATE_ICON_POS = {
+  x: TILE_WIDTH * 0.24,
+  y: -TILE_HEIGHT * 0.3,
+  width: 31 * ICON_SCALE,
+};
+
+/**
+ * What the painter draws over one building beyond its sprite and pad: the fill
+ * badge's figure, the anomaly icon at its foot and the state icon beside it.
+ * All are worked out by the caller — they come off the scorer and the board
+ * around the building, and neither is the renderer's job.
+ */
+export interface BuildingOverlay {
+  /** The badge's figure, or null for no badge. */
+  fill: number | null;
+  anomalyIcon: BoardIcon | null;
+  /** The game's state icon (`STATE_ICON`), or null over a working building. */
+  stateIcon: BoardIcon | null;
+}
 
 /**
  * The selection accent, as Pixi wants it.
@@ -91,6 +135,11 @@ interface TileStateCache {
    * frame key would have left the second with nothing to key on.
    */
   status: PlacementStatus | null;
+  /** The badge's figure, or null for no badge. */
+  fill: number | null;
+  anomalyIcon: BoardIcon | null;
+  /** The game's state icon (`STATE_ICON`), or null over a working building. */
+  stateIcon: BoardIcon | null;
 }
 
 function isIslandTile(tile?: Tile): boolean {
@@ -161,12 +210,14 @@ export class GridRenderer {
   private gridLinesContainer: Container;
   private propsContainer: Container;
   private ghostContainer: Container;
+  private badgeContainer: Container;
 
   private hoverHighlight: Graphics;
 
   private islandTileNodes: (Container | null)[][] = [];
   private gridTileNodes: (Container | null)[][] = [];
   private propTileNodes: (Container | null)[][] = [];
+  private badgeTileNodes: (Container | null)[][] = [];
 
   private stateCache: (TileStateCache | null)[][] = [];
 
@@ -220,11 +271,24 @@ export class GridRenderer {
     this.ghostContainer.sortableChildren = true;
     this.ghostContainer.eventMode = "none";
 
+    /*
+     * 5. Layer for building overlays: status icons and fill badges.
+     *
+     * Above the props rather than inside each tile's prop node: a badge is
+     * wider than its tile, and in a prop node the building in front would
+     * draw over the badge of the one behind. Depth-sorted among themselves so
+     * that, where two do overlap, the nearer one wins as it does in the game.
+     */
+    this.badgeContainer = new Container();
+    this.badgeContainer.sortableChildren = true;
+    this.badgeContainer.eventMode = "none";
+
     // Insertion order is draw order: ground, then the interactive grid,
-    // then props, then ghosts on top of everything.
+    // then props, then badges, then ghosts on top of everything.
     this.gridContainer.addChild(this.islandContainer);
     this.gridContainer.addChild(this.gridLinesContainer);
     this.gridContainer.addChild(this.propsContainer);
+    this.gridContainer.addChild(this.badgeContainer);
     this.gridContainer.addChild(this.ghostContainer);
 
     // Hover Highlight Overlay
@@ -248,6 +312,7 @@ export class GridRenderer {
     this.gridLinesContainer.destroy({ children: true });
     this.propsContainer.destroy({ children: true });
     this.ghostContainer.destroy({ children: true });
+    this.badgeContainer.destroy({ children: true });
   }
 
   public clear(): void {
@@ -267,11 +332,13 @@ export class GridRenderer {
     clearContainer(this.gridLinesContainer);
     clearContainer(this.propsContainer);
     clearContainer(this.ghostContainer);
+    clearContainer(this.badgeContainer);
     this.ghostKey = "";
 
     this.islandTileNodes = [];
     this.gridTileNodes = [];
     this.propTileNodes = [];
+    this.badgeTileNodes = [];
     this.stateCache = [];
     this.pulsing.clear();
   }
@@ -288,6 +355,7 @@ export class GridRenderer {
     this.islandTileNodes = Array.from({ length: gridHeight }, () => []);
     this.gridTileNodes = Array.from({ length: gridHeight }, () => []);
     this.propTileNodes = Array.from({ length: gridHeight }, () => []);
+    this.badgeTileNodes = Array.from({ length: gridHeight }, () => []);
     this.stateCache = Array.from({ length: gridHeight }, () =>
       Array(gridWidth).fill(null),
     );
@@ -329,6 +397,14 @@ export class GridRenderer {
         propNode.eventMode = "none";
         this.propTileNodes[y][x] = propNode;
         this.propsContainer.addChild(propNode);
+
+        // --- LAYER 5: Badge Container Node ---
+        const badgeNode = new Container();
+        badgeNode.position.set(isoPos.x, isoPos.y);
+        badgeNode.zIndex = depth;
+        badgeNode.eventMode = "none";
+        this.badgeTileNodes[y][x] = badgeNode;
+        this.badgeContainer.addChild(badgeNode);
       }
     }
 
@@ -336,18 +412,28 @@ export class GridRenderer {
     this.updateState(grid, gridWidth, gridHeight);
   }
 
-  /** Updates only changed layers per cell using state diffing */
+  /**
+   * Updates only changed layers per cell using state diffing.
+   *
+   * `overlays` is aligned with `placements` — each one's badge figure and
+   * anomaly icon (see `BuildingOverlay`) — or omitted for neither.
+   */
   public updateState(
     grid: Tile[][],
     gridWidth: number,
     gridHeight: number,
-    placements: PlacedBuilding[] = [],
+    placements: readonly PlacedBuilding[] = [],
+    overlays?: readonly BuildingOverlay[],
   ): void {
     // Map "x,y" coordinates to the placement itself for O(1) lookups — the
     // status pad needs its scored figures, not just which building it is.
     const placementMap = new Map<string, PlacedBuilding>();
-    for (const p of placements) {
+    const overlayMap = new Map<string, BuildingOverlay>();
+    for (let i = 0; i < placements.length; i++) {
+      const p = placements[i];
       placementMap.set(`${p.x},${p.y}`, p);
+      const overlay = overlays?.[i];
+      if (overlay) overlayMap.set(`${p.x},${p.y}`, overlay);
     }
 
     for (let y = 0; y < gridHeight; y++) {
@@ -365,6 +451,13 @@ export class GridRenderer {
           propFrameKey: TILE_IMAGE_MAP[tile.type] || null,
           buildingFrameKey: placed?.buildingId ?? null,
           status: placed ? placementStatus(placed) : null,
+          fill: placed ? (overlayMap.get(`${x},${y}`)?.fill ?? null) : null,
+          anomalyIcon: placed
+            ? (overlayMap.get(`${x},${y}`)?.anomalyIcon ?? null)
+            : null,
+          stateIcon: placed
+            ? (overlayMap.get(`${x},${y}`)?.stateIcon ?? null)
+            : null,
         };
 
         const prevState = this.stateCache[y][x];
@@ -376,7 +469,10 @@ export class GridRenderer {
           prevState.waterFrameKey === nextState.waterFrameKey &&
           prevState.propFrameKey === nextState.propFrameKey &&
           prevState.buildingFrameKey === nextState.buildingFrameKey &&
-          prevState.status === nextState.status
+          prevState.status === nextState.status &&
+          prevState.fill === nextState.fill &&
+          prevState.anomalyIcon === nextState.anomalyIcon &&
+          prevState.stateIcon === nextState.stateIcon
         ) {
           continue;
         }
@@ -389,14 +485,16 @@ export class GridRenderer {
     this.islandContainer.sortChildren();
     this.gridLinesContainer.sortChildren();
     this.propsContainer.sortChildren();
+    this.badgeContainer.sortChildren();
   }
 
   private renderTileVisuals(x: number, y: number, state: TileStateCache): void {
     const islandNode = this.islandTileNodes[y]?.[x];
     const gridNode = this.gridTileNodes[y]?.[x];
     const propNode = this.propTileNodes[y]?.[x];
+    const badgeNode = this.badgeTileNodes[y]?.[x];
 
-    if (!islandNode || !gridNode || !propNode) return;
+    if (!islandNode || !gridNode || !propNode || !badgeNode) return;
 
     const clearNode = (node: Container) => {
       while (node.children.length > 0) {
@@ -414,6 +512,7 @@ export class GridRenderer {
     clearNode(islandNode);
     clearNode(gridNode);
     clearNode(propNode);
+    clearNode(badgeNode);
 
     // 1. ISLAND & WATER LAYER
     if (state.islandFrameKey) {
@@ -510,6 +609,34 @@ export class GridRenderer {
           this.pulsing.set(`${x},${y}`, { sprite: buildingSprite, pulse });
           if (!this.animate) buildingSprite.alpha = pulse.minAlpha;
         }
+      }
+    }
+
+    /*
+     * 4. OVERLAYS — the game's two building icons and the fill badge, in the
+     * top layer so a taller neighbour in front cannot hide them. Drawn in the
+     * order the eye reads them: the anomaly icon at the foot, then the state
+     * icon, then the badge across the front, which may overlap both.
+     */
+    if (state.buildingFrameKey && state.status) {
+      if (state.anomalyIcon) {
+        const icon = createIconSprite(state.anomalyIcon, ANOMALY_ICON.width);
+        if (icon) {
+          icon.position.set(ANOMALY_ICON.x, ANOMALY_ICON.y);
+          badgeNode.addChild(icon);
+        }
+      }
+      if (state.stateIcon) {
+        const icon = createIconSprite(state.stateIcon, STATE_ICON_POS.width);
+        if (icon) {
+          icon.position.set(STATE_ICON_POS.x, STATE_ICON_POS.y);
+          badgeNode.addChild(icon);
+        }
+      }
+      if (state.fill !== null) {
+        const badge = createStatusBadge(state.fill, state.status);
+        badge.position.set(0, BADGE_OFFSET_Y);
+        badgeNode.addChild(badge);
       }
     }
   }

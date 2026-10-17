@@ -287,6 +287,25 @@ class UIState {
   }
 
   /**
+   * Whether each building wears the game's fill gauge ("70%") on the board.
+   *
+   * A switch because it is the one overlay that can crowd a large island at
+   * the fitted zoom; the state and anomaly icons stay regardless, since they
+   * are the board's only mark of *why* a building is in the state it is.
+   */
+  #fillBadges = $state<boolean>(uiStorage.loadPrefs().fillBadges);
+
+  get fillBadges(): boolean {
+    return this.#fillBadges;
+  }
+
+  setFillBadges(on: boolean) {
+    if (this.#fillBadges === on) return;
+    this.#fillBadges = on;
+    uiStorage.savePrefs({ fillBadges: on });
+  }
+
+  /**
    * Whether usage collection is off, or `null` for "follow the browser".
    *
    * The negative, matching gtag's `ga-disable-<id>`: the default is to

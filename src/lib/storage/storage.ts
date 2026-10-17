@@ -73,6 +73,12 @@ export interface UiPrefs {
    */
   haptics: boolean;
   /**
+   * Whether every building wears its fill badge ("70%") — see
+   * `uiState.fillBadges`. On by default: it is the game's own gauge, and the
+   * one place the board says how hard each building is working without a tap.
+   */
+  fillBadges: boolean;
+  /**
    * Whether usage collection is switched **off** — see
    * `uiState.analyticsDisabled`. The negative, because gtag's own switch is
    * `ga-disable-<id>` and the default is to collect.
@@ -91,6 +97,7 @@ const DEFAULT_UI_PREFS: UiPrefs = {
   statsCardCollapsed: false,
   solveMode: DEFAULT_SOLVE_MODE,
   haptics: true,
+  fillBadges: true,
   imageScale: 1,
 };
 

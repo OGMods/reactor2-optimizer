@@ -7,7 +7,15 @@
     uiState,
     viewportState,
   } from "../../state";
-  import { createPlacement } from "../../data/placements";
+  import {
+    createPlacement,
+    gameStatuses,
+    placementFillPercent,
+  } from "../../data/placements";
+  import { BUILDINGS, findBuilding } from "@reactor2/solver";
+  import { ratedPlacements, ratingShifts } from "../../simulation/simulator";
+  import { anomalyIconFor, STATE_ICON } from "../../data/boardIcons";
+  import type { BuildingOverlay } from "../../pixi/gridPainter";
   import { onMount, onDestroy, untrack } from "svelte";
   import { Application, Container, Rectangle } from "pixi.js";
   import { loadAtlas } from "../../pixi/atlas";
@@ -839,6 +847,55 @@
     recenterGrid();
   });
 
+  /*
+   * What each visible building wears beyond its sprite and pad, aligned with
+   * `visiblePlacements`.
+   *
+   * The badge figure is a fraction of what the scorer rated the building for on
+   * this board — the readout's ceiling, so a badge reading 70% and the card's
+   * `600 / 852` are one measurement — and only computed while the setting is
+   * on. The anomaly icon shows where the scorer rated the building off its
+   * plain tier, so it marks exactly the buildings an anomaly moved. Both rate
+   * the whole board in one pass, since a rule can rate a tile by what its
+   * neighbours are, and both take the rules from `layoutState` exactly as the
+   * readout does.
+   */
+  let buildingOverlays = $derived.by((): BuildingOverlay[] => {
+    const placements = uiState.visiblePlacements;
+    const grid = layoutState.grid;
+    const prestige = layoutState.placementPrestige;
+    const anomaly = layoutState.placementAnomaly;
+    // Rated unconditionally: the state icons need the ceilings as much as the
+    // gauges do — a generator is only "wasting heat" at full capacity.
+    const rated = ratedPlacements(
+      grid,
+      BUILDINGS,
+      placements,
+      prestige,
+      anomaly,
+    );
+    const states = gameStatuses(
+      placements,
+      rated,
+      anomaly.rule === "shared_cooling",
+    );
+    const showFill = uiState.fillBadges;
+    const shifts =
+      anomaly.rule === "baseline"
+        ? null
+        : ratingShifts(grid, BUILDINGS, placements, prestige, anomaly);
+    return placements.map((p, i) => {
+      const r = rated[i];
+      const role = findBuilding(p.buildingId)?.type;
+      return {
+        fill: showFill && r ? placementFillPercent(p, r) : null,
+        stateIcon: STATE_ICON[states[i]],
+        anomalyIcon:
+          shifts && role ? anomalyIconFor(anomaly, shifts[i], role) : null,
+      };
+    });
+  });
+
   $effect(() => {
     const curW = layoutState.width;
     const curH = layoutState.height;
@@ -848,6 +905,7 @@
     // inspector reads the same getter — so the card can never describe a
     // building that is not the one being drawn.
     const activePlacements = uiState.visiblePlacements;
+    const overlays = buildingOverlays;
 
     // Ghosts only while restore mode is on — see `editorState.restoreMode`.
     const ghosts = editorState.restoreMode
@@ -875,7 +933,13 @@
        * correctness depend on an accidental re-run. Both edges are plain
        * variables and the paint is spelled out.
        */
-      gridRenderer.updateState(currentGrid, curW, curH, activePlacements);
+      gridRenderer.updateState(
+        currentGrid,
+        curW,
+        curH,
+        activePlacements,
+        overlays,
+      );
       gridRenderer.setGhosts(ghosts);
     }
   });

@@ -37,6 +37,41 @@ path to the first frame.
 `indicator_idle`, and `STATUS_FRAME` in `gridPainter.ts` maps a
 `PlacementStatus` onto the last three.
 
+**Each building can wear three overlays, all in the game's own art**, drawn in
+the badge layer above the props so a taller neighbour in front cannot hide
+them. They are the game's `BuildingVisual` children, read out of its prefab:
+
+- **The state icon**: `SpritesDB`'s per-state sprite for the game's reading of
+  the building, `gameStatuses` in `data/placements.ts` — red triangle when
+  nothing it can work with is adjacent (_offline_: a generator with no heat
+  source beside it), zzz when partners are adjacent but do not need it
+  (_idle_), the warning thermometer for a power source shut down by its waste
+  (_overheated_), the gauge (the prefab's `ICON_wastingheatStatus`) for a full generator beside a
+  reactor leaving over a tenth of its heat (_wasting heat_), nothing over a building that is
+  fine. Each definition is the game's own description text, quoted there. This
+  is finer than `PlacementStatus`, which the pads, the pulse and the readout's
+  counts keep using — `STATE_ICON` in `data/boardIcons.ts` maps it to art.
+- **The anomaly icon** (`anomalyIconRenderer`) at the building's foot: whatever
+  the timeline's anomaly hands it — Singularity's boosted / downgraded icons,
+  Tidal's wave, Cryo's cooler icon. _Whether_ it shows is `ratingShifts` in the
+  simulator: the scorer rated the building off its plain tier. So the icon can
+  only appear where the figures it explains changed; `anomalyIconFor` only
+  picks _which_.
+- **The fill badge** (`pixi/statusBadge.ts`), switchable in Settings
+  (`uiState.fillBadges`): the game's `status_gauge` dial and "70%" on a
+  see-through pill. The figure is `placementFillPercent`, a fraction of what the
+  _scorer_ rated the building for (`ratedPlacements`), so it agrees with the
+  readout's `used / total`. Tinted with the status colours rather than the
+  game's one red, per the colour law; one shared `BitmapText` font, because a
+  `Text` per badge is a texture per badge.
+
+`PixiCanvas` computes all of it (`buildingOverlays`) and hands it to
+`updateState`; the painter does no scoring. The icons are loose files in
+`public/icons/` loaded with the atlas (`BOARD_ICONS`), written by the extractor's
+`CUSTOM_ICON_MAPPING` like every other badge — so a re-extract keeps them.
+Positions come from the prefab's transforms, converted at
+`PIXELS_PER_WORLD_UNIT` and enlarged by `ICON_SCALE`; see the comment there.
+
 **A building that is not working breathes.** The pad says _what_ is wrong in
 colour; the pulse says _that_ something is, and motion is what the eye finds
 without being told where to look. `STATUS_PULSE` and the raised-cosine

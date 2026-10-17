@@ -1,6 +1,12 @@
 <script lang="ts">
   import { uiState } from "../../state";
-  import { ChartColumn, ImageDown, Sparkles, Vibrate } from "lucide-svelte";
+  import {
+    ChartColumn,
+    Gauge,
+    ImageDown,
+    Sparkles,
+    Vibrate,
+  } from "lucide-svelte";
   import type { ImageScale } from "../../types/ui";
   import { EXPORT_MAX_SIDE_PX } from "../../pixi/boardExport";
   import ModalShell from "./ModalShell.svelte";
@@ -48,6 +54,12 @@
       : uiState.haptics
         ? "A short buzz when a building is placed or cleared."
         : "Placing and clearing buildings stay silent.",
+  );
+
+  let fillBadgesHint = $derived(
+    uiState.fillBadges
+      ? "Each building shows how hard it is working, as in the game."
+      : "Building figures stay in the readout; tap a building to see them.",
   );
 
   /*
@@ -109,6 +121,25 @@
           aria-checked={uiState.haptics}
           aria-labelledby="setting-haptics"
           onclick={() => uiState.setHaptics(!uiState.haptics)}
+        >
+          <span class="track"><span class="knob"></span></span>
+        </button>
+      </div>
+
+      <div class="setting">
+        <span class="icon"><Gauge size={16} /></span>
+
+        <span class="text">
+          <span class="name" id="setting-fill-badges">Building gauges</span>
+          <span class="hint">{fillBadgesHint}</span>
+        </span>
+
+        <button
+          class="switch"
+          role="switch"
+          aria-checked={uiState.fillBadges}
+          aria-labelledby="setting-fill-badges"
+          onclick={() => uiState.setFillBadges(!uiState.fillBadges)}
         >
           <span class="track"><span class="knob"></span></span>
         </button>

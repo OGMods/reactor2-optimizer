@@ -23,7 +23,11 @@
  *   is a finer partition than the island.
  */
 import { describe, it, expect } from "vitest";
-import { ratedPlacementAt, simulatePlacedBuildings } from "./simulator";
+import {
+  ratedPlacementAt,
+  ratingShifts,
+  simulatePlacedBuildings,
+} from "./simulator";
 import {
   getAnomaly,
   type RoleIsolationAnomaly,
@@ -613,5 +617,70 @@ describe("a rated ceiling is what the row beside it was measured against", () =>
     expect(
       ratedPlacementAt(grid, DEFS, place(spec), 99, 0, undefined, none),
     ).toBeNull();
+  });
+});
+
+describe("a rating shift marks exactly the buildings the rules moved", () => {
+  const TIDAL = getAnomaly("tidal_ascendancy") as TerrainAffinityAnomaly;
+  const CRYO = getAnomaly("cryo_nexus");
+  const SINGULARITY = getAnomaly("singularity_isolation");
+
+  /** Rock round the edge, so only the tiles touching `water` are waterside. */
+  function walledGrid(w: number, h: number, water: [number, number][] = []) {
+    const grid = grassGrid(w, h);
+    for (const row of grid)
+      for (const t of row)
+        if (t.x === 0 || t.y === 0 || t.x === w - 1 || t.y === h - 1)
+          t.type = "rock";
+    for (const [x, y] of water) grid[y][x].type = "water";
+    return grid;
+  }
+
+  const shiftsOf = (grid: Tile[][], spec: Spec, anomaly: AnomalyDefinition) =>
+    ratingShifts(grid, DEFS, place(spec), undefined, anomaly);
+
+  it("leaves every building alone under the base rules", () => {
+    const spec: Spec = [
+      [1, 1, "reactor", VALUES.reactor],
+      [2, 1, "generator", VALUES.generator],
+      [3, 1, "cooler", VALUES.cooler],
+    ];
+    expect(shiftsOf(walledGrid(6, 3), spec, getAnomaly(undefined))).toEqual([
+      null,
+      null,
+      null,
+    ]);
+  });
+
+  it("raises a waterside building under Tidal, and only that one", () => {
+    // Water at (1,1); the reactor beside it is waterside, the far one is not.
+    const grid = walledGrid(8, 3, [[1, 1]]);
+    const spec: Spec = [
+      [2, 1, "reactor", VALUES.reactor],
+      [6, 1, "reactor", VALUES.reactor],
+    ];
+    expect(TIDAL.multiplier).toBeGreaterThan(1);
+    expect(shiftsOf(grid, spec, TIDAL)).toEqual(["up", null]);
+  });
+
+  it("raises a lone generator and lowers two that touch, under Singularity", () => {
+    const spec: Spec = [
+      [1, 1, "generator", VALUES.generator],
+      [5, 1, "generator", VALUES.generator],
+      [6, 1, "generator", VALUES.generator],
+    ];
+    expect(shiftsOf(walledGrid(9, 3), spec, SINGULARITY)).toEqual([
+      "up",
+      "down",
+      "down",
+    ]);
+  });
+
+  it("moves every cooler under Cryo Nexus, and nothing else", () => {
+    const spec: Spec = [
+      [1, 1, "reactor", VALUES.reactor],
+      [2, 1, "cooler", VALUES.cooler],
+    ];
+    expect(shiftsOf(walledGrid(5, 3), spec, CRYO)).toEqual([null, "down"]);
   });
 });

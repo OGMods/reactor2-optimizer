@@ -2,6 +2,7 @@ import { Assets, Texture, Spritesheet, Sprite } from "pixi.js";
 import { PIXELS_PER_WORLD_UNIT } from "../utils/isoMath";
 import { asset } from "../utils/assetUrl";
 import type { TileType } from "../types";
+import { BOARD_ICONS, type BoardIcon } from "../data/boardIcons";
 
 /** Which atlas frame draws the prop sitting on each obstacle tile. */
 export const TILE_IMAGE_MAP: Partial<Record<TileType, string>> = {
@@ -32,6 +33,16 @@ export const GROUND_TILING_FRAMES = {
 
 let spritesheet: Spritesheet | null = null;
 const textureCache: Record<string, Texture> = {};
+
+/**
+ * The per-building status icons, loaded beside the sheet.
+ *
+ * Loose files rather than atlas frames because the sheet is packed by the
+ * external extractor and these are UI badges off the game's icon sheets, which
+ * it ships to `public/icons/` like every other badge. Fetched as part of the
+ * same load so a board never draws a frame with a building's state missing.
+ */
+const iconTextures: Partial<Record<BoardIcon, Texture>> = {};
 
 /** The atlas description, and through `meta.image` the sheet beside it. */
 const ATLAS_JSON = "data/web_atlas.json";
@@ -100,7 +111,14 @@ async function fetchAtlas(): Promise<void> {
   const texture: Texture = await Assets.load(imagePath);
 
   spritesheet = new Spritesheet(texture, atlasData);
-  await spritesheet.parse();
+  await Promise.all([
+    spritesheet.parse(),
+    ...BOARD_ICONS.map(async (name) => {
+      iconTextures[name] = await Assets.load<Texture>(
+        asset(`icons/${name}.webp`),
+      );
+    }),
+  ]);
 
   Object.values(FRAME_KEYS).forEach((frameName) => {
     if (spritesheet?.textures[frameName]) {
@@ -156,5 +174,23 @@ export function createScaledSprite(
     sprite.position.set(offsetX, offsetY);
   }
 
+  return sprite;
+}
+
+/**
+ * A board icon, centred on its own origin and scaled so its longer side is
+ * `sizePx` world pixels — the state thermometers are tall and narrow, and
+ * sized by width they came out twice the height of the round icons beside
+ * them. Null until the load that fetches it has landed.
+ */
+export function createIconSprite(
+  name: BoardIcon,
+  sizePx: number,
+): Sprite | null {
+  const texture = iconTextures[name];
+  if (!texture) return null;
+  const sprite = new Sprite(texture);
+  sprite.anchor.set(0.5);
+  sprite.scale.set(sizePx / Math.max(texture.width, texture.height));
   return sprite;
 }
