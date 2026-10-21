@@ -173,6 +173,31 @@ function layoutFor(
 }
 
 /**
+ * The total power of a board that is not on screen — one of the islands the
+ * header adds up, or a game board as it was imported.
+ *
+ * Its own context rather than `contextFor`'s: that cache holds one board, the
+ * one being edited, and walking eight islands through it would evict it eight
+ * times over and make the next edit pay to rebuild it. Callers here run on a
+ * change of island or roster, not on every edit, and memoise the answer.
+ */
+export function boardPower(
+  grid: Tile[][],
+  buildings: readonly BuildingDefinition[],
+  placedBuildings: readonly PlacedBuilding[],
+  prestige?: PrestigeScales,
+  anomaly: AnomalyDefinition = getAnomaly(undefined),
+): number {
+  if (!grid?.length || !grid[0]?.length || placedBuildings.length === 0) {
+    return 0;
+  }
+  const ctx = buildIslandContext(grid, undefined, anomaly);
+  if (ctx.n === 0) return 0;
+  const { placement } = layoutFor(ctx, buildings, placedBuildings, prestige);
+  return simulateIsland(placement, ctx).totalPower;
+}
+
+/**
  * Returns the given placements with every derived figure filled in, in the same
  * order they arrived. A placement on a tile that cannot be built on, or naming
  * a building the catalogue does not have, keeps its zeroes.

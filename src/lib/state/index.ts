@@ -1,5 +1,5 @@
 /**
- * Six runes singletons, split by what the state *is* rather than which
+ * Seven runes singletons, split by what the state *is* rather than which
  * component happens to read it:
  *
  *   editor   — the paintbrush: active tool, selected building
@@ -7,6 +7,7 @@
  *   config   — the roster: which components are unlocked, and to what level
  *   solver   — the optimizer run: status, streaming result, stop handle
  *   viewport — the device: width class and pointer type, from matchMedia
+ *   timeline — every island's power at once, and the game's Chronon count
  *   ui       — the interface: what's open, what's being inspected
  *
  * They reference each other directly rather than through events; this app is
@@ -70,4 +71,5 @@ export { viewportState } from "./viewport.svelte";
 export { layoutState } from "./layout.svelte";
 export { configState } from "./config.svelte";
 export { solverState } from "./solver.svelte";
+export { timelineState } from "./timeline.svelte";
 export { uiState } from "./ui.svelte";

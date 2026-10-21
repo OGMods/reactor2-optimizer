@@ -30,6 +30,7 @@ export * from "./solver/solver";
 
 export * from "./data/anomalies";
 export * from "./data/buildings";
+export * from "./data/chronons";
 export * from "./data/effectiveBuildings";
 export * from "./data/gameImport";
 export * from "./data/maps";

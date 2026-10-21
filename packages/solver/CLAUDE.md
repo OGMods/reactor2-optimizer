@@ -79,6 +79,17 @@ by `HeatProducerBuildingSO`. That is why Infinite Grid goes out of its way to
 name turbines. The rule is "every heat producer", and a reactor is the only one
 the game ships, so it is modelled as reactors.
 
+### Chronons
+
+`data/chronons.ts` is the one place the game's Chronon award lives: the formula,
+its inverse (`energyForAward`), the jump threshold by generation, the first-entry
+bonus and `projectTimeline`, which runs a game export's section 7 forward from its
+`exportedAt`. Chronon Reactor's multiplier is carried there rather than in
+`PRESTIGE_UPGRADES`, which holds only research a layout can feel. Island power is
+energy **per tick** (`TICK_SECONDS` = 3). `tests/chronons.test.ts` holds the
+formula to the award the game wrote into every 1.1.11 sample, and the projection
+to a live reading taken on a player's save.
+
 ### Anomalies
 
 Prestiging also picks an **anomaly** that changes the rules for the whole next

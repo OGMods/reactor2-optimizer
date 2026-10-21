@@ -10,6 +10,7 @@ import {
   formatNumberForFilename,
   isGameExportCode,
   resolveGameExport,
+  type GameExport,
   type InProgressMode,
   type ResolvedGameImport,
 } from "@reactor2/solver";
@@ -24,6 +25,7 @@ import { evaluatePlan, type PlanReport } from "../simulation/upgradePlan";
 import { configState } from "./config.svelte";
 import { layoutState } from "./layout.svelte";
 import { solverState } from "./solver.svelte";
+import { timelineState } from "./timeline.svelte";
 import { viewportState } from "./viewport.svelte";
 
 /** A tile the inspector can point at. Internal — nothing outside builds one. */
@@ -455,6 +457,12 @@ class UIState {
    * asking to replace anything. Null for anything else in the box.
    */
   gameImport = $state<ResolvedGameImport | null>(null);
+  /**
+   * The same code as the game wrote it. The resolver translates what a board
+   * needs and drops the rest — the economy research, the timeline — which
+   * `timelineState.recordImport` keeps.
+   */
+  #gameExport: GameExport | null = null;
   /** What the import does with research still running in the game. */
   gameImportMode = $state<InProgressMode>("plan");
   /** Orders reads of the box, so a slow decode cannot land over a newer paste. */
@@ -1042,6 +1050,7 @@ class UIState {
     this.importError = null;
     this.isImporting = false;
     this.gameImport = null;
+    this.#gameExport = null;
     this.activeModal = "import";
   }
 
@@ -1054,16 +1063,20 @@ class UIState {
     const seq = ++this.#gameReadSeq;
     if (!isGameExportCode(code)) {
       this.gameImport = null;
+      this.#gameExport = null;
       return;
     }
     try {
-      const resolved = await resolveGameExport(await decodeGameExport(code));
+      const exp = await decodeGameExport(code);
+      const resolved = await resolveGameExport(exp);
       if (seq !== this.#gameReadSeq) return;
+      this.#gameExport = exp;
       this.gameImport = resolved;
       this.importError = null;
     } catch (err) {
       if (seq !== this.#gameReadSeq) return;
       this.gameImport = null;
+      this.#gameExport = null;
       this.importError =
         err instanceof Error ? err.message : "That code could not be read.";
     }
@@ -1080,7 +1093,8 @@ class UIState {
    */
   async applyGameImport() {
     const resolved = this.gameImport;
-    if (!resolved || this.isImporting) return;
+    const exp = this.#gameExport;
+    if (!resolved || !exp || this.isImporting) return;
     this.isImporting = true;
     this.importError = null;
     try {
@@ -1099,9 +1113,11 @@ class UIState {
       // Every stored solve was found under the old roster: keep each one the
       // import left buildable, re-scored, before restore() reads the store.
       await solverState.carryOverSolves(resolved.lockedTemplateIds);
+      await timelineState.recordImport(exp, resolved);
       this.activeModal = null;
       this.importCode = "";
       this.gameImport = null;
+      this.#gameExport = null;
       solverState.restore();
       this.closeInspector();
       this.recenterCanvas();

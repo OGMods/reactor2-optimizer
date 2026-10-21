@@ -392,6 +392,25 @@ apply them, and the cooling network. The in-game description text is not the
 authority: several of its lines have more than one consistent reading, and where
 it and the code differ, what is written here is the code.
 
+### What a Time Jump pays
+
+A jump pays Chronons for the energy the timeline produced, online and offline:
+
+```
+Chronons = max(1, floor(97.34 × (E / 2.82e16)^0.135 × M)) + B
+```
+
+`M` is the Chronon Reactor research's multiplier (×1.05 to ×1.25), and `B` is
+88 the first time a timeline runs under a given anomaly, otherwise 0 — added
+after the multiplier, not through it. At zero energy the award is 0. A jump is
+allowed once the award without `B` reaches
+`min(5000, round(88 × 1.15^jumps completed))`: 88, 101, 116, 134 …
+
+**Layout power barely moves the count.** At an exponent of 0.135, doubling a
+whole timeline's energy pays about 9.8% more Chronons; what layout power buys is
+_when_ the next one arrives. The board's power is energy per 3-second tick.
+`packages/solver/src/data/chronons.ts` holds the formula.
+
 ---
 
 ## Time Lab Research

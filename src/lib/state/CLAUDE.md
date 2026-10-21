@@ -1,6 +1,6 @@
 # CLAUDE.md — state layer and board rules
 
-Loaded when working under `src/lib/state/`. The six stores and the dependency
+Loaded when working under `src/lib/state/`. The seven stores and the dependency
 DAG between them are summarised in the root `CLAUDE.md`.
 
 ## The Time Lab and anomalies: the app side
@@ -284,6 +284,43 @@ the board it is solving is no longer the one being looked at.
 duration afterwards (`lastRunDurationMs`, `finishedAt`). The solve has a
 five-minute ceiling, streams its result and shows no progress bar, so without a
 clock nothing separates "four seconds in" from "about to time out".
+
+### `timelineState` (`timeline.svelte.ts`)
+
+The game as a whole, for the header's `TimelineStatus`: every island's power at
+once, and where the Chronon count stands. **Two figures from two sources, and
+keeping them apart is the point.**
+
+- **`totalPower` is the boards here, live.** The island on screen counts from
+  its scored placements; every other game island from its saved layout, re-scored
+  by `refreshIslands` through the simulator's `boardPower` under the current
+  roster, research and anomaly. That one builds its own island context, because
+  the simulator's cache holds one board — the one being edited — and walking
+  eight islands through it would evict it each time. Answers are memoised by
+  board code and rules, and the board on screen is skipped, since it is re-saved
+  after every paint. Custom islands and a previewed layout are not counted.
+- **`projection` is the game's, run forward.** It is the last import's timeline
+  carried from `exportedAt` to `now` at `record.energyPerTick` — the power the
+  game's own boards made, scored at import from the _resolved_ levels rather than
+  whatever the in-progress mode counted as bought. An edit here changes nothing in
+  the game, so it must not move the count; a re-import is what reconciles the two.
+  The formula, the inverse and the jump threshold are the package's
+  (`data/chronons.ts`); island power is energy **per 3-second tick**, which a live
+  save confirmed to the second.
+
+**`record` is the import as the game had it** — `SavedGameImport` under the
+`game_import` key. The roster and boards are edited away after an import; this is
+what survives, for the tools that need the game's truth: the full research map
+(economy and Time Lab, which `configState` never holds), research in progress,
+obstacles being cleared, each island's board as a blueprint (the start of a move
+list), the export and import times, and the timeline — whose cash (signed:
+negative on build credit) and research points are what the cost-aware tools will
+read. `uiState.applyGameImport`
+writes it through `recordImport`, after the import has landed. A record from a
+format version this build cannot read is dropped; the next import rewrites it.
+
+`now` ticks once a second only while something shows a timeline:
+`startClock()` returns its own stop, for a component's `$effect` to hand back.
 
 ### `viewportState` (`viewport.svelte.ts`)
 

@@ -45,6 +45,23 @@ export function formatTimeAgo(
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
+/**
+ * A span of game time, to its two largest units: "13d 4h", "4h 17m",
+ * "4m 02s", "37s". For timeline lengths and countdowns, where the game itself
+ * reads in days and hours and a countdown in minutes needs its seconds.
+ */
+export function formatSpan(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec.toString().padStart(2, "0")}s`;
+  return `${sec}s`;
+}
+
 // ---------------------------------------------------------------------------
 // Tile coordinates
 // ---------------------------------------------------------------------------
