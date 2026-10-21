@@ -11,11 +11,11 @@ The app-side half — how `layoutState`, `configState`, `AnomalySelector` and
 
 ### Time Lab research
 
-`PRESTIGE_UPGRADES` (`data/prestige.ts`) carries **three** of the game's eleven
+`PRESTIGE_UPGRADES` (`data/prestige.ts`) carries **three** of the game's twelve
 researches: Absolute Zero (cooler cooling), Infinite Grid (generator and wind
-turbine stats) and Stellar Forge (reactor heat). The other eight move research
-income, research time, chronons, obstacle-removal, energy sale price and
-building prices — all
+turbine stats) and Stellar Forge (reactor heat). The other nine move research
+income, research time, chronons, obstacle-removal, energy sale price,
+building prices and the City level a timeline starts at — all
 decided _before_ the solver is handed a board, so none can change which layout
 is best. The file names them so it is clear they were read and dismissed.
 
@@ -423,7 +423,7 @@ CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
 they are bought with Chronons, survive a Time Jump, and stack with whatever
 anomaly is running — **multiplicatively**, so a generator under Singularity
 Isolation with Infinite Grid maxed is rated x8. The extractor's record covers
-all eleven Time Lab upgrades; the three a layout can see are **Stellar Forge**
+all twelve Time Lab upgrades; the three a layout can see are **Stellar Forge**
 (every heat producer, so reactors), **Infinite Grid** (generators _and_ wind
 turbines), and **Absolute Zero** (every cooler), each ten levels of
 `BonusPercentage`. Absolute Zero and Infinite Grid share one curve, 0.1 to 1.0

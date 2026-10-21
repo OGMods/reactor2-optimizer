@@ -227,6 +227,18 @@ the unchanged search across three seeds, because `powerPerTile` orders a greedy 
 later stages rewrite, so skewing it toward the coast mostly changes which tiles are claimed first.
 Don't re-attempt either without a wider measurement.
 
+**What did pay is a second seed with the top reactor one tier down** (`TIER_STEP`, the ×1.25 every
+reactor steps by), rewritten in the real roster's buildings and kept when it stabilizes higher —
+the move an upgrade plan already makes with today's tiers, and how it was found: a player's plan
+run beat their plain one. On their board (Tidal legacy plus research) that seed stabilizes at
+15.39AD against 13.95AD and wins every attempt; over 48 attempts at 20s the median rose from
+19.58–19.63AD to 19.69–19.74AD and the worst from 19.32–19.41AD to 19.42–19.53AD, the best
+unchanged. On the shipped maps it wins the seed comparison on every main island and moves nothing at the end:
+maps 3, 5–8 under both Tidal variants, 30 attempts each, medians within ±0.04AD in both directions;
+under the base rules the same, and on the player's board with the anomaly off the runs were
+identical. So it is gated to a terrain bonus, where it was measured to help, and costs one seed
+construction there; a plan run already has its own second seed and skips it.
+
 `role_isolation` is resolved in `simulateIsland`, the one place a whole layout is in hand. It
 copies the placement into `ctx.ratedLayout` — held by the island, not allocated per call — re-rates
 the affected role's tiles and reads every figure through that. Two details are load-bearing: the
@@ -857,10 +869,10 @@ Import dialog to see the board.
 code writer all three paths go through and it always passes `blueprintRules`, so the app's preview
 rates a CLI layout the way the run did rather than under the reader's own timeline — a
 coast-hugging Tidal board would otherwise come back at roughly its baseline figure with nothing
-saying why. The research table it writes is **empty rather than absent**, which is a different
-claim and a true one: the CLI solves at full unlocks and no Time Lab, and there is no flag for one,
-so "the author had no research" is exactly what it knows, where an absent section would mean "rules
-unknown". `--anomaly` also tags the filename (`test_4_tidal_ascendancy.txt`) and every header names
+saying why. The research table it writes is the run's: a `--code` board's own, otherwise **empty
+rather than absent**, which is a different claim and a true one — a shipped map is solved with no
+Time Lab, so "the author had no research" is exactly what it knows, where an absent section would
+mean "rules unknown". `--anomaly` also tags the filename (`test_4_tidal_ascendancy.txt`) and every header names
 the timeline, because a `solves/` directory or a session scrollback holding three timelines is
 otherwise unreadable from the outside — the same argument `formatNumberForFilename` makes about the
 power figure. The tag is the full id, so a filename pastes straight back into the flag that
@@ -869,7 +881,14 @@ matches the optional tail, since that regex is what finds the previous ids: a ta
 could not see would restart numbering at 1 and overwrite an untagged run.
 
 `--attempts` runs a batch session: N whole solves through a worker pool, with a leaderboard of
-distinct layouts at the end. Ctrl-C stops it and still prints the report.
+distinct layouts at the end and the worst, median and best of every attempt — the spread is what
+tells two settings apart when both reach the same best. Ctrl-C stops it and still prints the report.
+
+Three flags reproduce a player's setup rather than a shipped one. `--code BLUEPRINT` solves a
+pasted board, taking its anomaly (unless `--anomaly` is given) and its Time Lab research from the
+code's rules section. `--tier ID=LEVEL` holds a building below its last tier, and `--plan
+ID=LEVEL` adds an upgrade-plan step, in buying order and resolved by `resolveUpgradePlan` exactly
+as the app does; both count levels from 1, like the app's tier buttons.
 
 Cores are spent on two axes and the flags pick which. A **run** farms its islands out to the pool,
 each with its own slice (`islandBudgetsS`) of the budget. When every island has a worker of its

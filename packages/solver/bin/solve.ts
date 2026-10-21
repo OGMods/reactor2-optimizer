@@ -32,8 +32,18 @@ import os from "node:os";
 import path from "node:path";
 
 import { ANOMALIES, DEFAULT_ANOMALY_ID } from "../src/data/anomalies";
-import { BUILDINGS, allUpgradesUnlocked } from "../src/data/buildings";
+import {
+  BUILDINGS,
+  allUpgradesUnlocked,
+  findBuilding,
+} from "../src/data/buildings";
 import { getEffectiveBuildings } from "../src/data/effectiveBuildings";
+import {
+  MAX_UPGRADE_STEPS,
+  resolveUpgradePlan,
+  type UpgradeStep,
+} from "../src/data/upgradePlan";
+import { prestigeScales } from "../src/data/prestige";
 import {
   blueprintKey,
   blueprintRules,
@@ -138,6 +148,18 @@ function offsetSeed(
   return (seed + index * SEED_STRIDE) >>> 0;
 }
 
+/**
+ * What the player holds beyond the unlocked tiers: Time Lab research and an
+ * upgrade plan. Carried as one value so each solve path takes one more
+ * argument rather than two.
+ */
+interface Progress {
+  /** Research levels, keyed and indexed like the player's own record. */
+  research: Record<string, number>;
+  /** The plan's rosters before its target, today's first — `resolveUpgradePlan`'s `along`. */
+  upgradePlan: Record<string, number>[];
+}
+
 // --- Solving -------------------------------------------------------------
 
 /**
@@ -156,6 +178,7 @@ async function solveWithPool(
   timeBudgetS: number,
   seed: number | undefined,
   anomalyId: AnomalyId | undefined,
+  progress: Progress,
   pool: WorkerPool | null,
 ): Promise<OptimizationResult> {
   const plan = planSolve(
@@ -165,6 +188,8 @@ async function solveWithPool(
     timeBudgetS,
     seed,
     anomalyId,
+    prestigeScales(progress.research),
+    progress.upgradePlan,
   );
   if (!plan || plan.islands.length < 2 || !pool || pool.size < 2)
     return solve(
@@ -172,7 +197,11 @@ async function solveWithPool(
       [...BUILDINGS],
       unlockedUpgrades,
       timeBudgetS,
-      { anomalyId },
+      {
+        anomalyId,
+        prestige: prestigeScales(progress.research),
+        upgradePlan: progress.upgradePlan,
+      },
       seed,
     );
 
@@ -198,6 +227,7 @@ async function solveWithPool(
         // resolved it, and a worker re-resolving would be a second reading of
         // the same string.
         anomaly: plan.anomaly,
+        upgradeSteps: plan.upgradeSteps,
       },
     })),
     (i, result) => {
@@ -217,10 +247,10 @@ async function solveWithPool(
  * would come back at roughly its baseline figure with nothing on screen saying
  * why.
  *
- * The research table is **empty rather than absent**, which is a truthful
- * statement and not the same claim: the CLI solves at full building unlocks and
- * no Time Lab (there is no flag for one), so "the author had no research" is
- * exactly what it knows. `DEFAULT_ANOMALY_ID` spells the absence of `--anomaly`
+ * The research table is the one the run solved under — a `--code` board's own,
+ * otherwise **empty rather than absent**, which is a truthful statement and not
+ * the same claim: "the author had no research" is exactly what the CLI knows
+ * about a shipped map. `DEFAULT_ANOMALY_ID` spells the absence of `--anomaly`
  * for the same reason — "no anomaly" is a real choice, and stating it is what
  * keeps a reader off their own.
  */
@@ -228,12 +258,13 @@ async function codeFor(
   grid: Tile[][],
   result: OptimizationResult,
   anomalyId: AnomalyId | undefined,
+  research: Record<string, number>,
 ): Promise<string> {
   return encodeBlueprint(
     grid,
     result.placements,
     placementTiers(result.placements),
-    blueprintRules(anomalyId ?? DEFAULT_ANOMALY_ID, {}),
+    blueprintRules(anomalyId ?? DEFAULT_ANOMALY_ID, research),
   );
 }
 
@@ -264,10 +295,15 @@ async function solveMap(
   filenameFor: (run: SolveRun, bestPower: number) => string,
   seed: number | undefined,
   anomalyId: AnomalyId | undefined,
+  progress: Progress,
   pool: WorkerPool | null,
 ): Promise<SolveRun[]> {
   const { grid } = await decodeBlueprint(gameMap.code);
-  const roster = getEffectiveBuildings(BUILDINGS, unlockedUpgrades);
+  const roster = getEffectiveBuildings(
+    BUILDINGS,
+    unlockedUpgrades,
+    prestigeScales(progress.research),
+  );
   const results: SolveRun[] = [];
 
   for (let runNum = 1; runNum <= runs; runNum++) {
@@ -279,13 +315,14 @@ async function solveMap(
       timeLimitS,
       offsetSeed(seed, runNum - 1),
       anomalyId,
+      progress,
       pool,
     );
     results.push({
       runNum,
       result,
       elapsedS: (Date.now() - started) / 1000,
-      code: await codeFor(grid, result, anomalyId),
+      code: await codeFor(grid, result, anomalyId, progress.research),
     });
   }
 
@@ -307,6 +344,7 @@ async function runSingle(
   timeLimitS: number,
   seed: number | undefined,
   anomalyId: AnomalyId | undefined,
+  progress: Progress,
   pool: WorkerPool | null,
 ): Promise<void> {
   const testId = nextOutputId(TEST_FILENAME_RE);
@@ -320,6 +358,7 @@ async function runSingle(
     () => filename,
     seed,
     anomalyId,
+    progress,
     pool,
   );
 
@@ -338,6 +377,7 @@ async function runComparison(
   timeLimitS: number,
   seed: number | undefined,
   anomalyId: AnomalyId | undefined,
+  progress: Progress,
   pool: WorkerPool | null,
 ): Promise<void> {
   const sessionId = nextOutputId(ISLAND_FILENAME_RE);
@@ -361,6 +401,7 @@ async function runComparison(
       filenameFor,
       seed,
       anomalyId,
+      progress,
       pool,
     );
 
@@ -382,10 +423,15 @@ function workerCount(attempts: number, requested?: number): number {
 async function runSession(
   gameMap: CliMap,
   unlockedUpgrades: Record<string, number>,
+  progress: Progress,
   args: Args,
 ): Promise<SessionReport> {
   const { grid } = await decodeBlueprint(gameMap.code);
-  const roster = getEffectiveBuildings(BUILDINGS, unlockedUpgrades);
+  const roster = getEffectiveBuildings(
+    BUILDINGS,
+    unlockedUpgrades,
+    prestigeScales(progress.research),
+  );
   const attempts = args.attempts!;
   const inFlight = workerCount(attempts, args.workers);
   const board = new Leaderboard(args.top);
@@ -429,6 +475,8 @@ async function runSession(
         timeLimitS: args.timeLimitS,
         seed: offsetSeed(args.seed, i),
         anomalyId: args.anomalyId,
+        prestige: prestigeScales(progress.research),
+        upgradePlan: progress.upgradePlan,
       },
     })),
     (attempt, raw) => {
@@ -447,7 +495,7 @@ async function runSession(
           power: result.totalPower,
           attempt,
           activeTiles: result.activeTilesCount,
-          code: await codeFor(grid, result, args.anomalyId),
+          code: await codeFor(grid, result, args.anomalyId, progress.research),
           key: blueprintKey(grid, result.placements),
         };
         board.offer(candidate);
@@ -472,10 +520,11 @@ async function runSession(
 async function runSessions(
   gameMaps: CliMap[],
   unlockedUpgrades: Record<string, number>,
+  progress: Progress,
   args: Args,
 ): Promise<number> {
   for (const gameMap of gameMaps) {
-    const report = await runSession(gameMap, unlockedUpgrades, args);
+    const report = await runSession(gameMap, unlockedUpgrades, progress, args);
     printSessionReport(report);
     // Ctrl-C stops the session it was pressed in; it does not mean "move on to
     // the next map", which on `--all` would be another half hour away.
@@ -496,11 +545,18 @@ interface Args {
   workers: number | undefined;
   seed: number | undefined;
   anomalyId: AnomalyId | undefined;
+  /** Tiers held below the last, 0-based like `unlockedUpgrades`. */
+  tiers: Record<string, number>;
+  /** The upgrade plan, in buying order. */
+  plan: UpgradeStep[];
+  /** A pasted board to solve instead of a shipped map. */
+  code: string | undefined;
 }
 
 const USAGE = `usage: solve [-h] [--map NUM] [--all] [--runs RUNS] [--time TIME_LIMIT_S]
              [--attempts N] [--top K] [--workers N] [--seed SEED]
-             [--anomaly ID]
+             [--anomaly ID] [--tier ID=LEVEL] [--plan ID=LEVEL]
+             [--code BLUEPRINT]
 
 Decode a map, solve it, and report on the result.
 
@@ -522,6 +578,20 @@ options:
                  One of: ${ANOMALIES.map((a) => a.id).join(", ")}.
                  Only the rules the solver implements take effect; the rest are
                  accepted and ignored, exactly as in the app.
+  --tier ID=LEVEL
+                 hold a building below its last tier (repeatable). LEVEL counts
+                 from 1, like the app's tier buttons; every building not named
+                 is fully upgraded
+  --plan ID=LEVEL
+                 one step of an upgrade plan (repeatable, in buying order, at
+                 most ${MAX_UPGRADE_STEPS}): the run scores at the tiers after the last
+                 step and keeps only layouts that also run at --tier's tiers
+                 and after each step, exactly as the app's upgrade plan does
+  --code BLUEPRINT
+                 solve a pasted board instead of a shipped map. Its rules
+                 section, when it has one, supplies the anomaly (unless
+                 --anomaly is given) and the Time Lab research; placements
+                 on it are ignored
 
 This renders no picture. Each run writes its blueprint code to solves/, named
 after what it found and after the anomaly it found it under; paste one into the
@@ -539,6 +609,9 @@ function parseArgs(argv: string[]): Args | null {
     workers: undefined,
     seed: undefined,
     anomalyId: undefined,
+    tiers: {},
+    plan: [],
+    code: undefined,
   };
 
   const takeValue = (
@@ -565,6 +638,20 @@ function parseArgs(argv: string[]): Args | null {
     if (!Number.isFinite(n))
       throw new Error(`argument ${flag}: invalid float value: '${raw}'`);
     return n;
+  };
+
+  // `ID=LEVEL`, with LEVEL 1-based as typed and 0-based as carried.
+  const asUpgradeStep = (flag: string, raw: string): UpgradeStep => {
+    const [buildingId, levelRaw] = raw.split("=");
+    const def = findBuilding(buildingId);
+    if (!def || levelRaw === undefined)
+      throw new Error(`argument ${flag}: expected ID=LEVEL, got '${raw}'`);
+    const level = asInt(flag, levelRaw);
+    if (level < 1 || level > def.levels.length)
+      throw new Error(
+        `argument ${flag}: ${buildingId} has levels 1-${def.levels.length}, got ${level}`,
+      );
+    return { buildingId, level: level - 1 };
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -627,6 +714,18 @@ function parseArgs(argv: string[]): Args | null {
           args.anomalyId = match.id;
         }
         break;
+      case "--code":
+        [raw, i] = takeValue(flag, inline, i);
+        args.code = raw;
+        break;
+      case "--tier":
+      case "--plan": {
+        [raw, i] = takeValue(flag, inline, i);
+        const step = asUpgradeStep(flag, raw);
+        if (flag === "--tier") args.tiers[step.buildingId] = step.level;
+        else args.plan.push(step);
+        break;
+      }
       default:
         throw new Error(`unrecognized arguments: ${token}`);
     }
@@ -646,7 +745,21 @@ export async function main(argv: string[]): Promise<number> {
   if (!args) return 0;
 
   let selected: CliMap[];
-  if (args.all) {
+  let research: Record<string, number> = {};
+  if (args.code !== undefined) {
+    let rules;
+    try {
+      ({ rules } = await decodeBlueprint(args.code));
+    } catch (err) {
+      console.error(`--code: ${(err as Error).message}`);
+      return 1;
+    }
+    selected = [{ num: -1, name: "pasted board", code: args.code }];
+    if (rules) {
+      research = rules.research;
+      args.anomalyId ??= ANOMALIES.find((a) => a.id === rules.anomalyId)?.id;
+    }
+  } else if (args.all) {
     selected = MAPS;
   } else if (args.maps.length) {
     const unknown = args.maps.filter((n) => !MAPS_BY_NUM.has(n));
@@ -661,7 +774,30 @@ export async function main(argv: string[]): Promise<number> {
     selected = [MAPS_BY_NUM.get(DEFAULT_MAP_NUM)!];
   }
 
-  const unlockedUpgrades = allUpgradesUnlocked();
+  if (args.plan.length > MAX_UPGRADE_STEPS) {
+    console.error(`--plan takes at most ${MAX_UPGRADE_STEPS} steps`);
+    return 1;
+  }
+  const { target: unlockedUpgrades, along: upgradePlan } = resolveUpgradePlan(
+    BUILDINGS,
+    { ...allUpgradesUnlocked(), ...args.tiers },
+    args.plan,
+  );
+  if (args.plan.length && upgradePlan.length === 0) {
+    console.error("--plan raises nothing: no step is above its --tier");
+    return 1;
+  }
+  const progress: Progress = { research, upgradePlan };
+  if (Object.keys(research).length)
+    console.log(
+      `Research: ${Object.entries(research)
+        .map(([id, level]) => `${id} ${level + 1}`)
+        .join(", ")}`,
+    );
+  if (upgradePlan.length)
+    console.log(
+      `Upgrade plan: ${args.plan.map((s) => `${s.buildingId} -> ${s.level + 1}`).join(", ")}\n`,
+    );
 
   if (args.attempts !== undefined) {
     if (args.attempts < 1) {
@@ -672,7 +808,7 @@ export async function main(argv: string[]): Promise<number> {
       console.error("--workers must be at least 1");
       return 1;
     }
-    return runSessions(selected, unlockedUpgrades, args);
+    return runSessions(selected, unlockedUpgrades, progress, args);
   }
 
   const pool = new WorkerPool(WORKER_URL, os.cpus().length);
@@ -685,6 +821,7 @@ export async function main(argv: string[]): Promise<number> {
         args.timeLimitS,
         args.seed,
         args.anomalyId,
+        progress,
         pool,
       );
     else
@@ -694,6 +831,7 @@ export async function main(argv: string[]): Promise<number> {
         args.timeLimitS,
         args.seed,
         args.anomalyId,
+        progress,
         pool,
       );
   } finally {

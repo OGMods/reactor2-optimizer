@@ -396,9 +396,10 @@ it and the code differ, what is written here is the code.
 
 ## Time Lab Research
 
-Eleven researches exist; **three** of them change a building's figures, and the
-other eight move research income, research time, Chronons, obstacle-removal
-cost, energy sale price and building prices — all decided before a board is
+Twelve researches exist; **three** of them change a building's figures, and the
+other nine move research income, research time, Chronons, obstacle-removal
+cost, energy sale price, building prices and the City level a timeline starts
+at — all decided before a board is
 laid out, so none can change which layout is best.
 
 | research          | scales                                                                         | levels (×)  |

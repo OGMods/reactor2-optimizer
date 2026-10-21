@@ -14,7 +14,7 @@ import type {
  * carries a `multiplier` array that is just `1 + values`, and it is not copied,
  * because deriving it is what keeps the two from drifting.
  *
- * **Three of the game's eleven are here.** The other eight change the economy
+ * **Three of the game's twelve are here.** The other nine change the economy
  * around the board rather than anything on it, and the solver cannot feel any
  * of them — they are listed so it is clear they were read and dismissed rather
  * than missed:
@@ -25,6 +25,7 @@ import type {
  * - `erased_from_time` / `phase_breaker` — obstacle removal time and cost
  * - `quantum_exchange` — energy sale price
  * - `quantum_replicator` — building prices
+ * - `skip_city` (Chrono Seed) — the City level the next timeline starts at
  * - `zero_time_protocol` — free research speed-up window
  *
  * The solver optimises power on a fixed board from a fixed roster. What a
