@@ -8,9 +8,11 @@ import {
   blueprintRules,
   decodeGameExport,
   formatNumberForFilename,
+  ISLAND_TEMPLATES,
   isGameExportCode,
   resolveGameExport,
   type GameExport,
+  type IslandTemplate,
   type InProgressMode,
   type ResolvedGameImport,
 } from "@reactor2/solver";
@@ -482,6 +484,16 @@ class UIState {
   #gameExport: GameExport | null = null;
   /** What the import does with research still running in the game. */
   gameImportMode = $state<InProgressMode>("plan");
+
+  /**
+   * "Solve all islands" in progress: how many are done, how many in all, and
+   * the one running now. Null with no batch running.
+   */
+  solveAll = $state<{ done: number; total: number; current: string } | null>(
+    null,
+  );
+  /** Set by Stop: the island running finishes, and no further one starts. */
+  #solveAllCancelled = false;
   /** Orders reads of the box, so a slow decode cannot land over a newer paste. */
   #gameReadSeq = 0;
 
@@ -702,6 +714,8 @@ class UIState {
     // the verb another way.
     if (this.isPreview) return;
     if (solverState.isOptimizing) {
+      // Stop ends a "Solve all" too, not just the island it is on.
+      if (this.solveAll) this.#solveAllCancelled = true;
       solverState.stopOptimizer();
       return;
     }
@@ -788,6 +802,95 @@ class UIState {
   #beginSolve(options: { keepBest?: boolean } = {}) {
     this.setSheetDetent("closed");
     void solverState.runOptimizer(options);
+  }
+
+  /**
+   * The islands "Solve all" works through: every shipped island that exists in
+   * the game, less those the last import says are still locked there — the
+   * player has nothing on those, and a solve for them answers no question yet.
+   */
+  get solveAllTargets(): IslandTemplate[] {
+    const locked = timelineState.record?.lockedTemplateIds ?? [];
+    return ISLAND_TEMPLATES.filter((t) => t.game && !locked.includes(t.id));
+  }
+
+  /** Whether "Solve all" can start now — the controls are hidden otherwise. */
+  get canSolveAll(): boolean {
+    return (
+      !this.isPreview &&
+      !solverState.isOptimizing &&
+      this.solveAll === null &&
+      configState.canProducePower &&
+      this.solveAllTargets.length > 0
+    );
+  }
+
+  /**
+   * Solves every unlocked island in turn, keeping each one's best layout, then
+   * goes back to the island the player started on.
+   *
+   * It does this by opening each island exactly as the island list does and
+   * running the same solve the Run button runs. That is deliberate: a run is
+   * built around the board on screen — the layout it defends, the per-island
+   * merge, the streamed progress — and solving an island off screen would mean
+   * a second path through the most carefully pinned code in the app. Setup is
+   * hidden while any run is in flight anyway, so there is little else to look
+   * at, and watching each island solved is the progress bar.
+   *
+   * Each island's stored solve is defended the way the Run dialog's "keep the
+   * better one" defends it, whenever it was searched under the same anomaly
+   * and plan; across a change of either the two figures do not compare, and
+   * the fresh run stands, as it would from the Run button.
+   *
+   * Stop ends the batch after the island running. A hidden tab holds the next
+   * island back until it is visible again: a background tab is where a batch
+   * the player has forgotten about would otherwise run their battery down.
+   */
+  async solveAllIslands() {
+    if (!this.canSolveAll) return;
+    const islands = this.solveAllTargets;
+    const home = layoutState.findTemplate(layoutState.activeTemplateId);
+    this.#solveAllCancelled = false;
+    this.setSheetDetent("closed");
+    this.closeInspector();
+
+    let done = 0;
+    try {
+      for (const island of islands) {
+        await whenVisible();
+        if (this.#solveAllCancelled) break;
+        this.solveAll = {
+          done,
+          total: islands.length,
+          current: island.name,
+        };
+        if (island.id !== layoutState.activeTemplateId) {
+          await layoutState.loadTemplate(island, configState.buildingUpgrades);
+          solverState.restore();
+          this.recenterCanvas();
+        }
+        const keepBest =
+          solverState.optimizationResult !== null &&
+          solverState.resultAnomalyId === configState.activeAnomaly.id &&
+          solverState.resultPlanKey === configState.planKey;
+        await solverState.runOptimizer({ keepBest });
+        if (this.#solveAllCancelled) break;
+        done++;
+      }
+    } finally {
+      this.solveAll = null;
+      if (home && home.id !== layoutState.activeTemplateId) {
+        await layoutState.loadTemplate(home, configState.buildingUpgrades);
+        solverState.restore();
+        this.recenterCanvas();
+      }
+      this.showToast(
+        done === islands.length
+          ? `Solved all ${done} islands`
+          : `Stopped after ${done} of ${islands.length} islands`,
+        done === islands.length ? "ok" : "warn",
+      );
+    }
   }
 
   /** Folds the corner readout on a small screen, and remembers it. */
@@ -1211,6 +1314,20 @@ class UIState {
   closeModal() {
     this.activeModal = null;
   }
+}
+
+/** Resolves at once on a visible page, else when it next becomes visible. */
+function whenVisible(): Promise<void> {
+  if (typeof document === "undefined" || document.visibilityState !== "hidden")
+    return Promise.resolve();
+  return new Promise((resolve) => {
+    const onChange = () => {
+      if (document.visibilityState === "hidden") return;
+      document.removeEventListener("visibilitychange", onChange);
+      resolve();
+    };
+    document.addEventListener("visibilitychange", onChange);
+  });
 }
 
 export const uiState = new UIState();

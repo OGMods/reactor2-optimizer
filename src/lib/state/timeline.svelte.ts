@@ -194,6 +194,11 @@ class TimelineState {
     this.#solvePower = solved;
   }
 
+  /** How many game islands have a stored solve — what "With solves" covers. */
+  get solvedIslands(): number {
+    return Object.keys(this.#solvePower).length;
+  }
+
   /**
    * Every game island's power with each stored solve built in place of the
    * board here — or null when no island has a solve. An island whose solve

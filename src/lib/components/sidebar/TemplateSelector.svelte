@@ -8,7 +8,8 @@
   } from "../../state";
   import { ISLAND_TEMPLATES, MAX_CUSTOM_ISLANDS } from "@reactor2/solver";
   import type { IslandTemplate } from "../../types/building";
-  import { Plus, RotateCcw, Trash2 } from "lucide-svelte";
+  import { ListChecks, Plus, RotateCcw, Trash2 } from "lucide-svelte";
+  import { formatSpan } from "../../utils";
   import { onDestroy } from "svelte";
   import { createConfirmArm } from "../confirmArm.svelte";
 
@@ -77,9 +78,33 @@
       if (fallback) await selectTemplate(fallback);
     }
   }
+
+  /*
+   * A rough length for "Solve all": the run the current mode would take on
+   * the island on screen, once per island. Islands differ in size, so this
+   * is a scale ("about four minutes"), not a promise.
+   */
+  let solveAllEstimate = $derived(
+    formatSpan(
+      (solverState.estimatedRunMs * uiState.solveAllTargets.length) / 1000,
+    ),
+  );
 </script>
 
 <div class="section-box">
+  <!--
+    Hidden, not disabled, whenever it cannot start: during any run (Setup is
+    gone then anyway), on a previewed board, or with a roster that makes no
+    power. Not the action colour: RUN is the one filled control in the app.
+  -->
+  {#if uiState.canSolveAll}
+    <button class="solve-all" onclick={() => uiState.solveAllIslands()}>
+      <ListChecks size={14} />
+      <span>Solve all islands</span>
+      <span class="estimate">~{solveAllEstimate}</span>
+    </button>
+  {/if}
+
   <!--
     No "Island Templates" heading: the Setup switch directly above says
     "Islands", and repeating it costs a row of a panel that is short on them.
@@ -207,6 +232,38 @@
   /* A limit reached is the one thing in this panel that warrants warn. */
   .count.full {
     color: var(--warn);
+  }
+  .solve-all {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    height: var(--ctl);
+    margin-bottom: 0.6rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--dur-fast);
+  }
+  .solve-all:hover {
+    background: var(--surface-raised);
+    border-color: var(--accent-dim);
+  }
+  .solve-all .estimate {
+    margin-left: auto;
+    color: var(--text-dim);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  @media (pointer: coarse) {
+    .solve-all {
+      height: var(--tap);
+    }
   }
   .template-list {
     display: flex;

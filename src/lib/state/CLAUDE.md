@@ -350,6 +350,27 @@ landing or a variant applied is what changes a stored solve.
 `now` ticks once a second only while something shows a timeline:
 `startClock()` returns its own stop, for a component's `$effect` to hand back.
 
+### Solve all islands (`uiState.solveAllIslands`)
+
+One press solves every island the game has unlocked (every shipped island
+before any import) and keeps each one's best, so the timeline's "With solves"
+covers the whole game. **It walks the islands rather than solving them off
+screen**: each is opened exactly as the island list opens one, run through the
+same `runOptimizer` the Run button uses, and the player is returned to the island
+they started on. A run is built around the board on screen — the layout it
+defends, the per-island merge, the streamed progress — and a second path through
+that code to solve an island out of sight is the larger risk; Setup is hidden
+during any run anyway, and watching each island solved is the progress bar.
+
+Each island's stored solve is defended (`keepBest`) whenever it was searched
+under the same anomaly and plan — the Run dialog's own test — and otherwise the
+fresh run stands. Stop (`requestSolve`'s stop branch) ends the batch after the
+island running. A hidden tab holds the next island back until it is visible:
+a background tab is where a forgotten batch would run a battery down. It is
+**never automatic** — a solve takes every core for its budget, and Quick often
+loses to a hand-built board, so unasked it would be heat spent on results
+thrown away. `solveAll.test.ts` pins the walk with the search stood in for.
+
 ### `viewportState` (`viewport.svelte.ts`)
 
 The device, from `matchMedia`: `isCompact` (< 1024px — bottom sheet instead of

@@ -165,6 +165,11 @@
     if (e.newState === "open") place();
   }
 
+  function solveAll() {
+    panel?.hidePopover();
+    void uiState.solveAllIslands();
+  }
+
   function importCode() {
     panel?.hidePopover();
     uiState.openImport();
@@ -291,6 +296,29 @@
             {formatNumber(withSolves)}
           </dd>
         {/if}
+        <!--
+          How many islands the solve figures cover, and the way to cover the
+          rest. The button hides whenever "Solve all" cannot start, and a batch
+          in flight says where it is instead.
+        -->
+        <dt>Solves</dt>
+        <dd>
+          {#if uiState.solveAll}
+            <span class="aside">
+              solving {uiState.solveAll.done + 1} of {uiState.solveAll.total}
+            </span>
+          {:else}
+            <span class="aside">
+              {timelineState.solvedIslands} of {uiState.solveAllTargets.length}
+              islands
+            </span>
+            {#if uiState.canSolveAll}
+              <button type="button" class="mini" onclick={solveAll}>
+                Solve all
+              </button>
+            {/if}
+          {/if}
+        </dd>
         <dt>Held</dt>
         <dd>{@render chronon()}{count(record.timeline.chronons)}</dd>
         <dt>Timeline</dt>
@@ -660,12 +688,29 @@
     border-color: var(--accent-dim);
   }
 
+  .mini {
+    padding: 0.1rem 0.5rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .mini:hover {
+    background: var(--surface-raised);
+    border-color: var(--accent-dim);
+  }
+
   .link.start {
     align-self: flex-start;
   }
 
   @media (pointer: coarse) {
     .chip,
+    .mini,
     .link {
       min-height: var(--tap);
     }

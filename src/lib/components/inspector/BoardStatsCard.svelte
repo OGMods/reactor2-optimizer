@@ -593,6 +593,10 @@
             >
               <Loader2 size={11} class="spinner" />
               {#if runMode}<span class="mode">{runMode.label}</span>{/if}
+              <!-- Which island of a "Solve all" this is, counted from one. -->
+              {#if uiState.solveAll}<span class="mode"
+                  >{uiState.solveAll.done + 1}/{uiState.solveAll.total}</span
+                >{/if}
               <span class="clock"
                 >{solverState.isStopping ? "stopping" : countdown}</span
               >
