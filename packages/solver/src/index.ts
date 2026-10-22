@@ -35,6 +35,7 @@ export * from "./data/effectiveBuildings";
 export * from "./data/gameImport";
 export * from "./data/maps";
 export * from "./data/prestige";
+export * from "./data/timeLab";
 export * from "./data/upgradePlan";
 
 export * from "./encoding/blueprint";

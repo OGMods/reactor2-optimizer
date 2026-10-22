@@ -350,6 +350,85 @@ describe("the timeline", () => {
     expect(timelineState.unenteredAnomalies).toEqual([]);
   });
 
+  describe("the Time Lab planner", () => {
+    it("reads the game's levels and prices a plan on top of them", async () => {
+      await importFixture("gen2_city52_9c43e4b7");
+      expect(timelineState.timeLabLevels).toMatchObject({
+        chronon_reactor: 3,
+        stellar_forge: 10,
+      });
+
+      // Chronon Reactor 3 -> 5 is levels 4 and 5: 1,800 + 4,000.
+      timelineState.planLevels("chronon_reactor", 1);
+      timelineState.planLevels("chronon_reactor", 1);
+      expect(timelineState.planCost).toBe(5800);
+
+      // A third would pass the cap, and Stellar Forge is maxed already.
+      timelineState.planLevels("chronon_reactor", 1);
+      timelineState.planLevels("stellar_forge", 1);
+      expect(timelineState.timeLabPlan).toEqual({ chronon_reactor: 2 });
+
+      timelineState.planLevels("chronon_reactor", -2);
+      expect(timelineState.timeLabPlan).toEqual({});
+      expect(timelineState.planCost).toBe(0);
+    });
+
+    it("budgets what the jump leaves, with the +88 when it is counted", async () => {
+      const { exp } = await importFixture("gen2_city52_9c43e4b7");
+      const t = exp.timeline!;
+      timelineState.now = t.exportedAt * 1000;
+      timelineState.planWithBonus = true;
+      expect(timelineState.planBudget).toBe(t.chronons + t.jumpAward + 88);
+      timelineState.planWithBonus = false;
+      expect(timelineState.planBudget).toBe(t.chronons + t.jumpAward);
+      timelineState.planWithBonus = true;
+    });
+
+    it("budgets no bonus once every anomaly has been entered", async () => {
+      const { exp } = await importFixture("gen6_tidal_city49");
+      const t = exp.timeline!;
+      timelineState.now = t.exportedAt * 1000;
+      expect(timelineState.planBudget).toBe(t.chronons + t.jumpAward);
+    });
+
+    it("prices the next Chronon Reactor level in Chronons a jump", async () => {
+      const { exp } = await importFixture("gen2_city52_9c43e4b7");
+      timelineState.now = exp.timeline!.exportedAt * 1000;
+      // ×1.15 -> ×1.20 at an award of 11,241: about 4.3% more of it.
+      const gain = timelineState.reactorNextGain!;
+      expect(gain).toBeGreaterThan(470);
+      expect(gain).toBeLessThan(500);
+      timelineState.planLevels("chronon_reactor", 2);
+      expect(timelineState.reactorNextGain).toBeNull();
+    });
+
+    it("prices stat research in power, and an unchanged plan at none", async () => {
+      await importFixture("gen2_city52_9c43e4b7");
+      await timelineState.refreshPlanPower();
+      const p = timelineState.planPower!;
+      expect(p.base).toBeGreaterThan(0);
+      expect(p.plan).toBe(p.base);
+      // Cooling and generators both have levels left, and more of either
+      // never makes the same boards weaker.
+      expect(p.next.absolute_zero).toBeGreaterThanOrEqual(p.plan);
+      expect(p.next.infinite_grid).toBeGreaterThanOrEqual(p.plan);
+
+      timelineState.planLevels("infinite_grid", 1);
+      await timelineState.refreshPlanPower();
+      expect(timelineState.planPower!.plan).toBeCloseTo(
+        p.next.infinite_grid,
+        -15,
+      );
+    });
+
+    it("starts a new import with an empty plan", async () => {
+      await importFixture("gen2_city52_9c43e4b7");
+      timelineState.planLevels("chronon_reactor", 1);
+      await importFixture("gen1_cryo_city41");
+      expect(timelineState.timeLabPlan).toEqual({});
+    });
+  });
+
   it("has no projection for a code from before the timeline section", async () => {
     await importFixture("city34-timeline3");
     expect(timelineState.record!.timeline).toBeNull();

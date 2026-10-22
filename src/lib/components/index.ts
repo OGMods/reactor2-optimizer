@@ -19,3 +19,4 @@ export { default as SettingsModal } from "./modals/SettingsModal.svelte";
 export { default as SolveModal } from "./modals/SolveModal.svelte";
 export { default as SolveModeInfoModal } from "./modals/SolveModeInfoModal.svelte";
 export { default as UpgradePlanModal } from "./modals/UpgradePlanModal.svelte";
+export { default as TimeLabPlannerModal } from "./modals/TimeLabPlannerModal.svelte";

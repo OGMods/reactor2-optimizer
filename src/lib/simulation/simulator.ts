@@ -198,6 +198,33 @@ export function boardPower(
 }
 
 /**
+ * `boardPower` under several sets of research at once: one total per entry of
+ * `prestiges`, in order.
+ *
+ * Research only changes what a tile is rated at, not the island context, so
+ * the context — the expensive part — is built once and every set is scored on
+ * it. This is what lets the Time Lab planner price a level of each stat
+ * research across every island without rebuilding eight contexts per level.
+ */
+export function boardPowers(
+  grid: Tile[][],
+  buildings: readonly BuildingDefinition[],
+  placedBuildings: readonly PlacedBuilding[],
+  prestiges: readonly (PrestigeScales | undefined)[],
+  anomaly: AnomalyDefinition = getAnomaly(undefined),
+): number[] {
+  if (!grid?.length || !grid[0]?.length || placedBuildings.length === 0) {
+    return prestiges.map(() => 0);
+  }
+  const ctx = buildIslandContext(grid, undefined, anomaly);
+  if (ctx.n === 0) return prestiges.map(() => 0);
+  return prestiges.map((prestige) => {
+    const { placement } = layoutFor(ctx, buildings, placedBuildings, prestige);
+    return simulateIsland(placement, ctx).totalPower;
+  });
+}
+
+/**
  * Returns the given placements with every derived figure filled in, in the same
  * order they arrived. A placement on a tile that cannot be built on, or naming
  * a building the catalogue does not have, keeps its zeroes.

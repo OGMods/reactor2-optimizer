@@ -45,6 +45,7 @@ type ActiveModal =
   | "solveModes"
   | "settings"
   | "upgradePlan"
+  | "timeLab"
   | null;
 
 /**
@@ -1309,6 +1310,12 @@ class UIState {
    */
   openUpgradePlan() {
     this.activeModal = "upgradePlan";
+  }
+
+  /** The Time Lab planner: what to buy with the Chronons a jump would leave. */
+  openTimeLabPlanner() {
+    this.overflowOpen = false;
+    this.activeModal = "timeLab";
   }
 
   closeModal() {

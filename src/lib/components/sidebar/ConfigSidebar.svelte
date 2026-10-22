@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { uiState, viewportState } from "../../state";
+  import { timelineState, uiState, viewportState } from "../../state";
   import { type SheetDetent } from "../../state/ui.svelte";
   import TemplateSelector from "./TemplateSelector.svelte";
   import BuildingUnlockList from "./BuildingUnlockList.svelte";
@@ -256,6 +256,19 @@
   {:else if uiState.setupTab === "buildings"}
     <BuildingUnlockList />
   {:else}
+    <!--
+      The planner is about the game's Time Lab, not the research a solve is
+      rated under below, so it leads the tab rather than sitting among it —
+      and is there only once an import has said what the player holds.
+    -->
+    {#if timelineState.record?.timeline}
+      <button class="plan-lab" onclick={() => uiState.openTimeLabPlanner()}>
+        <span>Plan Chronon spending</span>
+        <span class="plan-lab-budget"
+          >{(timelineState.planBudget ?? 0).toLocaleString("en-US")} to spend</span
+        >
+      </button>
+    {/if}
     <!-- Research first: it applies under every anomaly, including none. -->
     <PrestigeUpgrades />
     <AnomalySelector />
@@ -657,5 +670,36 @@
     background: var(--surface-inset);
     transition: background var(--dur) var(--ease);
     flex-shrink: 0;
+  }
+  .plan-lab {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: var(--ctl);
+    margin-bottom: 0.75rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--dur-fast);
+  }
+  .plan-lab:hover {
+    background: var(--surface-raised);
+    border-color: var(--accent-dim);
+  }
+  .plan-lab-budget {
+    margin-left: auto;
+    color: var(--text-dim);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  @media (pointer: coarse) {
+    .plan-lab {
+      height: var(--tap);
+    }
   }
 </style>

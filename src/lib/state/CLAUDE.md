@@ -350,6 +350,27 @@ landing or a variant applied is what changes a stored solve.
 `now` ticks once a second only while something shows a timeline:
 `startClock()` returns its own stop, for a component's `$effect` to hand back.
 
+### The Time Lab planner (`TimeLabPlannerModal`)
+
+What to buy with the Chronons a jump leaves. The levels are the game's, read off
+the import (`timelineState.timeLabLevels`); the plan is extra levels on top
+(`timeLabPlan`), kept for the session and cleared by an import, since it is
+priced against the levels the last code reported. **The budget is the target's**
+— `targetEta.held`, what the panel says a jump would leave — plus the +88 when
+`planWithBonus` is set and an anomaly is left to earn it, so moving the target
+re-prices the plan.
+
+It measures what it can and only that. Chronon Reactor's next level is priced in
+Chronons a jump at the energy the jump is made at (`reactorNextGain`). The three
+stat researches are priced in power by `refreshPlanPower`, which re-scores every
+island's saved board under the game's research, the plan, and the plan plus one
+level of each — on **one island context per board** (`boardPowers`), since
+research changes only what a tile is rated, never the context. Those are floors:
+the boards as built, not re-solved, so a research the layout is not short of
+reads "no gain". The economy researches get their figure and their cost and no
+invented worth: they move cash, research and obstacle clocks the optimizer does
+not model.
+
 ### Solve all islands (`uiState.solveAllIslands`)
 
 One press solves every island the game has unlocked (every shipped island

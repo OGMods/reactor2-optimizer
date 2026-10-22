@@ -165,6 +165,11 @@
     if (e.newState === "open") place();
   }
 
+  function planTimeLab() {
+    panel?.hidePopover();
+    uiState.openTimeLabPlanner();
+  }
+
   function solveAll() {
     panel?.hidePopover();
     void uiState.solveAllIslands();
@@ -319,6 +324,17 @@
             {/if}
           {/if}
         </dd>
+        <!-- What the jump leaves to spend, and the way to plan spending it. -->
+        {#if timelineState.planBudget !== null}
+          <dt>Time Lab</dt>
+          <dd>
+            <span class="aside">{count(timelineState.planBudget)} to spend</span
+            >
+            <button type="button" class="mini" onclick={planTimeLab}>
+              Plan
+            </button>
+          </dd>
+        {/if}
         <dt>Held</dt>
         <dd>{@render chronon()}{count(record.timeline.chronons)}</dd>
         <dt>Timeline</dt>

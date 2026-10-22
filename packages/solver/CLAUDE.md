@@ -79,6 +79,17 @@ by `HeatProducerBuildingSO`. That is why Infinite Grid goes out of its way to
 name turbines. The rule is "every heat producer", and a reactor is the only one
 the game ships, so it is modelled as reactors.
 
+### The Time Lab table
+
+`data/timeLab.ts` carries all twelve Time Lab researches with each level's
+Chronon cost — the planner's price list — where `PRESTIGE_UPGRADES` carries only
+the three a layout feels. Hand-transcribed from the extractor's record like that
+table; where the two overlap they must agree, which `tests/timeLab.test.ts`
+enforces, and Chronon Reactor's values must match `chronons.ts`'s multiplier
+(kept apart there to avoid an import cycle). `gameId` is the key a game export
+files a research under — the extractor's id for all but Chrono Seed, which
+exports as `TimeLabSkipCityResearchSO`.
+
 ### Chronons
 
 `data/chronons.ts` is the one place the game's Chronon award lives: the formula,
