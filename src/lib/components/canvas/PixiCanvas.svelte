@@ -77,6 +77,31 @@
   let activeHoverKey: string | null = null;
 
   /*
+   * Whether the pointer is over the board's own element — not a dialog, a
+   * panel or a popover drawn above it.
+   *
+   * Pixi listens for pointer moves on the whole document, so a drag keeps
+   * working past the canvas edge, and hit-tests the board wherever the pointer
+   * is. Over an open dialog that meant tiles still lit up, the inspector card
+   * still followed the cursor and the heat links still drew, all for a board
+   * the dialog covered. The element's native enter and leave are the truth:
+   * an overlay above it is not its descendant, so moving onto one is a leave.
+   *
+   * A hover that lands while outside is not dropped but held, so coming back
+   * onto the same tile lights it at once rather than waiting for the next one.
+   */
+  let pointerOnBoard = true;
+  let heldHover: { x: number; y: number } | null = null;
+  /** The board's hover handler, kept so re-entering can replay a held hover. */
+  let hoverTile: ((x: number, y: number) => void) | null = null;
+
+  function clearHover() {
+    activeHoverKey = null;
+    gridRenderer?.setHover(null, null);
+    uiState.hoveredTile = null;
+  }
+
+  /*
    * Tap-to-inspect, coarse pointers only.
    *
    * `onPointerOver` does not meaningfully exist on touch — a tap fires
@@ -574,7 +599,11 @@
           dragAction = action;
           commitAction(action, x, y, true);
         },
-        onPointerOver: (x, y) => {
+        onPointerOver: (hoverTile = (x, y) => {
+          if (!pointerOnBoard) {
+            heldHover = { x, y };
+            return;
+          }
           activeHoverKey = `${x},${y}`;
           gridRenderer?.setHover(x, y);
 
@@ -596,13 +625,10 @@
           if (uiState.hoveredTile && after) {
             uiState.hoveredTile.type = after.type;
           }
-        },
+        }),
         onPointerOut: (x, y) => {
-          if (activeHoverKey === `${x},${y}`) {
-            activeHoverKey = null;
-            gridRenderer?.setHover(null, null);
-            uiState.hoveredTile = null;
-          }
+          if (heldHover?.x === x && heldHover.y === y) heldHover = null;
+          if (activeHoverKey === `${x},${y}`) clearHover();
         },
       },
     );
@@ -1055,6 +1081,19 @@
       pendingEdit = null;
       clearHold();
     }
+  }}
+  onpointerenter={() => {
+    pointerOnBoard = true;
+    const held = heldHover;
+    heldHover = null;
+    if (held) hoverTile?.(held.x, held.y);
+  }}
+  onpointerleave={(e) => {
+    // A touch "leaves" on every lift; only a pointer that can hover moves
+    // off the board onto something else.
+    if (e.pointerType === "touch") return;
+    pointerOnBoard = false;
+    clearHover();
   }}
   onpointerup={handlePointerUp}
   onpointercancel={() => {
