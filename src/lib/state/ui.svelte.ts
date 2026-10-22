@@ -308,6 +308,23 @@ class UIState {
   }
 
   /**
+   * Whether the inspected building's lines carry on outward — through the
+   * buildings it is linked to, and theirs, until the network it belongs to is
+   * drawn whole. Off, only its own partners are linked.
+   */
+  #chainLinks = $state<boolean>(uiStorage.loadPrefs().chainLinks);
+
+  get chainLinks(): boolean {
+    return this.#chainLinks;
+  }
+
+  setChainLinks(on: boolean) {
+    if (this.#chainLinks === on) return;
+    this.#chainLinks = on;
+    uiStorage.savePrefs({ chainLinks: on });
+  }
+
+  /**
    * Whether usage collection is off, or `null` for "follow the browser".
    *
    * The negative, matching gtag's `ga-disable-<id>`: the default is to

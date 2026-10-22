@@ -244,6 +244,97 @@ export function simulatePlacedBuildings(
   return results;
 }
 
+/** One line on the board: `from` supplies `to`, both as tile coordinates. */
+export interface Flow {
+  from: { x: number; y: number };
+  to: { x: number; y: number };
+}
+
+/** A `Flow` as the board draws it: `direct` when it touches the focus itself. */
+export interface BoardLink extends Flow {
+  direct: boolean;
+}
+
+/**
+ * The flows to draw for the building on `focus`: the ones touching it, and
+ * with `chain` every flow reachable from it through linked buildings — the
+ * whole network it is part of, so a reactor shows the coolers that keep its
+ * generators running. Direction is ignored for reach (a generator's cooler is
+ * as much part of the reactor's chain as the generator), and each flow appears
+ * once.
+ */
+export function linksFrom(
+  flows: readonly Flow[],
+  focus: { x: number; y: number },
+  chain: boolean,
+): BoardLink[] {
+  const key = (p: { x: number; y: number }) => `${p.x},${p.y}`;
+  const start = key(focus);
+  const reached = new Set([start]);
+  const queue = [start];
+  const taken = new Set<number>();
+  const links: BoardLink[] = [];
+
+  while (queue.length > 0) {
+    const at = queue.shift()!;
+    flows.forEach((f, i) => {
+      if (taken.has(i)) return;
+      const a = key(f.from);
+      const b = key(f.to);
+      if (a !== at && b !== at) return;
+      taken.add(i);
+      links.push({ ...f, direct: at === start });
+      if (!chain) return;
+      for (const next of [a, b]) {
+        if (reached.has(next)) continue;
+        reached.add(next);
+        queue.push(next);
+      }
+    });
+  }
+  return links;
+}
+
+/**
+ * Every pair of buildings on the board that actually moved something on the
+ * last tick: a reactor's heat into a generator, a cooler's cooling into a power
+ * source. The board draws the ones touching the building under the pointer.
+ *
+ * Read off the same distribution that scores the board, not re-derived from
+ * adjacency, because being *beside* a partner is not using it: a reactor whose
+ * generators are already full sends nothing, and neither does a cooler beside a
+ * source another cooler has covered. Under Cryo Nexus every working cooler
+ * feeds every source the pool served, which is what the pool does.
+ */
+export function placementFlows(
+  grid: Tile[][],
+  buildings: readonly BuildingDefinition[],
+  placedBuildings: PlacedBuilding[],
+  prestige?: PrestigeScales,
+  anomaly: AnomalyDefinition = getAnomaly(undefined),
+): Flow[] {
+  if (!grid?.length || !grid[0]?.length || placedBuildings.length === 0) {
+    return [];
+  }
+  const ctx = contextFor(grid, anomaly);
+  if (ctx.n === 0) return [];
+
+  const { placement } = layoutFor(ctx, buildings, placedBuildings, prestige);
+  const pairs: number[] = [];
+  simulateIsland(placement, ctx, true, pairs);
+
+  const flows: Flow[] = [];
+  for (let k = 0; k < pairs.length; k += 2) {
+    const a = pairs[k];
+    const b = pairs[k + 1];
+    flows.push({
+      from: { x: ctx.xs[a], y: ctx.ys[a] },
+      to: { x: ctx.xs[b], y: ctx.ys[b] },
+    });
+  }
+  return flows;
+}
+
 /**
  * What the building on `(x, y)` was **rated for** on the board around it: the
  * three ceilings every figure in its scored row was measured against. Null on a

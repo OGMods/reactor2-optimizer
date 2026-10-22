@@ -13,7 +13,12 @@
     placementFillPercent,
   } from "../../data/placements";
   import { BUILDINGS, findBuilding } from "@reactor2/solver";
-  import { ratedPlacements, ratingShifts } from "../../simulation/simulator";
+  import {
+    linksFrom,
+    placementFlows,
+    ratedPlacements,
+    ratingShifts,
+  } from "../../simulation/simulator";
   import { anomalyIconFor, STATE_ICON } from "../../data/boardIcons";
   import type { BuildingOverlay } from "../../pixi/gridPainter";
   import { onMount, onDestroy, untrack } from "svelte";
@@ -346,6 +351,8 @@
     const longest = Math.max(frame.width, frame.height);
     const resolution = Math.min(scale, EXPORT_MAX_SIDE_PX / longest);
 
+    // The inspected building's partner lines are a pointer's, not the board's.
+    gridRenderer?.setLinksVisible(false);
     const canvas = app.renderer.extract.canvas({
       target: gridContainer,
       frame,
@@ -355,6 +362,7 @@
       // than a transparent halo that turns black in most image viewers.
       clearColor: CANVAS_CLEAR,
     });
+    gridRenderer?.setLinksVisible(true);
 
     // `ICanvas` is Pixi's abstraction over an HTMLCanvasElement and an
     // OffscreenCanvas, which spell "give me a blob" differently.
@@ -801,6 +809,34 @@
     // the bounce and the double-tap zoom all still land where they were going,
     // they just do not travel there.
     viewportControls?.setAnimated(on);
+  });
+
+  /*
+   * What moved between buildings on the board on screen, off the same scorer
+   * the overlays read. Only re-run when the board changes, not on hover.
+   */
+  let boardFlows = $derived(
+    placementFlows(
+      layoutState.grid,
+      BUILDINGS,
+      uiState.visiblePlacements,
+      layoutState.placementPrestige,
+      layoutState.placementAnomaly,
+    ),
+  );
+
+  /*
+   * Lines from the inspected building — hovered on a mouse, pinned on touch,
+   * which `inspectedTile` already decides — to every building it sends heat or
+   * cooling to or takes it from, and on through theirs with `chainLinks`. Only
+   * a building standing on the tile has flows: hovering grass draws nothing.
+   */
+  $effect(() => {
+    const focus = uiState.inspectedTile;
+    const flows = boardFlows;
+    const chain = uiState.chainLinks;
+    if (!isAtlasLoaded) return;
+    gridRenderer?.setLinks(focus ? linksFrom(flows, focus, chain) : []);
   });
 
   /*

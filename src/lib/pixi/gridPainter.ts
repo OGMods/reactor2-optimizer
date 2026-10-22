@@ -19,6 +19,7 @@ import {
   createScaledSprite,
 } from "./atlas";
 import { placementStatus, type PlacementStatus } from "../data/placements";
+import type { BoardLink } from "../simulation/simulator";
 import { pulseAlpha, STATUS_PULSE, type Pulse } from "./statusPulse";
 import { createStatusBadge } from "./statusBadge";
 import { createIconSprite } from "./atlas";
@@ -103,6 +104,33 @@ const STATUS_FRAME: Record<PlacementStatus, string> = {
   starved: FRAME_KEYS.indicatorOverheat,
   idle: FRAME_KEYS.indicatorIdle,
 };
+
+/**
+ * The lines from the inspected building to the ones it works with, drawn the
+ * way the game draws its own: a dashed line along the ground, in the board's
+ * "this is selected" cyan, on a dark track so it still reads across grass.
+ *
+ * The dashes march from supplier to receiver at `LINK_SPEED` world px/s, so the
+ * line says which way the heat or cooling goes without a label. With animation
+ * off they stand still and the line is simply a line.
+ */
+const LINK_DASH = 12;
+const LINK_GAP = 9;
+const LINK_SPEED = 28;
+const LINK_WIDTH = 4;
+/**
+ * The dark band the dashes run along. Cyan alone has almost no contrast with
+ * the grass and the green and amber status pads it crosses, so the line sat
+ * invisible beside exactly the buildings with something to say; a dark track
+ * under it reads on every ground the board has.
+ */
+const LINK_TRACK_WIDTH = 10;
+const LINK_TRACK = 0x0b1f3a;
+/**
+ * How strongly a link further out along the chain draws against one touching
+ * the focus — see `uiState.chainLinks`. Visible, but a step behind.
+ */
+const LINK_CHAIN_STRENGTH = 0.75;
 
 /** A building sprite that breathes, and the shape of its breath. */
 interface PulsingSprite {
@@ -214,6 +242,11 @@ export class GridRenderer {
 
   private hoverHighlight: Graphics;
 
+  /** See `setLinks`. Its own layer, so `clear()` never touches it. */
+  private linkGraphics: Graphics;
+  private links: BoardLink[] = [];
+  private linkKey = "";
+
   private islandTileNodes: (Container | null)[][] = [];
   private gridTileNodes: (Container | null)[][] = [];
   private propTileNodes: (Container | null)[][] = [];
@@ -287,6 +320,10 @@ export class GridRenderer {
     // then props, then badges, then ghosts on top of everything.
     this.gridContainer.addChild(this.islandContainer);
     this.gridContainer.addChild(this.gridLinesContainer);
+    // Partner lines lie on the ground: over the pads, under the buildings.
+    this.linkGraphics = new Graphics();
+    this.linkGraphics.eventMode = "none";
+    this.gridContainer.addChild(this.linkGraphics);
     this.gridContainer.addChild(this.propsContainer);
     this.gridContainer.addChild(this.badgeContainer);
     this.gridContainer.addChild(this.ghostContainer);
@@ -308,6 +345,7 @@ export class GridRenderer {
   public destroy(): void {
     this.clear();
     this.hoverHighlight.destroy({ children: true });
+    this.linkGraphics.destroy();
     this.islandContainer.destroy({ children: true });
     this.gridLinesContainer.destroy({ children: true });
     this.propsContainer.destroy({ children: true });
@@ -649,7 +687,9 @@ export class GridRenderer {
    * The curve itself is `pulseAlpha`; this is the walk that applies it.
    */
   public tick(elapsedMs: number): void {
-    if (!this.animate || this.pulsing.size === 0) return;
+    if (!this.animate) return;
+    if (this.links.length > 0) this.drawLinks(elapsedMs);
+    if (this.pulsing.size === 0) return;
 
     for (const { sprite, pulse } of this.pulsing.values()) {
       if (sprite.destroyed) continue;
@@ -674,6 +714,7 @@ export class GridRenderer {
     this.animate = on;
     if (on) return;
 
+    this.drawLinks(0);
     for (const { sprite, pulse } of this.pulsing.values()) {
       if (!sprite.destroyed) sprite.alpha = pulse.minAlpha;
     }
@@ -730,6 +771,90 @@ export class GridRenderer {
     }
 
     this.ghostContainer.sortChildren();
+  }
+
+  /**
+   * Shows the lines from the inspected building to its partners, or none.
+   *
+   * Pushed in by `PixiCanvas`, which reads them off the scorer — the painter
+   * only draws. Skipped when the set has not changed, since the effect that pushes
+   * it re-runs on every board repaint.
+   */
+  public setLinks(links: BoardLink[]): void {
+    const key = links
+      .map(
+        (l) =>
+          `${l.from.x},${l.from.y}>${l.to.x},${l.to.y}${l.direct ? "!" : ""}`,
+      )
+      .join("|");
+    if (key === this.linkKey) return;
+    this.linkKey = key;
+    this.links = links;
+    this.drawLinks(0);
+  }
+
+  /**
+   * Hides or shows the partner lines without forgetting them — for the board's
+   * image export, which renders this container and must not carry a pointer's
+   * passing interest into a picture meant for someone else.
+   */
+  public setLinksVisible(on: boolean): void {
+    this.linkGraphics.visible = on;
+  }
+
+  /** Redraws every partner line with its dashes advanced to `elapsedMs`. */
+  private drawLinks(elapsedMs: number): void {
+    const g = this.linkGraphics;
+    g.clear();
+    if (this.links.length === 0) return;
+
+    const period = LINK_DASH + LINK_GAP;
+    const phase = ((elapsedMs / 1000) * LINK_SPEED) % period;
+
+    // The chain first and fainter, so the focus's own partners draw over it
+    // and still read as the answer to "what does this one touch".
+    for (const direct of [false, true]) {
+      const group = this.links.filter((l) => l.direct === direct);
+      if (group.length === 0) continue;
+      const strength = direct ? 1 : LINK_CHAIN_STRENGTH;
+
+      for (const { from, to } of group) {
+        const a = gridToIso(from.x, from.y);
+        const b = gridToIso(to.x, to.y);
+        g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+      }
+      g.stroke({
+        width: LINK_TRACK_WIDTH,
+        color: LINK_TRACK,
+        alpha: 0.85 * strength,
+        cap: "round",
+      });
+
+      for (const { from, to } of group) {
+        const a = gridToIso(from.x, from.y);
+        const b = gridToIso(to.x, to.y);
+        const length = Math.hypot(b.x - a.x, b.y - a.y);
+        if (length === 0) continue;
+        const ux = (b.x - a.x) / length;
+        const uy = (b.y - a.y) / length;
+        // Starts one period back so the first dash slides in from the supplier.
+        for (let t = phase - period; t < length; t += period) {
+          const start = Math.max(t, 0);
+          const end = Math.min(t + LINK_DASH, length);
+          if (end <= start) continue;
+          g.moveTo(a.x + ux * start, a.y + uy * start).lineTo(
+            a.x + ux * end,
+            a.y + uy * end,
+          );
+        }
+      }
+      g.stroke({
+        width: LINK_WIDTH,
+        color: ACCENT,
+        alpha: 0.95 * strength,
+        cap: "round",
+      });
+    }
   }
 
   public setHover(x: number | null, y: number | null): void {

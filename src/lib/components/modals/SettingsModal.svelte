@@ -6,6 +6,7 @@
     ImageDown,
     Sparkles,
     Vibrate,
+    Waypoints,
   } from "lucide-svelte";
   import type { ImageScale } from "../../types/ui";
   import { EXPORT_MAX_SIDE_PX } from "../../pixi/boardExport";
@@ -60,6 +61,12 @@
     uiState.fillBadges
       ? "Each building shows how hard it is working, as in the game."
       : "Building figures stay in the readout; tap a building to see them.",
+  );
+
+  let chainLinksHint = $derived(
+    uiState.chainLinks
+      ? "Lines follow on from a building to everything it is connected to."
+      : "Lines reach only the buildings next in line to the one you point at.",
   );
 
   /*
@@ -140,6 +147,25 @@
           aria-checked={uiState.fillBadges}
           aria-labelledby="setting-fill-badges"
           onclick={() => uiState.setFillBadges(!uiState.fillBadges)}
+        >
+          <span class="track"><span class="knob"></span></span>
+        </button>
+      </div>
+
+      <div class="setting">
+        <span class="icon"><Waypoints size={16} /></span>
+
+        <span class="text">
+          <span class="name" id="setting-chain-links">Follow connections</span>
+          <span class="hint">{chainLinksHint}</span>
+        </span>
+
+        <button
+          class="switch"
+          role="switch"
+          aria-checked={uiState.chainLinks}
+          aria-labelledby="setting-chain-links"
+          onclick={() => uiState.setChainLinks(!uiState.chainLinks)}
         >
           <span class="track"><span class="knob"></span></span>
         </button>

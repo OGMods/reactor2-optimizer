@@ -83,6 +83,13 @@ export interface UiPrefs {
    */
   fillBadges: boolean;
   /**
+   * Whether the lines from an inspected building carry on through the buildings
+   * it is linked to — see `uiState.chainLinks`. On by default: a reactor's
+   * heat is only worth anything once the generator's coolers take its waste,
+   * and the whole chain is what answers "what does this one do for me".
+   */
+  chainLinks: boolean;
+  /**
    * Whether usage collection is switched **off** — see
    * `uiState.analyticsDisabled`. The negative, because gtag's own switch is
    * `ga-disable-<id>` and the default is to collect.
@@ -102,6 +109,7 @@ const DEFAULT_UI_PREFS: UiPrefs = {
   solveMode: DEFAULT_SOLVE_MODE,
   haptics: true,
   fillBadges: true,
+  chainLinks: true,
   imageScale: 1,
 };
 

@@ -64,11 +64,19 @@ const conversion = { power: 0.0, waste: 0.0 };
  * its reactors and generators are moving around, which is what the inspector
  * asks for. It changes no number that a short-circuited layout would otherwise
  * have reported; it only fills in the ones the search would have skipped.
+ *
+ * `flows`, when given, is filled with every supplier -> consumer pair that
+ * actually moved something, as flat `[supplierTile, consumerTile, ...]` island
+ * tile indices: heat from reactors to generators, then cooling from coolers to
+ * power sources. It is a read of what the distribution already decided — it
+ * changes no number — and the search never asks for it, so the hot path pays
+ * one untaken branch per distribution.
  */
 export function simulateIsland(
   placement: Placement,
   ctx: IslandContext,
   fullReport = false,
+  flows?: number[],
 ): SimulationResult {
   const n = ctx.n;
   const reactorTiles = ctx.reactorTiles;
@@ -189,6 +197,16 @@ export function simulateIsland(
       numGenerators,
       ctx,
     );
+    if (flows) {
+      collectFlows(
+        ctx,
+        flows,
+        reactorTiles,
+        numReactors,
+        generatorTiles,
+        numGenerators,
+      );
+    }
     for (let i = 0; i < numReactors; i++)
       heatOut[reactorTiles[i]] = d.supplierSent[i];
     for (let j = 0; j < numGenerators; j++)
@@ -281,6 +299,17 @@ export function simulateIsland(
       for (let i = 0; i < numCoolers; i++)
         heatOut[coolerTiles[i]] =
           layout[coolerTiles[i]]!.effectiveValue * share;
+
+      // Every cooler doing work pays into every source the pool served.
+      if (flows) {
+        for (let i = 0; i < numCoolers; i++) {
+          if (heatOut[coolerTiles[i]] <= EPS) continue;
+          for (let j = 0; j < numWaste; j++) {
+            if (coolingIn[wasteTiles[j]] > EPS)
+              flows.push(coolerTiles[i], wasteTiles[j]);
+          }
+        }
+      }
     } else {
       for (let i = 0; i < numCoolers; i++) {
         d.supplierCap[i] = layout[coolerTiles[i]]!.effectiveValue;
@@ -289,6 +318,9 @@ export function simulateIsland(
         d.consumerCap[j] = wasteOf[wasteTiles[j]];
       }
       runDistribution(coolerTiles, numCoolers, wasteTiles, numWaste, ctx);
+      if (flows) {
+        collectFlows(ctx, flows, coolerTiles, numCoolers, wasteTiles, numWaste);
+      }
       for (let i = 0; i < numCoolers; i++)
         heatOut[coolerTiles[i]] = d.supplierSent[i];
       for (let j = 0; j < numWaste; j++)
@@ -335,6 +367,28 @@ export function simulateIsland(
   }
 
   return { totalPower, placements };
+}
+
+/**
+ * Appends every pair the last `runDistribution` moved something along — see
+ * `simulateIsland`'s `flows`. Module-level rather than a closure so the search,
+ * which never passes `flows`, allocates nothing for it.
+ */
+function collectFlows(
+  ctx: IslandContext,
+  flows: number[],
+  supplierTiles: Int32Array,
+  numSuppliers: number,
+  consumerTiles: Int32Array,
+  numConsumers: number,
+): void {
+  const flow = ctx.dist.flow;
+  for (let i = 0; i < numSuppliers; i++) {
+    for (let j = 0; j < numConsumers; j++) {
+      if (flow[i * numConsumers + j] > EPS)
+        flows.push(supplierTiles[i], consumerTiles[j]);
+    }
+  }
 }
 
 /**
