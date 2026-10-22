@@ -100,6 +100,12 @@ export interface UiPrefs {
   analyticsDisabled?: boolean;
   /** How far `saveLayoutImage` scales the exported PNG up. */
   imageScale: ImageScale;
+  /**
+   * The jump award the timeline panel counts down to — see
+   * `timelineState.chrononTarget`. Optional: absent means the player has not
+   * set one, and the panel reads today's award instead.
+   */
+  chrononTarget?: number;
 }
 
 const DEFAULT_UI_PREFS: UiPrefs = {

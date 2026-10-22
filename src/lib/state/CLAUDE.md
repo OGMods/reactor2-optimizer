@@ -319,6 +319,34 @@ read. `uiState.applyGameImport`
 writes it through `recordImport`, after the import has landed. A record from a
 format version this build cannot read is dropped; the next import rewrites it.
 
+**`chrononTarget` is a jump award the player is waiting for**, and `targetEta`
+counts down to it: real seconds through the package's `secondsUntilAward`, the
+moment on this device's clock, the timeline's length then, and what the player
+would hold after jumping. Unset, it reads today's award, so an empty field
+answers what a jump now would leave the player holding. It is kept in
+`UiPrefs.chrononTarget` so it survives a reload, and **`recordImport` clears it**:
+a new code is a new situation, and a goal set against the last one, left
+standing, read as an import that had not taken. The game's slow ticks (see `docs/game-export.md`) are neither modelled
+nor mentioned: they are the game's bug to fix.
+
+**`pace` reads the rate now against the timeline's average**, in Chronons an
+hour: one Chronon per `chrononSeconds` against the award over the elapsed time.
+Every Chronon takes longer than the last, so once the first falls below the
+second, a fresh timeline that runs like this one would be earning faster — the
+classic point to jump. The panel says that as a reading of two rates, not an
+order: its one assumption is that the next timeline is much like this one, and
+research bought at the jump only makes the next one faster.
+
+**`withSolvesPower` is every island with its stored solve built.** Each solve is
+read off `solverStorage` and re-scored through `boardPower` on its island's
+terrain under today's roster, research and anomaly, so one found before an
+upgrade counts at the tier the player has now — no signature check, because the
+shape is all that is used. An island whose solve makes less than its board keeps
+the board. `targetEta.secondsWithSolves` is the wait at that power, shown only
+when it beats the game's. Storage is not reactive, so `TimelineStatus`'s refresh
+effect also reads `solverState.optimizationResult` and `appliedVariant`: a solve
+landing or a variant applied is what changes a stored solve.
+
 `now` ticks once a second only while something shows a timeline:
 `startClock()` returns its own stop, for a component's `$effect` to hand back.
 

@@ -15,6 +15,7 @@ import {
   firstEntryBonus,
   jumpThreshold,
   projectTimeline,
+  secondsUntilAward,
 } from "../src/data/chronons";
 import { decodeGameExport } from "../src/encoding/gameExport";
 
@@ -62,6 +63,34 @@ describe("energyForAward", () => {
         expect(chrononAward(e * (1 - 1e-9), m)).toBe(n - 1);
       }
     }
+  });
+});
+
+describe("secondsUntilAward", () => {
+  // The live save: E 1.77717e31 at Chronon Reactor 3, 5.1247e25 a second.
+  const energy = 1.77717e31;
+  const rate = 1.5374e26 / 3;
+
+  it("is the time the energy takes to reach the target's threshold", () => {
+    const s = secondsUntilAward(energy, rate, 1.15, 11220)!;
+    expect(s).toBeCloseTo((energyForAward(11220, 1.15) - energy) / rate, 6);
+    expect(chrononAward(energy + rate * (s + 1e-3), 1.15)).toBe(11220);
+    expect(chrononAward(energy + rate * (s - 1), 1.15)).toBe(11219);
+  });
+
+  it("counts 11220 about five hours out, the way the game did", () => {
+    const s = secondsUntilAward(energy, rate, 1.15, 11220)!;
+    expect(s).toBeGreaterThan(5 * 3600);
+    expect(s).toBeLessThan(5.5 * 3600);
+  });
+
+  it("is zero for a target the award already meets", () => {
+    expect(secondsUntilAward(energy, rate, 1.15, 11140)).toBe(0);
+    expect(secondsUntilAward(energy, rate, 1.15, 50)).toBe(0);
+  });
+
+  it("never arrives with nothing produced", () => {
+    expect(secondsUntilAward(energy, 0, 1.15, 12000)).toBeNull();
   });
 });
 
@@ -131,6 +160,43 @@ describe("projectTimeline", () => {
     expect(p.secondsToNext! + 1).toBeLessThan(243);
   });
 
+  it("fills the bar toward the next Chronon from nothing to whole", () => {
+    const at = (award: number) =>
+      timeline.exportedAt +
+      (energyForAward(award, 1.15) - timeline.energy) / perSecond;
+    const start = at(11221);
+    const end = at(11222);
+    const bar = (t: number) =>
+      projectTimeline(timeline, perSecond, 1.15, t).towardNext;
+    expect(bar(start + 0.01)).toBeLessThan(0.01);
+    expect(bar((start + end) / 2)).toBeCloseTo(0.5, 2);
+    expect(bar(end - 0.01)).toBeGreaterThan(0.99);
+  });
+
+  it("times the whole Chronon under way, and each takes longer than the last", () => {
+    const p = projectTimeline(timeline, perSecond, 1.15, timeline.exportedAt);
+    const whole =
+      (energyForAward(11141, 1.15) - energyForAward(11140, 1.15)) / perSecond;
+    expect(p.chrononSeconds!).toBeCloseTo(whole, 6);
+    // 11,140 -> 11,141 at export takes about 230 s; five hours on, the
+    // Chronons the player timed at 11,223 took about 242.
+    expect(p.chrononSeconds!).toBeGreaterThan(225);
+    expect(p.chrononSeconds!).toBeLessThan(235);
+    const later = projectTimeline(
+      timeline,
+      perSecond,
+      1.15,
+      timeline.exportedAt +
+        (energyForAward(11223, 1.15) - timeline.energy) / perSecond +
+        1,
+    );
+    expect(later.chrononSeconds!).toBeGreaterThan(p.chrononSeconds!);
+    expect(later.chrononSeconds!).toBeGreaterThan(239);
+    expect(later.chrononSeconds!).toBeLessThan(243);
+    // What is left of one is never more than the whole.
+    expect(p.secondsToNext!).toBeLessThanOrEqual(p.chrononSeconds!);
+  });
+
   it("never runs backwards on a clock behind the export", () => {
     const p = projectTimeline(timeline, perSecond, 1.15, 0);
     expect(p.sinceExport).toBe(0);
@@ -140,6 +206,7 @@ describe("projectTimeline", () => {
   it("has no next Chronon on a board making nothing", () => {
     const p = projectTimeline(timeline, 0, 1.15, timeline.exportedAt + 999);
     expect(p.secondsToNext).toBeNull();
+    expect(p.chrononSeconds).toBeNull();
     expect(p.elapsedSeconds).toBe(timeline.elapsedSeconds + 999);
   });
 

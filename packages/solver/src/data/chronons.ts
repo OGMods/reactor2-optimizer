@@ -74,6 +74,26 @@ export function energyForAward(award: number, multiplier: number): number {
   return ENERGY_SCALE * (award / (AWARD_BASE * multiplier)) ** (1 / EXPONENT);
 }
 
+/**
+ * Seconds until a timeline at `energy`, growing at `energyPerSecond`, pays
+ * `target` on a jump (first-entry bonus excluded): 0 when it already does,
+ * null when it never will because nothing is being produced.
+ *
+ * Real seconds. The game counts offline time in real time, but its ticks run
+ * a little slow while it is open, so a target hours away arrives somewhat
+ * later than this for a player who keeps the game open throughout.
+ */
+export function secondsUntilAward(
+  energy: number,
+  energyPerSecond: number,
+  multiplier: number,
+  target: number,
+): number | null {
+  if (chrononAward(energy, multiplier) >= target) return 0;
+  if (!(energyPerSecond > 0)) return null;
+  return (energyForAward(target, multiplier) - energy) / energyPerSecond;
+}
+
 const THRESHOLD_BASE = 88;
 const THRESHOLD_GROWTH = 1.15;
 const THRESHOLD_CAP = 5000;
@@ -121,6 +141,17 @@ export interface TimelineProjection {
   award: number;
   /** Seconds until the award goes up by one; null when energy is not growing. */
   secondsToNext: number | null;
+  /**
+   * How long the Chronon now under way takes from start to finish, at this
+   * rate; null when energy is not growing. Each one takes a little longer
+   * than the last.
+   */
+  chrononSeconds: number | null;
+  /**
+   * How far the energy is from this award's threshold to the next one's, 0 to
+   * 1 — the game's own "until next Chronon" bar.
+   */
+  towardNext: number;
   /** The award a jump needs, and whether this one clears it. */
   threshold: number;
   canJump: boolean;
@@ -153,6 +184,7 @@ export function projectTimeline(
   const energy = timeline.energy + rate * sinceExport;
   const award = chrononAward(energy, multiplier);
   const next = Math.max(energyForAward(award + 1, multiplier), energy);
+  const from = Math.min(energyForAward(award, multiplier), energy);
   const threshold = jumpThreshold(timeline.generation);
   return {
     sinceExport,
@@ -160,6 +192,8 @@ export function projectTimeline(
     elapsedSeconds: timeline.elapsedSeconds + sinceExport,
     award,
     secondsToNext: rate > 0 ? (next - energy) / rate : null,
+    chrononSeconds: rate > 0 ? (next - from) / rate : null,
+    towardNext: next > from ? (energy - from) / (next - from) : 0,
     threshold,
     canJump: award >= threshold,
   };
