@@ -29,11 +29,14 @@ export * from "./solver/report";
 export * from "./solver/solver";
 
 export * from "./data/anomalies";
+export * from "./data/buildingPrices";
 export * from "./data/buildings";
+export * from "./data/chronons";
 export * from "./data/effectiveBuildings";
 export * from "./data/gameImport";
 export * from "./data/maps";
 export * from "./data/prestige";
+export * from "./data/timeLab";
 export * from "./data/upgradePlan";
 
 export * from "./encoding/blueprint";

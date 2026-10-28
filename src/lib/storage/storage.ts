@@ -5,6 +5,9 @@ import {
   DEFAULT_ANOMALY_ID,
   MAX_UPGRADE_STEPS,
   type AnomalyId,
+  type GameExportClearing,
+  type GameExportProgress,
+  type GameExportTimeline,
   type OptimizationResult,
   type UpgradeStep,
 } from "@reactor2/solver";
@@ -29,6 +32,7 @@ const KEYS = {
   UPGRADE_PLAN: "upgrade_plan",
   UI: "ui_prefs",
   SOLVE: "solver_result",
+  GAME_IMPORT: "game_import",
 } as const;
 
 export interface UiPrefs {
@@ -79,6 +83,13 @@ export interface UiPrefs {
    */
   fillBadges: boolean;
   /**
+   * Whether the lines from an inspected building carry on through the buildings
+   * it is linked to — see `uiState.chainLinks`. On by default: a reactor's
+   * heat is only worth anything once the generator's coolers take its waste,
+   * and the whole chain is what answers "what does this one do for me".
+   */
+  chainLinks: boolean;
+  /**
    * Whether usage collection is switched **off** — see
    * `uiState.analyticsDisabled`. The negative, because gtag's own switch is
    * `ga-disable-<id>` and the default is to collect.
@@ -89,6 +100,12 @@ export interface UiPrefs {
   analyticsDisabled?: boolean;
   /** How far `saveLayoutImage` scales the exported PNG up. */
   imageScale: ImageScale;
+  /**
+   * The jump award the timeline panel counts down to — see
+   * `timelineState.chrononTarget`. Optional: absent means the player has not
+   * set one, and the panel reads today's award instead.
+   */
+  chrononTarget?: number;
 }
 
 const DEFAULT_UI_PREFS: UiPrefs = {
@@ -98,6 +115,7 @@ const DEFAULT_UI_PREFS: UiPrefs = {
   solveMode: DEFAULT_SOLVE_MODE,
   haptics: true,
   fillBadges: true,
+  chainLinks: true,
   imageScale: 1,
 };
 
@@ -353,6 +371,57 @@ export const solverStorage = {
     if (Object.keys(records).length === 0) removeItem(KEYS.SOLVE);
     else setItem(KEYS.SOLVE, records);
   },
+};
+
+/**
+ * The last game code the player imported, kept as the game had it.
+ *
+ * An import is applied and then edited away: the roster follows the next tier
+ * the player clicks, the boards follow every paint. What the game actually
+ * said survives only here, and that is what the timeline readout and the
+ * planned tools need — a Chronon projection runs forward from the export's own
+ * figures at the power the *game's* boards made, a move list starts from the
+ * board the player really has, and a spending planner needs the economy
+ * research that `configState` never held.
+ *
+ * Bumped `version` rather than a migration when the shape changes: a record
+ * this build cannot read is dropped and the next import rewrites it, since the
+ * game is the source of every figure in it.
+ */
+export interface SavedGameImport {
+  version: 1;
+  /** When the player imported it, epoch ms on this device. */
+  importedAt: number;
+  gameVersion: string;
+  /** The header's anomaly, the game's id (`tidal_ascendancy_legacy` stays). */
+  anomalyId: string;
+  anomalyBalance: number;
+  /** Every research node by the game's id, economy and Time Lab included. */
+  research: Record<string, number>;
+  researchInProgress: GameExportProgress[];
+  clearing: GameExportClearing[];
+  /** Template id -> blueprint of that island's board as the game had it. */
+  islands: Record<string, string>;
+  /** Islands still locked in the game. */
+  lockedTemplateIds: string[];
+  /**
+   * The game boards' power, all islands, per tick — at the tiers, research
+   * and anomaly the game ran them at, not the ones an in-progress import may
+   * have counted as bought. The rate a projection runs forward at.
+   */
+  energyPerTick: number;
+  /** Section 7; null on a code from before game 1.1.11. */
+  timeline: GameExportTimeline | null;
+}
+
+const GAME_IMPORT_VERSION = 1;
+
+export const gameImportStorage = {
+  load: (): SavedGameImport | null => {
+    const raw = getItem<SavedGameImport | null>(KEYS.GAME_IMPORT, null);
+    return raw && raw.version === GAME_IMPORT_VERSION ? raw : null;
+  },
+  save: (data: SavedGameImport): void => setItem(KEYS.GAME_IMPORT, data),
 };
 
 export const gridStorage = {

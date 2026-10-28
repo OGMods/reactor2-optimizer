@@ -219,7 +219,7 @@ down**, and after `npm run fixtures` **read the diff**. See
 
 ## State layer (`src/lib/state/`, Svelte 5 runes)
 
-Six singleton classes, each exported as a ready-made instance, split by what the
+Seven singleton classes, each exported as a ready-made instance, split by what the
 state **is** rather than by which component reads it. They reference each other
 directly rather than through events/props — this is a small enough app that
 singletons + direct calls are the whole store layer. What keeps that from
@@ -228,7 +228,8 @@ becoming a knot is that the references form a **strict DAG**:
 ```
 layout   -> (nothing)         config   -> (nothing)
 viewport -> (nothing)         editor   -> layout
-solver   -> config, layout    ui       -> config, layout, solver, viewport
+solver   -> config, layout    timeline -> config, layout
+ui       -> config, layout, solver, timeline, viewport
 ```
 
 ## Assets and the deployed base

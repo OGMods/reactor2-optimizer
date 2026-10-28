@@ -45,6 +45,54 @@ export function formatTimeAgo(
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
+/**
+ * A span of game time, to its two largest units: "13d 4h", "4h 17m",
+ * "4m 02s", "37s". For timeline lengths and countdowns, where the game itself
+ * reads in days and hours and a countdown in minutes needs its seconds.
+ */
+export function formatSpan(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec.toString().padStart(2, "0")}s`;
+  return `${sec}s`;
+}
+
+/**
+ * A moment ahead, as a player would say it: "today 23:45", "tomorrow 06:10",
+ * "Fri 14:00" within the week, then "Oct 30 14:00". In the device's own locale
+ * and time zone, so the clock reads the way the phone beside it does.
+ */
+export function formatClockTime(
+  epochMs: number,
+  now: number = Date.now(),
+): string {
+  const at = new Date(epochMs);
+  // Past the range a Date can hold it is "Invalid Date", not a moment.
+  if (Number.isNaN(at.getTime())) return "—";
+  const time = at.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const midnight = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(at) - midnight(new Date(now))) / 86400000);
+  if (days <= 0) return `today ${time}`;
+  if (days === 1) return `tomorrow ${time}`;
+  if (days < 7) {
+    return `${at.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
+  }
+  const date = at.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+  return `${date} ${time}`;
+}
+
 // ---------------------------------------------------------------------------
 // Tile coordinates
 // ---------------------------------------------------------------------------

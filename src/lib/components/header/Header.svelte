@@ -4,6 +4,7 @@
   import { asset } from "../../utils";
   import GridControls from "./GridControls.svelte";
   import OverflowMenu from "./OverflowMenu.svelte";
+  import TimelineStatus from "./TimelineStatus.svelte";
 
   /*
    * Two arrangements of the same controls.
@@ -78,6 +79,13 @@
   </h1>
 
   <div class="actions">
+    <!--
+      First in the row, so it sits nearest the middle of the bar: a readout,
+      not an action, and the one thing here a player looks at rather than
+      presses. It renders nothing until there is a figure to show.
+    -->
+    <TimelineStatus />
+
     {#if showSize}
       <GridControls />
     {/if}

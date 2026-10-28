@@ -11,11 +11,11 @@ The app-side half — how `layoutState`, `configState`, `AnomalySelector` and
 
 ### Time Lab research
 
-`PRESTIGE_UPGRADES` (`data/prestige.ts`) carries **three** of the game's eleven
+`PRESTIGE_UPGRADES` (`data/prestige.ts`) carries **three** of the game's twelve
 researches: Absolute Zero (cooler cooling), Infinite Grid (generator and wind
-turbine stats) and Stellar Forge (reactor heat). The other eight move research
-income, research time, chronons, obstacle-removal, energy sale price and
-building prices — all
+turbine stats) and Stellar Forge (reactor heat). The other nine move research
+income, research time, chronons, obstacle-removal, energy sale price,
+building prices and the City level a timeline starts at — all
 decided _before_ the solver is handed a board, so none can change which layout
 is best. The file names them so it is clear they were read and dismissed.
 
@@ -78,6 +78,39 @@ literally would take the turbine — but a turbine's SO inherits
 by `HeatProducerBuildingSO`. That is why Infinite Grid goes out of its way to
 name turbines. The rule is "every heat producer", and a reactor is the only one
 the game ships, so it is modelled as reactors.
+
+### Building prices
+
+`data/buildingPrices.ts` is what a building costs in the game: `base ×
+scaler^copies × (1 − Construction Permits) × (1 − Quantum Replicator)`, the
+copies counted across all islands and the scaler 1.14 until Standardized Builds
+lowers it, and a sale refunds Salvage Protocols' share of the **current** price.
+The research tables are hand-transcribed from `tools/data/progression.json`;
+the base prices are the catalogue's `price`. Salvage Protocols' level 0 (50%) is
+an assumption — the record starts at level 1 — and says so. The rules were
+confirmed by the player; moves are free.
+
+### The Time Lab table
+
+`data/timeLab.ts` carries all twelve Time Lab researches with each level's
+Chronon cost — the planner's price list — where `PRESTIGE_UPGRADES` carries only
+the three a layout feels. Hand-transcribed from the extractor's record like that
+table; where the two overlap they must agree, which `tests/timeLab.test.ts`
+enforces, and Chronon Reactor's values must match `chronons.ts`'s multiplier
+(kept apart there to avoid an import cycle). `gameId` is the key a game export
+files a research under — the extractor's id for all but Chrono Seed, which
+exports as `TimeLabSkipCityResearchSO`.
+
+### Chronons
+
+`data/chronons.ts` is the one place the game's Chronon award lives: the formula,
+its inverse (`energyForAward`), the jump threshold by generation, the first-entry
+bonus and `projectTimeline`, which runs a game export's section 7 forward from its
+`exportedAt`. Chronon Reactor's multiplier is carried there rather than in
+`PRESTIGE_UPGRADES`, which holds only research a layout can feel. Island power is
+energy **per tick** (`TICK_SECONDS` = 3). `tests/chronons.test.ts` holds the
+formula to the award the game wrote into every 1.1.11 sample, and the projection
+to a live reading taken on a player's save.
 
 ### Anomalies
 
@@ -423,7 +456,7 @@ CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
 they are bought with Chronons, survive a Time Jump, and stack with whatever
 anomaly is running — **multiplicatively**, so a generator under Singularity
 Isolation with Infinite Grid maxed is rated x8. The extractor's record covers
-all eleven Time Lab upgrades; the three a layout can see are **Stellar Forge**
+all twelve Time Lab upgrades; the three a layout can see are **Stellar Forge**
 (every heat producer, so reactors), **Infinite Grid** (generators _and_ wind
 turbines), and **Absolute Zero** (every cooler), each ten levels of
 `BonusPercentage`. Absolute Zero and Infinite Grid share one curve, 0.1 to 1.0

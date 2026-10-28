@@ -210,6 +210,18 @@ export function printSessionReport(report: SessionReport): void {
   if (rules) console.log(rules);
   console.log(rule);
   console.log(`Estimated max: ${formatNumberPair(report.estimatedMaxPower)}`);
+  // The spread, not only the best: the top layouts say what a session *can*
+  // find, and two settings that both reach the same best can still differ in
+  // how often they get there.
+  if (report.powers.length) {
+    const sorted = [...report.powers].sort((a, b) => a - b);
+    const median = sorted[Math.floor((sorted.length - 1) / 2)];
+    console.log(
+      `Attempts:      ${sorted.length} | worst ${formatNumberPair(sorted[0])}` +
+        ` | median ${formatNumberPair(median)}` +
+        ` | best ${formatNumberPair(sorted[sorted.length - 1])}`,
+    );
+  }
 
   if (!report.top.length) {
     console.log("\nNo attempts completed.\n");

@@ -6,11 +6,13 @@
  * three saves: city level 23 in a first timeline (five islands, early
  * buildings, most obstacles still standing), city level 34 in a third timeline
  * (Cryo Nexus, Time Lab research, two islands still locked) and city level 47
- * in a first timeline (everything unlocked, one research running). They are the only evidence of what the game
+ * in a first timeline (everything unlocked, one research running). They
+ * predate section 7; the `gen*` samples beside them carry it, and have their
+ * own block at the end. They are the only evidence of what the game
  * actually writes, which is why most of what is pinned here is pinned against
  * them rather than against codes built in the test.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
@@ -50,6 +52,18 @@ class Writer {
   i32(v: number) {
     const b = Buffer.alloc(4);
     b.writeInt32LE(v);
+    this.bytes.push(...b);
+    return this;
+  }
+  i64(v: number) {
+    const b = Buffer.alloc(8);
+    b.writeBigInt64LE(BigInt(v));
+    this.bytes.push(...b);
+    return this;
+  }
+  f64(v: number) {
+    const b = Buffer.alloc(8);
+    b.writeDoubleLE(v);
     this.bytes.push(...b);
     return this;
   }
@@ -165,8 +179,12 @@ describe("decodeGameExport", () => {
     await expect(decodeGameExport(city34.slice(0, 1200))).rejects.toThrow();
   });
 
-  it("ignores a section appended after the six it knows", async () => {
-    const w = tinyExport().str("a later section");
+  it("ignores a section appended after the seven it knows", async () => {
+    const w = timelineSection(tinyExport())
+      .f64(1e6)
+      .f64(5e4)
+      .u8(0)
+      .str("a later section");
     const exp = await decodeGameExport(w.code());
     expect(exp.islands[0]).toMatchObject({
       areaId: "area_1",
@@ -174,6 +192,170 @@ describe("decodeGameExport", () => {
       minY: 4,
       cells: ["TileGrass", "TileWater"],
     });
+    expect(exp.timeline).toMatchObject({
+      generation: 3,
+      cash: 1e6,
+      researchPoints: 5e4,
+      stampSource: "server",
+    });
+  });
+});
+
+/**
+ * The worked example of `docs/game-export.md`'s section 7, plus the generation
+ * field the game added after it.
+ */
+function timelineSection(w: Writer): Writer {
+  return w
+    .i64(1792540800)
+    .i64(6200)
+    .f64(5.14e29)
+    .i64(2592000)
+    .i64(6905)
+    .u16(1)
+    .str("cryo_nexus")
+    .i32(3);
+}
+
+/**
+ * Section 7, the timeline. Saves the developer exported from 1.1.11 for this
+ * purpose, named `gen<jumps>_<anomaly>_city<level>`; `gen2_city52_9c43e4b7`
+ * and `editor_current_save` are a player's, and a `_server` file is the same
+ * save stamped by server time rather than the device clock. They are the third
+ * round, which ends with the clock byte — except `owner_editor_save`, kept
+ * from the second, the one real code that ends at research points. Only the
+ * figures are pinned here — the award is the game's own, and whether our
+ * formula agrees with it is the Chronon module's to test.
+ */
+const TIMELINE_SAMPLES = readdirSync(DIR)
+  .filter((f) => !f.startsWith("city"))
+  .map((f) => f.replace(/\.txt$/, ""));
+describe("the timeline section", () => {
+  const sample = (name: string) =>
+    decodeGameExport(readFileSync(join(DIR, `${name}.txt`), "utf8"));
+
+  it("is null on a code written before it existed", async () => {
+    for (const code of [city23, city34, city47]) {
+      expect((await decodeGameExport(code)).timeline).toBeNull();
+    }
+  });
+
+  it("reads every figure the game wrote", async () => {
+    const exp = await sample("gen1_cryo_city41");
+    expect(exp.gameVersion).toBe("1.1.11");
+    expect(exp.timeline).toEqual({
+      exportedAt: 1792610302,
+      chronons: 553,
+      energy: 8.906078559870158e25,
+      elapsedSeconds: 1841407,
+      jumpAward: 2051,
+      anomaliesEntered: ["cryo_nexus"],
+      generation: 1,
+      cash: 3.001636196701361e30,
+      researchPoints: 7630000001250,
+      stampSource: "device",
+    });
+  });
+
+  it("reads a player who has never entered an anomaly", async () => {
+    const { timeline } = await sample("gen0_none_city2");
+    expect(timeline).toMatchObject({
+      energy: 23814,
+      jumpAward: 2,
+      anomaliesEntered: [],
+      generation: 0,
+      cash: 13926.60626791145,
+      researchPoints: 0,
+    });
+  });
+
+  it("names Tidal Ascendancy plainly when the header names its legacy balance", async () => {
+    const exp = await sample("gen6_tidal_city49");
+    expect(exp.anomalyId).toBe("tidal_ascendancy_legacy");
+    expect(exp.timeline?.anomaliesEntered).toEqual([
+      "cryo_nexus",
+      "singularity_isolation",
+      "tidal_ascendancy",
+    ]);
+    expect(exp.timeline?.generation).toBe(6);
+  });
+
+  /*
+   * One sample is not clean, and it is the game's save rather than our map:
+   * `gen1_cryo_city41` has a building standing on the transformer cell of
+   * areas 6, 7 and 8 (a chaos core, a psionic tower, a cooler6), where every
+   * other export writes `CantBuildHere`. The import drops each one and counts
+   * it, which is the rule — pinned so a fourth would show.
+   */
+  const ON_TRANSFORMER: Record<string, Record<string, number>> = {
+    gen1_cryo_city41: { island6: 1, island7: 1, island8: 1 },
+  };
+
+  it("reads every sample, and every one resolves onto our maps", async () => {
+    expect(TIMELINE_SAMPLES.length).toBe(13);
+    for (const name of TIMELINE_SAMPLES) {
+      const exp = await sample(name);
+      expect(exp.timeline, name).not.toBeNull();
+      const r = await resolveGameExport(exp);
+      for (const island of r.islands) {
+        expect(island.blockedBuildings, `${name} ${island.templateId}`).toBe(
+          ON_TRANSFORMER[name]?.[island.templateId] ?? 0,
+        );
+      }
+    }
+  });
+
+  it("reads the spec's worked example byte for byte", async () => {
+    const exp = await decodeGameExport(timelineSection(tinyExport()).code());
+    expect(exp.timeline).toEqual({
+      exportedAt: 1792540800,
+      chronons: 6200,
+      energy: 5.14e29,
+      elapsedSeconds: 2592000,
+      jumpAward: 6905,
+      anomaliesEntered: ["cryo_nexus"],
+      generation: 3,
+      cash: null,
+      researchPoints: null,
+      stampSource: null,
+    });
+  });
+
+  it("reads cash and research points after the generation, debt included", async () => {
+    const w = timelineSection(tinyExport()).f64(-2.5e30).f64(9.15e11);
+    const { timeline } = await decodeGameExport(w.code());
+    expect(timeline).toMatchObject({ cash: -2.5e30, researchPoints: 9.15e11 });
+  });
+
+  it("reads the clock byte the game writes, and its absence", async () => {
+    for (const name of TIMELINE_SAMPLES) {
+      const { timeline } = await sample(name);
+      expect(timeline?.stampSource, name).toBe(
+        name === "owner_editor_save"
+          ? null
+          : name.endsWith("_server")
+            ? "server"
+            : "device",
+      );
+    }
+  });
+
+  it("says which clock stamped the export, and not a clock it does not know", async () => {
+    const read = async (source: number) =>
+      (
+        await decodeGameExport(
+          timelineSection(tinyExport()).f64(0).f64(0).u8(source).code(),
+        )
+      ).timeline?.stampSource;
+    expect(await read(0)).toBe("server");
+    expect(await read(1)).toBe("device");
+    expect(await read(7)).toBeNull();
+  });
+
+  it("refuses a timeline that was cut off rather than reading half of it", async () => {
+    const w = timelineSection(tinyExport());
+    w.bytes.length -= 2;
+    await expect(decodeGameExport(w.code())).rejects.toThrow(/cut off/);
   });
 });
 

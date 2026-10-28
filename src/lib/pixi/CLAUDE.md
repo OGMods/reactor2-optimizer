@@ -158,6 +158,29 @@ false` on a writing press), and commits on the second tap's _up_.
   `ctrlKey` or a `deltaX` pans instead, and `deltaMode` is normalised through
   `WHEEL_LINE_PX` (Firefox reports lines, ~3 against Chrome's ~100).
 
+### Step marks sit on top
+
+`setStepMarks` outlines the tiles of the move step on screen — cyan where a
+building arrives, red (`DANGER`, `--danger` pinned like `ACCENT`) where one
+leaves, is sold or an obstacle is cleared. Drawn **above** the buildings, as a
+thick outline over a faint wash: on the ground they hid under the very building
+that had just arrived.
+
+### Nothing above the board hovers it
+
+Pixi listens for pointer moves on the **whole document**, so a drag keeps going
+past the canvas edge, and hit-tests the board wherever the pointer is. Left
+alone, that hovers the board _through_ anything drawn over it: with a dialog or
+the timeline panel open, tiles lit up, the inspector followed the cursor and the
+heat links drew under the overlay. `PixiCanvas` keeps `pointerOnBoard` from the
+wrapper's native `pointerenter` / `pointerleave` — an overlay is not the
+wrapper's descendant, so moving onto one is a leave — clears the hover on leave,
+and ignores Pixi's `pointerover` while outside. The last tile hovered while
+outside is held and replayed on re-entry, so coming back onto the same tile
+lights it at once. A touch "leaves" on every lift, so touch leaves are ignored.
+The HUD's empty margins are `pointer-events: none`, so they still count as the
+board, as they should.
+
 ### A finger writes on lift, or after a hold; a mouse writes on contact
 
 **On a touch screen one finger is the only way to move the board**, so a press

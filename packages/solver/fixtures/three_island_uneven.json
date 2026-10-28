@@ -95,11 +95,6 @@
         "building_id": "cooler8"
       },
       {
-        "x": 12,
-        "y": 0,
-        "building_id": "wind_turbine"
-      },
-      {
         "x": 0,
         "y": 1,
         "building_id": "generator7"

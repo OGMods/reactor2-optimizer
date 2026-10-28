@@ -19,6 +19,7 @@ import {
   createScaledSprite,
 } from "./atlas";
 import { placementStatus, type PlacementStatus } from "../data/placements";
+import type { BoardLink } from "../simulation/simulator";
 import { pulseAlpha, STATUS_PULSE, type Pulse } from "./statusPulse";
 import { createStatusBadge } from "./statusBadge";
 import { createIconSprite } from "./atlas";
@@ -87,6 +88,23 @@ export interface BuildingOverlay {
 const ACCENT = 0x00f3ff;
 
 /**
+ * `--danger`, for the one board mark that means something goes away: the tile
+ * a step sells from, clears, or moves a building off. Pinned like `ACCENT`
+ * above, and never themed — it is the board's language.
+ */
+const DANGER = 0xff4757;
+
+/**
+ * A tile a move step touches: where something arrives (`arrive`) or what it
+ * leaves, is sold from, or is cleared of (`leave`). See `setStepMarks`.
+ */
+export interface StepMark {
+  x: number;
+  y: number;
+  kind: "arrive" | "leave";
+}
+
+/**
  * The pad drawn on the tile beneath a building, saying whether it is running.
  *
  * One colour per state, which is the whole point: `starved` and `idle` both
@@ -103,6 +121,33 @@ const STATUS_FRAME: Record<PlacementStatus, string> = {
   starved: FRAME_KEYS.indicatorOverheat,
   idle: FRAME_KEYS.indicatorIdle,
 };
+
+/**
+ * The lines from the inspected building to the ones it works with, drawn the
+ * way the game draws its own: a dashed line along the ground, in the board's
+ * "this is selected" cyan, on a dark track so it still reads across grass.
+ *
+ * The dashes march from supplier to receiver at `LINK_SPEED` world px/s, so the
+ * line says which way the heat or cooling goes without a label. With animation
+ * off they stand still and the line is simply a line.
+ */
+const LINK_DASH = 12;
+const LINK_GAP = 9;
+const LINK_SPEED = 28;
+const LINK_WIDTH = 4;
+/**
+ * The dark band the dashes run along. Cyan alone has almost no contrast with
+ * the grass and the green and amber status pads it crosses, so the line sat
+ * invisible beside exactly the buildings with something to say; a dark track
+ * under it reads on every ground the board has.
+ */
+const LINK_TRACK_WIDTH = 10;
+const LINK_TRACK = 0x0b1f3a;
+/**
+ * How strongly a link further out along the chain draws against one touching
+ * the focus — see `uiState.chainLinks`. Visible, but a step behind.
+ */
+const LINK_CHAIN_STRENGTH = 0.75;
 
 /** A building sprite that breathes, and the shape of its breath. */
 interface PulsingSprite {
@@ -214,6 +259,18 @@ export class GridRenderer {
 
   private hoverHighlight: Graphics;
 
+  /** See `setStepMarks`. Drawn over the buildings. */
+  private stepMarks: Graphics;
+  private stepMarkKey = "";
+
+  /** See `setFocus`: the tiles left at full strength, or null for all. */
+  private focus: ReadonlySet<string> | null = null;
+
+  /** See `setLinks`. Its own layer, so `clear()` never touches it. */
+  private linkGraphics: Graphics;
+  private links: BoardLink[] = [];
+  private linkKey = "";
+
   private islandTileNodes: (Container | null)[][] = [];
   private gridTileNodes: (Container | null)[][] = [];
   private propTileNodes: (Container | null)[][] = [];
@@ -287,9 +344,19 @@ export class GridRenderer {
     // then props, then badges, then ghosts on top of everything.
     this.gridContainer.addChild(this.islandContainer);
     this.gridContainer.addChild(this.gridLinesContainer);
+    // Partner lines lie on the ground: over the pads, under the buildings.
+    this.linkGraphics = new Graphics();
+    this.linkGraphics.eventMode = "none";
+    this.gridContainer.addChild(this.linkGraphics);
     this.gridContainer.addChild(this.propsContainer);
     this.gridContainer.addChild(this.badgeContainer);
     this.gridContainer.addChild(this.ghostContainer);
+    // A step's tiles, over everything: on the ground they hid under the very
+    // building that had just arrived. So an outline and a faint wash, which
+    // the building shows through.
+    this.stepMarks = new Graphics();
+    this.stepMarks.eventMode = "none";
+    this.gridContainer.addChild(this.stepMarks);
 
     // Hover Highlight Overlay
     this.hoverHighlight = new Graphics();
@@ -308,6 +375,8 @@ export class GridRenderer {
   public destroy(): void {
     this.clear();
     this.hoverHighlight.destroy({ children: true });
+    this.linkGraphics.destroy();
+    this.stepMarks.destroy();
     this.islandContainer.destroy({ children: true });
     this.gridLinesContainer.destroy({ children: true });
     this.propsContainer.destroy({ children: true });
@@ -410,6 +479,8 @@ export class GridRenderer {
 
     this.gridLinesContainer.addChild(this.hoverHighlight);
     this.updateState(grid, gridWidth, gridHeight);
+    // New nodes start opaque; a focus set before the rebuild still holds.
+    this.applyFocus();
   }
 
   /**
@@ -649,7 +720,9 @@ export class GridRenderer {
    * The curve itself is `pulseAlpha`; this is the walk that applies it.
    */
   public tick(elapsedMs: number): void {
-    if (!this.animate || this.pulsing.size === 0) return;
+    if (!this.animate) return;
+    if (this.links.length > 0) this.drawLinks(elapsedMs);
+    if (this.pulsing.size === 0) return;
 
     for (const { sprite, pulse } of this.pulsing.values()) {
       if (sprite.destroyed) continue;
@@ -674,6 +747,7 @@ export class GridRenderer {
     this.animate = on;
     if (on) return;
 
+    this.drawLinks(0);
     for (const { sprite, pulse } of this.pulsing.values()) {
       if (!sprite.destroyed) sprite.alpha = pulse.minAlpha;
     }
@@ -730,6 +804,181 @@ export class GridRenderer {
     }
 
     this.ghostContainer.sortChildren();
+  }
+
+  /**
+   * Shows the lines from the inspected building to its partners, or none.
+   *
+   * Pushed in by `PixiCanvas`, which reads them off the scorer — the painter
+   * only draws. Skipped when the set has not changed, since the effect that pushes
+   * it re-runs on every board repaint.
+   */
+  public setLinks(links: BoardLink[]): void {
+    const key = links
+      .map(
+        (l) =>
+          `${l.from.x},${l.from.y}>${l.to.x},${l.to.y}${l.direct ? "!" : ""}`,
+      )
+      .join("|");
+    if (key === this.linkKey) return;
+    this.linkKey = key;
+    this.links = links;
+    this.drawLinks(0);
+  }
+
+  /**
+   * Hides or shows the partner lines without forgetting them — for the board's
+   * image export, which renders this container and must not carry a pointer's
+   * passing interest into a picture meant for someone else.
+   */
+  public setLinksVisible(on: boolean): void {
+    this.linkGraphics.visible = on;
+  }
+
+  /** Redraws every partner line with its dashes advanced to `elapsedMs`. */
+  private drawLinks(elapsedMs: number): void {
+    const g = this.linkGraphics;
+    g.clear();
+    if (this.links.length === 0) return;
+
+    const period = LINK_DASH + LINK_GAP;
+    const phase = ((elapsedMs / 1000) * LINK_SPEED) % period;
+
+    // The chain first and fainter, so the focus's own partners draw over it
+    // and still read as the answer to "what does this one touch".
+    for (const direct of [false, true]) {
+      const group = this.links.filter((l) => l.direct === direct);
+      if (group.length === 0) continue;
+      const strength = direct ? 1 : LINK_CHAIN_STRENGTH;
+
+      for (const { from, to } of group) {
+        const a = gridToIso(from.x, from.y);
+        const b = gridToIso(to.x, to.y);
+        g.moveTo(a.x, a.y).lineTo(b.x, b.y);
+      }
+      g.stroke({
+        width: LINK_TRACK_WIDTH,
+        color: LINK_TRACK,
+        alpha: 0.85 * strength,
+        cap: "round",
+      });
+
+      for (const { from, to } of group) {
+        const a = gridToIso(from.x, from.y);
+        const b = gridToIso(to.x, to.y);
+        const length = Math.hypot(b.x - a.x, b.y - a.y);
+        if (length === 0) continue;
+        const ux = (b.x - a.x) / length;
+        const uy = (b.y - a.y) / length;
+        // Starts one period back so the first dash slides in from the supplier.
+        for (let t = phase - period; t < length; t += period) {
+          const start = Math.max(t, 0);
+          const end = Math.min(t + LINK_DASH, length);
+          if (end <= start) continue;
+          g.moveTo(a.x + ux * start, a.y + uy * start).lineTo(
+            a.x + ux * end,
+            a.y + uy * end,
+          );
+        }
+      }
+      g.stroke({
+        width: LINK_WIDTH,
+        color: ACCENT,
+        alpha: 0.95 * strength,
+        cap: "round",
+      });
+    }
+  }
+
+  /**
+   * Marks the tiles of the move step being looked at: cyan where a building
+   * arrives, red where one leaves, is sold or an obstacle is cleared. Skipped
+   * when unchanged, since the board effect that pushes it re-runs on every
+   * repaint.
+   */
+  public setStepMarks(
+    marks: StepMark[],
+    arrows: readonly {
+      from: { x: number; y: number };
+      to: { x: number; y: number };
+    }[] = [],
+  ): void {
+    const key =
+      marks.map((m) => `${m.x},${m.y},${m.kind}`).join("|") +
+      "/" +
+      arrows
+        .map((a) => `${a.from.x},${a.from.y}>${a.to.x},${a.to.y}`)
+        .join("|");
+    if (key === this.stepMarkKey) return;
+    this.stepMarkKey = key;
+    this.stepMarks.clear();
+    for (const mark of marks) {
+      const iso = gridToIso(mark.x, mark.y);
+      const color = mark.kind === "arrive" ? ACCENT : DANGER;
+      this.stepMarks
+        .poly(TILE_DIAMOND.map((v, i) => v + (i % 2 === 0 ? iso.x : iso.y)))
+        .fill({ color, alpha: 0.16 })
+        .stroke({ width: 3, color, alpha: 1 });
+    }
+    // A move is also an arrow from the tile it leaves to the one it takes,
+    // stopping short of the target's centre so the head sits on its edge.
+    for (const { from, to } of arrows) {
+      const a = gridToIso(from.x, from.y);
+      const b = gridToIso(to.x, to.y);
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1) continue;
+      const ux = dx / len;
+      const uy = dy / len;
+      const tip = {
+        x: b.x - ux * (TILE_HEIGHT / 3),
+        y: b.y - uy * (TILE_HEIGHT / 3),
+      };
+      const head = 12;
+      this.stepMarks
+        .moveTo(a.x, a.y)
+        .lineTo(tip.x - ux * head * 0.6, tip.y - uy * head * 0.6)
+        .stroke({ width: 4, color: ACCENT, alpha: 1, cap: "round" });
+      this.stepMarks
+        .poly([
+          tip.x,
+          tip.y,
+          tip.x - ux * head - uy * head * 0.6,
+          tip.y - uy * head + ux * head * 0.6,
+          tip.x - ux * head + uy * head * 0.6,
+          tip.y - uy * head - ux * head * 0.6,
+        ])
+        .fill({ color: ACCENT, alpha: 1 });
+    }
+  }
+
+  /**
+   * Fades every building, pad and badge but those on `tiles` — step mode's
+   * way of making the one building a step is about stand out on a board of a
+   * hundred. Null puts every tile back at full strength. The terrain is never
+   * faded, so the island still reads as itself.
+   */
+  public setFocus(tiles: ReadonlySet<string> | null): void {
+    this.focus = tiles;
+    this.applyFocus();
+  }
+
+  private applyFocus(): void {
+    const focus = this.focus;
+    for (let y = 0; y < this.propTileNodes.length; y++) {
+      const row = this.propTileNodes[y];
+      for (let x = 0; x < row.length; x++) {
+        const alpha = !focus || focus.has(`${x},${y}`) ? 1 : 0.18;
+        for (const node of [
+          row[x],
+          this.gridTileNodes[y]?.[x],
+          this.badgeTileNodes[y]?.[x],
+        ]) {
+          if (node) node.alpha = alpha;
+        }
+      }
+    }
   }
 
   public setHover(x: number | null, y: number | null): void {

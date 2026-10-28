@@ -13,9 +13,15 @@
     placementFillPercent,
   } from "../../data/placements";
   import { BUILDINGS, findBuilding } from "@reactor2/solver";
-  import { ratedPlacements, ratingShifts } from "../../simulation/simulator";
+  import {
+    linksFrom,
+    placementFlows,
+    ratedPlacements,
+    ratingShifts,
+  } from "../../simulation/simulator";
   import { anomalyIconFor, STATE_ICON } from "../../data/boardIcons";
-  import type { BuildingOverlay } from "../../pixi/gridPainter";
+  import type { BuildingOverlay, StepMark } from "../../pixi/gridPainter";
+  import type { MoveStep } from "../../simulation/moveSteps";
   import { onMount, onDestroy, untrack } from "svelte";
   import { Application, Container, Rectangle } from "pixi.js";
   import { loadAtlas } from "../../pixi/atlas";
@@ -70,6 +76,31 @@
    */
   let dragAction: TileAction | null = null;
   let activeHoverKey: string | null = null;
+
+  /*
+   * Whether the pointer is over the board's own element — not a dialog, a
+   * panel or a popover drawn above it.
+   *
+   * Pixi listens for pointer moves on the whole document, so a drag keeps
+   * working past the canvas edge, and hit-tests the board wherever the pointer
+   * is. Over an open dialog that meant tiles still lit up, the inspector card
+   * still followed the cursor and the heat links still drew, all for a board
+   * the dialog covered. The element's native enter and leave are the truth:
+   * an overlay above it is not its descendant, so moving onto one is a leave.
+   *
+   * A hover that lands while outside is not dropped but held, so coming back
+   * onto the same tile lights it at once rather than waiting for the next one.
+   */
+  let pointerOnBoard = true;
+  let heldHover: { x: number; y: number } | null = null;
+  /** The board's hover handler, kept so re-entering can replay a held hover. */
+  let hoverTile: ((x: number, y: number) => void) | null = null;
+
+  function clearHover() {
+    activeHoverKey = null;
+    gridRenderer?.setHover(null, null);
+    uiState.hoveredTile = null;
+  }
 
   /*
    * Tap-to-inspect, coarse pointers only.
@@ -346,6 +377,8 @@
     const longest = Math.max(frame.width, frame.height);
     const resolution = Math.min(scale, EXPORT_MAX_SIDE_PX / longest);
 
+    // The inspected building's partner lines are a pointer's, not the board's.
+    gridRenderer?.setLinksVisible(false);
     const canvas = app.renderer.extract.canvas({
       target: gridContainer,
       frame,
@@ -355,6 +388,7 @@
       // than a transparent halo that turns black in most image viewers.
       clearColor: CANVAS_CLEAR,
     });
+    gridRenderer?.setLinksVisible(true);
 
     // `ICanvas` is Pixi's abstraction over an HTMLCanvasElement and an
     // OffscreenCanvas, which spell "give me a blob" differently.
@@ -566,7 +600,11 @@
           dragAction = action;
           commitAction(action, x, y, true);
         },
-        onPointerOver: (x, y) => {
+        onPointerOver: (hoverTile = (x, y) => {
+          if (!pointerOnBoard) {
+            heldHover = { x, y };
+            return;
+          }
           activeHoverKey = `${x},${y}`;
           gridRenderer?.setHover(x, y);
 
@@ -588,13 +626,10 @@
           if (uiState.hoveredTile && after) {
             uiState.hoveredTile.type = after.type;
           }
-        },
+        }),
         onPointerOut: (x, y) => {
-          if (activeHoverKey === `${x},${y}`) {
-            activeHoverKey = null;
-            gridRenderer?.setHover(null, null);
-            uiState.hoveredTile = null;
-          }
+          if (heldHover?.x === x && heldHover.y === y) heldHover = null;
+          if (activeHoverKey === `${x},${y}`) clearHover();
         },
       },
     );
@@ -791,16 +826,89 @@
    */
   $effect(() => {
     // Read first, so this stays a dependency on the path that returns early.
+    // Off in step mode too: a board of pulsing pads is noise around the one
+    // building a step is about. The viewport keeps the player's own choice.
     const on = uiState.animations;
+    const pulse = on && !uiState.stepsActive;
     // `gridRenderer` is a plain `let`, so assigning it does not re-run this.
     // `isAtlasLoaded` is the `$state` that flips right after it is built —
     // the same handle the render effect below uses to wait for it.
     if (!isAtlasLoaded) return;
-    gridRenderer?.setAnimated(on);
+    gridRenderer?.setAnimated(pulse);
     // The same answer governs the board's own motion. With it off the glide,
     // the bounce and the double-tap zoom all still land where they were going,
     // they just do not travel there.
     viewportControls?.setAnimated(on);
+  });
+
+  /*
+   * What moved between buildings on the board on screen, off the same scorer
+   * the overlays read. Only re-run when the board changes, not on hover.
+   */
+  let boardFlows = $derived(
+    placementFlows(
+      layoutState.grid,
+      BUILDINGS,
+      uiState.visiblePlacements,
+      layoutState.placementPrestige,
+      layoutState.placementAnomaly,
+    ),
+  );
+
+  /*
+   * Lines from the inspected building — hovered on a mouse, pinned on touch,
+   * which `inspectedTile` already decides — to every building it sends heat or
+   * cooling to or takes it from, and on through theirs with `chainLinks`. Only
+   * a building standing on the tile has flows: hovering grass draws nothing.
+   */
+  $effect(() => {
+    const focus = uiState.inspectedTile;
+    const flows = boardFlows;
+    const chain = uiState.chainLinks;
+    if (!isAtlasLoaded) return;
+    gridRenderer?.setLinks(focus ? linksFrom(flows, focus, chain) : []);
+  });
+
+  /** The tiles a move step touches: where things arrive, and where they go. */
+  function marksFor(step: MoveStep): StepMark[] {
+    switch (step.kind) {
+      case "move":
+        return [
+          { ...step.from, kind: "leave" },
+          { ...step.to, kind: "arrive" },
+        ];
+      case "build":
+      case "replace":
+        return [{ x: step.x, y: step.y, kind: "arrive" }];
+      case "sell":
+      case "clear":
+        return [{ x: step.x, y: step.y, kind: "leave" }];
+      case "sellAll":
+        return step.tiles.map((t) => ({ ...t, kind: "leave" as const }));
+    }
+  }
+
+  /*
+   * In step mode, the step that made the board on screen: its tiles marked, a
+   * move drawn as an arrow, and every other building faded so the one the step
+   * is about stands out. At the start, before any step, the board is shown
+   * whole. `stepsActive` rather than `moveSteps`, so a plan for another board
+   * never marks or fades this one.
+   */
+  $effect(() => {
+    const m = uiState.stepsActive ? uiState.moveSteps : null;
+    const step = m && m.index > 0 ? m.plan.steps[m.index - 1] : null;
+    if (!isAtlasLoaded) return;
+    const marks = step ? marksFor(step) : [];
+    gridRenderer?.setStepMarks(
+      marks,
+      step?.kind === "move" ? [{ from: step.from, to: step.to }] : [],
+    );
+    gridRenderer?.setFocus(
+      step && step.kind !== "sellAll"
+        ? new Set(marks.map((mk) => `${mk.x},${mk.y}`))
+        : null,
+    );
   });
 
   /*
@@ -862,6 +970,15 @@
    */
   let buildingOverlays = $derived.by((): BuildingOverlay[] => {
     const placements = uiState.visiblePlacements;
+    // Step mode wears none of it: a gauge and a state icon over every
+    // building drown the one a step is about.
+    if (uiState.stepsActive) {
+      return placements.map(() => ({
+        fill: null,
+        stateIcon: null,
+        anomalyIcon: null,
+      }));
+    }
     const grid = layoutState.grid;
     const prestige = layoutState.placementPrestige;
     const anomaly = layoutState.placementAnomaly;
@@ -1019,6 +1136,19 @@
       pendingEdit = null;
       clearHold();
     }
+  }}
+  onpointerenter={() => {
+    pointerOnBoard = true;
+    const held = heldHover;
+    heldHover = null;
+    if (held) hoverTile?.(held.x, held.y);
+  }}
+  onpointerleave={(e) => {
+    // A touch "leaves" on every lift; only a pointer that can hover moves
+    // off the board onto something else.
+    if (e.pointerType === "touch") return;
+    pointerOnBoard = false;
+    clearHover();
   }}
   onpointerup={handlePointerUp}
   onpointercancel={() => {

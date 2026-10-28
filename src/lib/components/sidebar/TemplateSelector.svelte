@@ -5,10 +5,12 @@
     layoutState,
     solverState,
     uiState,
+    viewportState,
   } from "../../state";
   import { ISLAND_TEMPLATES, MAX_CUSTOM_ISLANDS } from "@reactor2/solver";
   import type { IslandTemplate } from "../../types/building";
   import { Plus, RotateCcw, Trash2 } from "lucide-svelte";
+  import SolveAllButton from "./SolveAllButton.svelte";
   import { onDestroy } from "svelte";
   import { createConfirmArm } from "../confirmArm.svelte";
 
@@ -80,6 +82,14 @@
 </script>
 
 <div class="section-box">
+  <!--
+    "Solve all" heads the island list only on a compact layout; a wide one
+    has it in Setup's footer beside the run-length modes. See SolveAllButton.
+  -->
+  {#if viewportState.isCompact}
+    <div class="solve-all-slot"><SolveAllButton /></div>
+  {/if}
+
   <!--
     No "Island Templates" heading: the Setup switch directly above says
     "Islands", and repeating it costs a row of a panel that is short on them.
@@ -207,6 +217,9 @@
   /* A limit reached is the one thing in this panel that warrants warn. */
   .count.full {
     color: var(--warn);
+  }
+  .solve-all-slot {
+    margin-bottom: 0.6rem;
   }
   .template-list {
     display: flex;

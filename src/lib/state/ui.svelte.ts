@@ -1,15 +1,31 @@
 import type { PixiCanvas } from "../components";
-import type { ImageScale, PlacedBuilding, PlacementView } from "../types";
+import type {
+  ImageScale,
+  OptimizationResult,
+  PlacedBuilding,
+  PlacementView,
+  Tile,
+} from "../types";
+import { isObstacleType } from "../types/grid";
 import type { BuildingCategory } from "@reactor2/solver";
 import { buildShareUrl, clearSharedCode } from "../encoding/shareLink";
 import { downloadBlob, toFileSlug } from "../utils/downloadFile";
 import {
   applyInProgress,
   blueprintRules,
+  BUILDINGS,
+  buildPrice,
+  decodeBlueprint,
+  findBuilding,
+  priceRules,
+  sellRefund,
   decodeGameExport,
   formatNumberForFilename,
+  ISLAND_TEMPLATES,
   isGameExportCode,
   resolveGameExport,
+  type GameExport,
+  type IslandTemplate,
   type InProgressMode,
   type ResolvedGameImport,
 } from "@reactor2/solver";
@@ -21,9 +37,24 @@ import {
 } from "../utils/analytics";
 import { uiStorage } from "../storage/storage";
 import { evaluatePlan, type PlanReport } from "../simulation/upgradePlan";
+import {
+  createBoardScorer,
+  simulatePlacedBuildings,
+} from "../simulation/simulator";
+import {
+  planMoveSteps,
+  PlanCancelled,
+  stepCount,
+  priceSteps,
+  type BoardBuilding,
+  type MovePlan,
+  type StepPrice,
+} from "../simulation/moveSteps";
+import { createPlacement } from "../data/placements";
 import { configState } from "./config.svelte";
 import { layoutState } from "./layout.svelte";
 import { solverState } from "./solver.svelte";
+import { timelineState } from "./timeline.svelte";
 import { viewportState } from "./viewport.svelte";
 
 /** A tile the inspector can point at. Internal — nothing outside builds one. */
@@ -41,6 +72,7 @@ type ActiveModal =
   | "solveModes"
   | "settings"
   | "upgradePlan"
+  | "timeLab"
   | null;
 
 /**
@@ -306,6 +338,23 @@ class UIState {
   }
 
   /**
+   * Whether the inspected building's lines carry on outward — through the
+   * buildings it is linked to, and theirs, until the network it belongs to is
+   * drawn whole. Off, only its own partners are linked.
+   */
+  #chainLinks = $state<boolean>(uiStorage.loadPrefs().chainLinks);
+
+  get chainLinks(): boolean {
+    return this.#chainLinks;
+  }
+
+  setChainLinks(on: boolean) {
+    if (this.#chainLinks === on) return;
+    this.#chainLinks = on;
+    uiStorage.savePrefs({ chainLinks: on });
+  }
+
+  /**
    * Whether usage collection is off, or `null` for "follow the browser".
    *
    * The negative, matching gtag's `ga-disable-<id>`: the default is to
@@ -455,8 +504,24 @@ class UIState {
    * asking to replace anything. Null for anything else in the box.
    */
   gameImport = $state<ResolvedGameImport | null>(null);
+  /**
+   * The same code as the game wrote it. The resolver translates what a board
+   * needs and drops the rest — the economy research, the timeline — which
+   * `timelineState.recordImport` keeps.
+   */
+  #gameExport: GameExport | null = null;
   /** What the import does with research still running in the game. */
   gameImportMode = $state<InProgressMode>("plan");
+
+  /**
+   * "Solve all islands" in progress: how many are done, how many in all, and
+   * the one running now. Null with no batch running.
+   */
+  solveAll = $state<{ done: number; total: number; current: string } | null>(
+    null,
+  );
+  /** Set by Stop: the island running finishes, and no further one starts. */
+  #solveAllCancelled = false;
   /** Orders reads of the box, so a slow decode cannot land over a newer paste. */
   #gameReadSeq = 0;
 
@@ -578,6 +643,7 @@ class UIState {
    * board is not showing.
    */
   get visiblePlacements(): PlacedBuilding[] {
+    if (this.stepsActive) return this.#stepBoard;
     if (this.showingSolver) {
       return solverState.optimizationResult?.placements ?? [];
     }
@@ -593,6 +659,8 @@ class UIState {
    * so its rows — already scored by `simulation/simulator.ts` — are added up.
    */
   get visiblePower(): number {
+    if (this.stepsActive)
+      return this.moveSteps!.plan.powers[this.moveSteps!.index];
     if (this.showingSolver)
       return solverState.optimizationResult?.totalPower ?? 0;
     return layoutState.placements.reduce((sum, p) => sum + p.powerGenerated, 0);
@@ -654,6 +722,8 @@ class UIState {
    * A no-op write still costs a storage round-trip, so it is skipped.
    */
   setPlacementView(view: PlacementView) {
+    // The steps lead to the solve; leaving the solve leaves them too.
+    if (view === "user") this.closeMoveSteps();
     if (this.placementView === view) return;
     this.placementView = view;
     uiStorage.savePrefs({ placementView: view });
@@ -677,6 +747,8 @@ class UIState {
     // the verb another way.
     if (this.isPreview) return;
     if (solverState.isOptimizing) {
+      // Stop ends a "Solve all" too, not just the island it is on.
+      if (this.solveAll) this.#solveAllCancelled = true;
       solverState.stopOptimizer();
       return;
     }
@@ -763,6 +835,308 @@ class UIState {
   #beginSolve(options: { keepBest?: boolean } = {}) {
     this.setSheetDetent("closed");
     void solverState.runOptimizer(options);
+  }
+
+  /**
+   * The islands "Solve all" works through: every shipped island that exists in
+   * the game, less those the last import says are still locked there — the
+   * player has nothing on those, and a solve for them answers no question yet.
+   */
+  get solveAllTargets(): IslandTemplate[] {
+    const locked = timelineState.record?.lockedTemplateIds ?? [];
+    return ISLAND_TEMPLATES.filter((t) => t.game && !locked.includes(t.id));
+  }
+
+  /** Whether "Solve all" can start now — the controls are hidden otherwise. */
+  get canSolveAll(): boolean {
+    return (
+      !this.isPreview &&
+      !solverState.isOptimizing &&
+      this.solveAll === null &&
+      configState.canProducePower &&
+      this.solveAllTargets.length > 0
+    );
+  }
+
+  /**
+   * Solves every unlocked island in turn, keeping each one's best layout, then
+   * goes back to the island the player started on.
+   *
+   * It does this by opening each island exactly as the island list does and
+   * running the same solve the Run button runs. That is deliberate: a run is
+   * built around the board on screen — the layout it defends, the per-island
+   * merge, the streamed progress — and solving an island off screen would mean
+   * a second path through the most carefully pinned code in the app. Setup is
+   * hidden while any run is in flight anyway, so there is little else to look
+   * at, and watching each island solved is the progress bar.
+   *
+   * Each island's stored solve is defended the way the Run dialog's "keep the
+   * better one" defends it, whenever it was searched under the same anomaly
+   * and plan; across a change of either the two figures do not compare, and
+   * the fresh run stands, as it would from the Run button.
+   *
+   * Stop ends the batch after the island running. A hidden tab holds the next
+   * island back until it is visible again: a background tab is where a batch
+   * the player has forgotten about would otherwise run their battery down.
+   */
+  // ── Move steps: from the game's board to the solve ─────────────────────
+
+  /**
+   * The steps from the player's board in Edit to the solve on screen, and the
+   * one being looked at — see `simulation/moveSteps.ts`. Null outside step
+   * mode.
+   */
+  moveSteps = $state<{
+    templateId: string;
+    result: OptimizationResult;
+    plan: MovePlan;
+    index: number;
+    /** Each step's cash, in order — see `priceSteps`. */
+    prices: StepPrice[];
+  } | null>(null);
+
+  /** Planning in progress: steps decided of steps in all. */
+  moveStepsPlanning = $state<{ done: number; total: number } | null>(null);
+  #moveStepsSeq = 0;
+
+  /**
+   * Whether step mode is what the board shows: the steps were planned for this
+   * island and this very solve, and the solve is on screen. A switch of island,
+   * a new run or the Edit view each make it false without anyone closing it,
+   * so a plan can never be drawn over a board it does not describe.
+   */
+  get stepsActive(): boolean {
+    const m = this.moveSteps;
+    return (
+      m !== null &&
+      this.showingSolver &&
+      m.templateId === layoutState.activeTemplateId &&
+      m.result === solverState.optimizationResult
+    );
+  }
+
+  /** Whether "Steps" can be offered for the board on screen now. */
+  get canPlanMoveSteps(): boolean {
+    return (
+      this.showingSolver &&
+      !this.isPreview &&
+      !solverState.isOptimizing &&
+      this.moveStepsPlanning === null &&
+      (solverState.optimizationResult?.placements.length ?? 0) > 0
+    );
+  }
+
+  /** The board after the step being looked at, scored. */
+  #stepBoard: PlacedBuilding[] = $derived.by(() => {
+    const m = this.moveSteps;
+    if (!m) return [];
+    const upgrades = configState.buildingUpgrades;
+    return simulatePlacedBuildings(
+      layoutState.grid,
+      BUILDINGS,
+      m.plan.boards[m.index].map((b) =>
+        createPlacement(b.buildingId, b.x, b.y, upgrades),
+      ),
+      configState.prestige,
+      configState.activeAnomaly,
+    );
+  });
+
+  /**
+   * Plans the steps for the island on screen and enters step mode at the
+   * start. The starting board is the game's, as last imported, so the steps
+   * are ones the player can take in the game; an island the import does not
+   * cover starts from their board here instead. Superseded by a later call,
+   * and abandoned if the solve or the island changes while it plans.
+   */
+  async planMoveSteps() {
+    if (!this.canPlanMoveSteps) return;
+    const seq = ++this.#moveStepsSeq;
+    const templateId = layoutState.activeTemplateId;
+    const grid = $state.snapshot(layoutState.grid);
+    const upgrades = $state.snapshot(configState.buildingUpgrades);
+
+    /*
+     * The steps start from the board in Edit: straight after an import that is
+     * the game's island, and once the player has rearranged it, it is where
+     * they say they are. The obstacles come from the game's board as imported,
+     * when there is one — a tile cleared here may still stand in the game, and
+     * building on it there needs a clear first.
+     */
+    const start: BoardBuilding[] = layoutState.placements.map(
+      ({ buildingId, x, y }) => ({ buildingId, x, y }),
+    );
+    let obstacles: { x: number; y: number; type: Tile["type"] }[] = [];
+    const code = timelineState.record?.islands[templateId];
+    if (code) {
+      try {
+        obstacles = (await decodeBlueprint(code)).grid
+          .flat()
+          .filter((t) => isObstacleType(t.type))
+          .map((t) => ({ x: t.x, y: t.y, type: t.type }));
+      } catch {
+        // An unreadable import leaves the clears out rather than the plan.
+      }
+    }
+    // Of the solve's layouts — every one at the same power — aim at the one
+    // nearest the island: the same answer in the fewest steps. It is put on
+    // screen, since the steps lead to the board being looked at.
+    const shapeOf = (r: OptimizationResult): BoardBuilding[] =>
+      r.placements.map(({ buildingId, x, y }) => ({ buildingId, x, y }));
+    const variants = solverState.variants;
+    if (variants.length > 1) {
+      let nearest = solverState.variantIndex;
+      let fewest = Infinity;
+      variants.forEach((v, i) => {
+        const n = stepCount(start, shapeOf(v));
+        if (n < fewest) [fewest, nearest] = [n, i];
+      });
+      if (nearest !== solverState.variantIndex)
+        solverState.showVariant(nearest);
+    }
+    const result = solverState.optimizationResult!;
+    const target = shapeOf(result);
+    const free = grid
+      .flat()
+      .filter((t) => t.type === "grass")
+      .map(({ x, y }) => ({ x, y }));
+    const score = createBoardScorer(
+      grid,
+      BUILDINGS,
+      upgrades,
+      configState.prestige,
+      configState.activeAnomaly,
+    );
+
+    const stale = () =>
+      seq !== this.#moveStepsSeq ||
+      layoutState.activeTemplateId !== templateId ||
+      solverState.optimizationResult !== result;
+
+    this.moveStepsPlanning = { done: 0, total: 0 };
+    try {
+      const plan = await planMoveSteps(start, target, obstacles, free, score, {
+        onProgress: (done, total) => {
+          if (!stale()) this.moveStepsPlanning = { done, total };
+        },
+        cancelled: stale,
+        // Scored by the planner's own scorer, so the goal and the steps are
+        // measured alike: once the island makes this, the rest only shuffles.
+        stopAtPower: score(
+          new Map(target.map((b) => [`${b.x},${b.y}`, b.buildingId])),
+        ),
+      });
+      if (stale()) return;
+      if (plan.steps.every((step) => step.kind === "clear")) {
+        this.showToast("Your island already makes as much as this layout");
+        return;
+      }
+      const rules = priceRules(timelineState.record?.research ?? {});
+      const baseOf = (id: string) => findBuilding(id)?.price ?? 0;
+      const prices = priceSteps(
+        plan,
+        await this.#copiesAcrossIslands(),
+        (id, n) => buildPrice(baseOf(id), n, rules),
+        (id, n) => sellRefund(baseOf(id), n, rules),
+      );
+      if (stale()) return;
+      this.moveSteps = {
+        templateId,
+        result,
+        plan,
+        index: 0,
+        prices,
+      };
+      this.closeInspector();
+    } catch (err) {
+      if (!(err instanceof PlanCancelled)) throw err;
+    } finally {
+      if (seq === this.#moveStepsSeq) this.moveStepsPlanning = null;
+    }
+  }
+
+  /**
+   * Each building's count across every island — what a price climbs with —
+   * on the boards here, as the steps start from them: the island on screen
+   * from its board in Edit, every other from its saved layout.
+   */
+  async #copiesAcrossIslands(): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    const active = layoutState.activeTemplateId;
+    for (const p of layoutState.placements)
+      counts.set(p.buildingId, (counts.get(p.buildingId) ?? 0) + 1);
+    const codes = ISLAND_TEMPLATES.filter((t) => t.game && t.id !== active).map(
+      (t) => layoutState.savedGrids[t.id]?.code ?? t.code,
+    );
+    for (const code of codes) {
+      try {
+        for (const p of (await decodeBlueprint(code)).placements)
+          counts.set(p.buildingId, (counts.get(p.buildingId) ?? 0) + 1);
+      } catch {
+        // An unreadable board counts for nothing rather than failing the plan.
+      }
+    }
+    return counts;
+  }
+
+  /** Shows the board after step `index` (0 is the start, before any step). */
+  showMoveStep(index: number) {
+    const m = this.moveSteps;
+    if (!m) return;
+    m.index = Math.max(0, Math.min(index, m.plan.steps.length));
+  }
+
+  closeMoveSteps() {
+    this.#moveStepsSeq++;
+    this.moveSteps = null;
+    this.moveStepsPlanning = null;
+  }
+
+  async solveAllIslands() {
+    if (!this.canSolveAll) return;
+    const islands = this.solveAllTargets;
+    const home = layoutState.findTemplate(layoutState.activeTemplateId);
+    this.#solveAllCancelled = false;
+    this.setSheetDetent("closed");
+    this.closeInspector();
+
+    let done = 0;
+    try {
+      for (const island of islands) {
+        await whenVisible();
+        if (this.#solveAllCancelled) break;
+        this.solveAll = {
+          done,
+          total: islands.length,
+          current: island.name,
+        };
+        if (island.id !== layoutState.activeTemplateId) {
+          await layoutState.loadTemplate(island, configState.buildingUpgrades);
+          solverState.restore();
+          this.recenterCanvas();
+        }
+        const keepBest =
+          solverState.optimizationResult !== null &&
+          solverState.resultAnomalyId === configState.activeAnomaly.id &&
+          solverState.resultPlanKey === configState.planKey;
+        await solverState.runOptimizer({ keepBest });
+        if (this.#solveAllCancelled) break;
+        done++;
+      }
+    } finally {
+      this.solveAll = null;
+      if (home && home.id !== layoutState.activeTemplateId) {
+        await layoutState.loadTemplate(home, configState.buildingUpgrades);
+        solverState.restore();
+        this.recenterCanvas();
+      }
+      this.showToast(
+        done === islands.length
+          ? `Solved all ${done} islands`
+          : `Stopped after ${done} of ${islands.length} islands`,
+        done === islands.length ? "ok" : "warn",
+      );
+    }
   }
 
   /** Folds the corner readout on a small screen, and remembers it. */
@@ -1042,6 +1416,7 @@ class UIState {
     this.importError = null;
     this.isImporting = false;
     this.gameImport = null;
+    this.#gameExport = null;
     this.activeModal = "import";
   }
 
@@ -1054,16 +1429,20 @@ class UIState {
     const seq = ++this.#gameReadSeq;
     if (!isGameExportCode(code)) {
       this.gameImport = null;
+      this.#gameExport = null;
       return;
     }
     try {
-      const resolved = await resolveGameExport(await decodeGameExport(code));
+      const exp = await decodeGameExport(code);
+      const resolved = await resolveGameExport(exp);
       if (seq !== this.#gameReadSeq) return;
+      this.#gameExport = exp;
       this.gameImport = resolved;
       this.importError = null;
     } catch (err) {
       if (seq !== this.#gameReadSeq) return;
       this.gameImport = null;
+      this.#gameExport = null;
       this.importError =
         err instanceof Error ? err.message : "That code could not be read.";
     }
@@ -1080,7 +1459,8 @@ class UIState {
    */
   async applyGameImport() {
     const resolved = this.gameImport;
-    if (!resolved || this.isImporting) return;
+    const exp = this.#gameExport;
+    if (!resolved || !exp || this.isImporting) return;
     this.isImporting = true;
     this.importError = null;
     try {
@@ -1099,9 +1479,11 @@ class UIState {
       // Every stored solve was found under the old roster: keep each one the
       // import left buildable, re-scored, before restore() reads the store.
       await solverState.carryOverSolves(resolved.lockedTemplateIds);
+      await timelineState.recordImport(exp, resolved);
       this.activeModal = null;
       this.importCode = "";
       this.gameImport = null;
+      this.#gameExport = null;
       solverState.restore();
       this.closeInspector();
       this.recenterCanvas();
@@ -1175,9 +1557,29 @@ class UIState {
     this.activeModal = "upgradePlan";
   }
 
+  /** The Time Lab planner: what to buy with the Chronons a jump would leave. */
+  openTimeLabPlanner() {
+    this.overflowOpen = false;
+    this.activeModal = "timeLab";
+  }
+
   closeModal() {
     this.activeModal = null;
   }
+}
+
+/** Resolves at once on a visible page, else when it next becomes visible. */
+function whenVisible(): Promise<void> {
+  if (typeof document === "undefined" || document.visibilityState !== "hidden")
+    return Promise.resolve();
+  return new Promise((resolve) => {
+    const onChange = () => {
+      if (document.visibilityState === "hidden") return;
+      document.removeEventListener("visibilitychange", onChange);
+      resolve();
+    };
+    document.addEventListener("visibilitychange", onChange);
+  });
 }
 
 export const uiState = new UIState();

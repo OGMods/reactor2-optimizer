@@ -17,6 +17,7 @@ import type {
   AnomalyId,
   EffectiveBuilding,
   IslandSubGrid,
+  PrestigeScales,
   Tile,
 } from "../src/solver/types";
 
@@ -28,6 +29,7 @@ type Task =
       budgetS: number;
       seed?: number;
       anomaly?: AnomalyDefinition;
+      upgradeSteps?: EffectiveBuilding[][];
     }
   | {
       kind: "attempt";
@@ -36,6 +38,8 @@ type Task =
       timeLimitS: number;
       seed?: number;
       anomalyId?: AnomalyId;
+      prestige?: PrestigeScales;
+      upgradePlan?: Record<string, number>[];
     };
 
 parentPort?.on(
@@ -51,13 +55,18 @@ parentPort?.on(
               undefined,
               payload.seed,
               payload.anomaly,
+              payload.upgradeSteps,
             )
           : await solve(
               payload.grid,
               [...BUILDINGS],
               payload.unlockedUpgrades,
               payload.timeLimitS,
-              { anomalyId: payload.anomalyId },
+              {
+                anomalyId: payload.anomalyId,
+                prestige: payload.prestige,
+                upgradePlan: payload.upgradePlan,
+              },
               payload.seed,
             );
       parentPort?.postMessage({ meta, result });

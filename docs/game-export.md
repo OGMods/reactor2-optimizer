@@ -128,9 +128,12 @@ Primitive encodings (what .NET's `BinaryWriter` writes, UTF-8):
 | `int16`  | 2, little-endian, signed                                  |
 | `uint16` | 2, little-endian                                          |
 | `int32`  | 4, little-endian, signed                                  |
+| `int64`  | 8, little-endian, signed                                  |
+| `double` | 8, IEEE 754, little-endian                                |
 | `string` | 7-bit-encoded length (LEB128), then that many UTF-8 bytes |
 
-Six sections, always present, always in this order:
+Seven sections, always present, always in this order (section 7 since game
+1.1.11; an older code ends after section 6):
 
 | #   | Section                 | Contents                                                                                                                |
 | --- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------- |
@@ -140,6 +143,7 @@ Six sections, always present, always in this order:
 | 4   | Research                | `uint16` count · per `ResearchSO`, all domains: `string` research id · `uint16` level                                   |
 | 5   | Research in progress    | `uint16` count · per entry: `string` research id · `uint16` level it will reach · `int32` seconds left                  |
 | 6   | Obstacles being cleared | `uint16` count · per entry: `int16` x · `int16` y · `int32` seconds left                                                |
+| 7   | Timeline                | see 4.5                                                                                                                 |
 
 Rules:
 
@@ -197,6 +201,46 @@ y = minY + 1 : grass  cooler2 generator7
 
 has the cell bytes `00 01 02 01 07 08`.
 
+### 4.5 Timeline
+
+Where the player's timeline stands, for the optimizer's Chronon tools. In this
+order:
+
+| Field               | Type                              | Meaning                                                                                                                                  |
+| ------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Exported at         | `int64`                           | Moment of export, Unix seconds, UTC: server time once the game has synced, the device clock otherwise                                    |
+| Chronon balance     | `int64`                           | Chronons held, unspent                                                                                                                   |
+| Timeline energy     | `double`                          | `TimelineEnergyProduced`, online + offline: the `E` of the award                                                                         |
+| Timeline elapsed    | `int64`                           | Seconds since the timeline began, on the game's internal clock                                                                           |
+| Jump award now      | `int64`                           | The game's own award for a jump now, **without** the first-entry bonus; 0 at zero energy                                                 |
+| Anomalies entered   | `uint16` count · count × `string` | Anomalies whose first-entry bonus is spent. Always `tidal_ascendancy`, never `tidal_ascendancy_legacy`: the bonus belongs to the anomaly |
+| Timeline generation | `int32`                           | Time Jumps completed, 0 before the first                                                                                                 |
+| Cash                | `double`                          | The raw signed balance: negative while building on credit                                                                                |
+| Research points     | `double`                          | Research points held                                                                                                                     |
+| Stamp source        | `byte`                            | Which clock wrote "Exported at": 0 server time, 1 the device clock (the game had not synced)                                             |
+
+Cash and research points were appended after the first samples, and the stamp
+source after them, so a code that ends at any of those fields is a valid, older
+section 7. Cash goes **below zero** on
+build credit: a purchase is allowed while `cash − cost ≥ −limit`, the limit set by
+the Build Credit research in section 4. The caps on both balances also come from
+research, and are multiplied while Rush Hour runs.
+
+The award, as the developer gave it:
+
+```
+Chronons = max(1, floor(97.34 × (E / 2.82e16)^0.135 × M)) + B
+```
+
+`M` is the Chronon Reactor multiplier (its level is in section 4), `B` is 88
+on the first entry into an anomaly and 0 otherwise. A jump is allowed once the
+award without `B` reaches `min(5000, round(88 × 1.15^generation))`, midpoint
+rounded away from zero.
+
+For a save older than the Time Jump feature that has not jumped yet, timeline
+energy and elapsed are counted from its first launch after that update; the
+two still agree, so energy per second is right.
+
 ## 5. Versioning
 
 - The format version is the digit in the `R2X1.` prefix.
@@ -235,6 +279,40 @@ first three real exports came to 2,347–2,460 characters.
   The roster also lists `research_building_tidal_plant`, a building the
   optimizer does not carry yet. The reader matches ids exactly and skips unknown
   ones.
+- **The 1.1.11 timeline samples** are in `tests/gameExports/` as
+  `gen<jumps>_<anomaly>_city<level>.txt`, the third round, ending with the
+  clock byte. A `_server` file is the same save stamped by server time (the
+  editor's sync fed from an NTP clock), the rest by the device clock.
+  `owner_editor_save` is kept from the second round as the one real code that
+  ends at research points. Each one's jump award matches the formula in 4.5.
+  One of them, `gen1_cryo_city41`, has a building on the transformer cell of
+  areas 6, 7 and 8; the importer drops those three.
+- **The power is right to under 100 parts per million.** `gen2_city52_9c43e4b7`
+  is a player's save, exported repeatedly with the same boards. The energy the
+  game added between two exports, over the time between, is its real rate, and
+  the simulator's power for those boards, as energy per 3-second tick, lands
+  within 25–66 ppm of it whenever the gap was offline. `editor_current_save`,
+  the same save after some play in the editor, comes out 229 ppm slower: the
+  online tick drift below, measured.
+- **An editor export runs about 10 s ahead.** On that same save the projected
+  next Chronon arrived 10–11 s before the game's, with the browser's clock
+  correct. The code came from the developer's Unity editor, which loaded the
+  save and credited its offline income by its own game clock — and the game's
+  anti-tampering can hold that clock off real time. So the editor's copy was 10
+  s ahead of the player's phone, and the projection was right for the copy it
+  was given. A player's own export has energy and stamp from one copy, so the
+  stamp should stay **server time**: that is the real moment the energy
+  describes, where a game-clock stamp would carry the anti-tampering offset into
+  every projection. The weak spot is the unsynced fallback to the device clock.
+- **The game runs slow while it is open (a game bug, being fixed).** Its
+  production tick waits 3 s after the previous one and the wait ends on the next
+  frame, so each tick runs a few milliseconds long: about 0.3% slow at 60 fps
+  (~10 s an hour), 0.5% at 30 fps, and more on frame hitches. Offline time is
+  counted in real time. So a projection on the real clock pulls ahead of the game
+  by that fraction of the time it has been open since the export — the
+  projection is right and the game drifts. The developer also suspects a short
+  focus loss credits the gap since the last autosave (every 15 s) rather than
+  since the pause. Neither is modelled here: both are the game's to fix.
 - **A code can pick up stray characters when pasted.** One sample ended in a
   stray `ś`. The reader drops anything outside the base64url alphabet before
   decoding; a code damaged in the middle still fails, at the inflate.

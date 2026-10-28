@@ -24,6 +24,8 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  linksFrom,
+  placementFlows,
   ratedPlacementAt,
   ratingShifts,
   simulatePlacedBuildings,
@@ -682,5 +684,84 @@ describe("a rating shift marks exactly the buildings the rules moved", () => {
       [2, 1, "cooler", VALUES.cooler],
     ];
     expect(shiftsOf(walledGrid(5, 3), spec, CRYO)).toEqual([null, "down"]);
+  });
+});
+
+describe("a flow is drawn only where something moved", () => {
+  const pairsOf = (spec: Spec, anomaly?: AnomalyDefinition, w = 8, h = 8) =>
+    placementFlows(grassGrid(w, h), DEFS, place(spec), undefined, anomaly)
+      .map((f) => `${f.from.x},${f.from.y}>${f.to.x},${f.to.y}`)
+      .sort();
+
+  /*
+   * One generator between two reactors and two coolers. The game walks columns
+   * left to right, and within one bottom-up: the left reactor fills the
+   * generator on its own, so the right one sleeps beside it; the lower cooler
+   * covers all its waste, so the upper one has nothing to do.
+   */
+  const contested: Spec = [
+    [0, 1, "reactor", VALUES.reactor],
+    [2, 1, "reactor", VALUES.reactor],
+    [1, 1, "generator", VALUES.generator],
+    [1, 2, "cooler", VALUES.cooler],
+    [1, 0, "cooler", VALUES.cooler],
+  ];
+
+  it("links a generator to the reactor and cooler that served it, not the idle ones beside it", () => {
+    expect(pairsOf(contested)).toEqual(["0,1>1,1", "1,2>1,1"]);
+  });
+
+  it("links nothing to a reactor with no generator in reach", () => {
+    expect(
+      pairsOf([
+        [0, 0, "reactor", VALUES.reactor],
+        [3, 3, "generator", VALUES.generator],
+      ]),
+    ).toEqual([]);
+  });
+
+  it("feeds every source from every working cooler under Cryo Nexus", () => {
+    const far: Spec = [...contested, [6, 6, "cooler", VALUES.cooler]];
+    expect(pairsOf(far, getAnomaly("cryo_nexus"))).toEqual([
+      "0,1>1,1",
+      "1,0>1,1",
+      "1,2>1,1",
+      "6,6>1,1",
+    ]);
+  });
+});
+
+describe("the links drawn from a building", () => {
+  const flow = (a: [number, number], b: [number, number]) => ({
+    from: { x: a[0], y: a[1] },
+    to: { x: b[0], y: b[1] },
+  });
+  // Reactor (0,0) -> generator (1,0) <- cooler (2,0); generator (1,0) is also
+  // fed by reactor (1,1), and a separate pair (5,5) -> (6,5) shares nothing.
+  const flows = [
+    flow([0, 0], [1, 0]),
+    flow([2, 0], [1, 0]),
+    flow([1, 1], [1, 0]),
+    flow([5, 5], [6, 5]),
+  ];
+  const drawn = (focus: [number, number], chain: boolean) =>
+    linksFrom(flows, { x: focus[0], y: focus[1] }, chain)
+      .map(
+        (l) =>
+          `${l.from.x},${l.from.y}>${l.to.x},${l.to.y}${l.direct ? "" : "~"}`,
+      )
+      .sort();
+
+  it("draws only the focus's own flows without the chain", () => {
+    expect(drawn([0, 0], false)).toEqual(["0,0>1,0"]);
+  });
+
+  it("follows the chain through linked buildings, fainter past the first step", () => {
+    expect(drawn([0, 0], true)).toEqual(["0,0>1,0", "1,1>1,0~", "2,0>1,0~"]);
+  });
+
+  it("never reaches a network the focus is not part of", () => {
+    expect(drawn([5, 5], true)).toEqual(["5,5>6,5"]);
+    expect(drawn([9, 9], true)).toEqual([]);
   });
 });

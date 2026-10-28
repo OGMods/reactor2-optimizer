@@ -188,7 +188,8 @@ export async function greedyPolish(
  * Post-search cleanup:
  * 1. Drops every producer generating 0 power, repeating until none remain.
  * 2. Sequentially tests removing reactors/coolers to eliminate redundant
- *    support structures.
+ *    support structures, and direct producers whose output the island's
+ *    total is too large to register.
  * 3. Guarantees a stable layout — every returned producer is online — with a
  *    minimal active tile footprint.
  *
@@ -215,12 +216,25 @@ export function pruneDeadWeight(
   let bestPower = stabilized.power;
   let rows = stabilized.rows;
 
-  // 2. Greedy backward sweep: test removing support buildings (reactors & coolers).
+  // 2. Greedy backward sweep: test removing support buildings (reactors &
+  // coolers), and direct producers too.
+  //
+  // A direct producer earns its tile on a small island, where a wind turbine
+  // beside a cooler is the most two tiles can make. On a large one its output
+  // is below the resolution of the island's total: 7 added to 1.5e25 is
+  // 1.5e25 exactly, since a double's last place there is around 2e9. Every
+  // comparison the search makes then reads it as worth nothing, so the walk
+  // drifts turbines in as neutral moves (a zero delta is always accepted) and
+  // nothing ever has a reason to take them out. Measured on Shadowspire under
+  // Singularity: five turbines across its two main islands on one run, none on
+  // the next. Removing one is accepted on the same guard as any support
+  // building — total power not lower — so a turbine whose 7 registers stays.
   const support: number[] = [];
   for (let tile = 0; tile < ctx.n; tile++) {
     const b = current[tile];
     if (b === null) continue;
-    if (b.type === "cooler" || isReactor(b)) support.push(tile);
+    if (b.type === "cooler" || b.type === "direct_producer" || isReactor(b))
+      support.push(tile);
   }
 
   for (const tile of support) {

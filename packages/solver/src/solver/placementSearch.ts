@@ -9,6 +9,7 @@ import type {
   IslandLayout,
   IslandSubGrid,
   PlacedBuilding,
+  Placement,
   SearchHooks,
 } from "./types";
 import { hillClimb } from "./search/anneal";
@@ -305,6 +306,13 @@ export async function replayIslandDeterministic(
 }
 
 /**
+ * How much one reactor tier is worth over the one below it. Every reactor in
+ * the catalogue steps by this factor, give or take the authored rounding, so
+ * dividing by it is "one tier down" without a second lookup into the table.
+ */
+const TIER_STEP = 1.25;
+
+/**
  * Solves one island.
  *
  * `rngSeed` fixes the random stream of the annealing walk. Same seed, same move
@@ -313,7 +321,6 @@ export async function replayIslandDeterministic(
  * narrows run-to-run variance rather than eliminating it. Omitting it draws a
  * fresh seed, preserving the stochastic default.
  */
-
 export async function solveIsland(
   island: IslandSubGrid,
   effectiveBuildings: EffectiveBuilding[],
@@ -387,12 +394,32 @@ export async function solveIsland(
     deadlineMs,
   );
 
+  // A seed built from a roster other than the one being scored, rewritten in
+  // the scored roster's buildings by id, replaces the seed when it runs better.
+  const targetById = new Map(effectiveBuildings.map((b) => [b.id, b]));
+  const adoptIfBetter = (altSeed: Placement) => {
+    const remapped = emptyPlacement(ctx.n);
+    for (let t = 0; t < ctx.n; t++) {
+      const b = altSeed[t];
+      const target = b === null ? undefined : targetById.get(b.id);
+      if (target !== undefined) put(remapped, ctx, t, target);
+    }
+    if (stabilize(remapped, ctx).power > stabilize(seed, ctx).power) {
+      seed = remapped;
+    }
+  };
+
   // Under a plan, a seed built from the target roster is sized for buildings
   // the player does not have yet: fewer coolers than today's tiers need, so
   // stabilizing it strips it bare — and nothing downstream puts the cooling
   // back, since a cooler that only today needs never raises target power. So
   // seed from the first step (today's tiers) as well, written in target
   // buildings, and start from whichever runs better across the plan.
+  //
+  // Under a terrain bonus without a plan, seed as well from the roster with
+  // its top reactor one tier down: the shore multiplies a hub's heat, so a
+  // seed sized for the full reactor is short of cooling there, the same way a
+  // target-sized seed is under a plan. See `docs/SOLVER.md`.
   const plan = upgradePlans.get(ctx);
   if (plan !== undefined) {
     const today = plan.steps[0];
@@ -401,24 +428,37 @@ export async function solveIsland(
         .filter((b) => b.type === type)
         .map(pool)
         .sort((a, b) => b[key] - a[key]);
-    const todaySeed = constructMultiStartSeed(
-      ctx,
-      byRole("reactor", "effectiveValue"),
-      byRole("generator", "effectiveValue"),
-      byRole("cooler", "effectiveValue"),
-      byRole("direct_producer", "energy"),
-      deadlineMs,
+    adoptIfBetter(
+      constructMultiStartSeed(
+        ctx,
+        byRole("reactor", "effectiveValue"),
+        byRole("generator", "effectiveValue"),
+        byRole("cooler", "effectiveValue"),
+        byRole("direct_producer", "energy"),
+        deadlineMs,
+      ),
     );
-    const targetById = new Map(effectiveBuildings.map((b) => [b.id, b]));
-    const remapped = emptyPlacement(ctx.n);
-    for (let t = 0; t < ctx.n; t++) {
-      const b = todaySeed[t];
-      const target = b === null ? undefined : targetById.get(b.id);
-      if (target !== undefined) put(remapped, ctx, t, target);
-    }
-    if (stabilize(remapped, ctx).power > stabilize(seed, ctx).power) {
-      seed = remapped;
-    }
+  } else if (
+    ctx.anomaly.rule === "terrain_affinity" &&
+    !ctx.uniformRating &&
+    reactors.length > 0
+  ) {
+    const top = reactors[0];
+    const weaker = reactors
+      .map((b) =>
+        b === top ? { ...b, effectiveValue: b.effectiveValue / TIER_STEP } : b,
+      )
+      .sort((a, b) => b.effectiveValue - a.effectiveValue);
+    adoptIfBetter(
+      constructMultiStartSeed(
+        ctx,
+        weaker,
+        generators,
+        coolers,
+        directProducers,
+        deadlineMs,
+      ),
+    );
   }
 
   // Repair the seed before annealing, and again afterwards. Seed construction

@@ -29,11 +29,23 @@ import { base64UrlToUint8Array, pipeThrough } from "./streams";
  *   4. research  uint16 n · n × (string id · uint16 level)
  *   5. ongoing   uint16 n · n × (string id · uint16 target level · int32 secs)
  *   6. clearing  uint16 n · n × (int16 x · int16 y · int32 secs)
+ *   7. timeline  int64 exported at (Unix s, UTC) · int64 chronons · double
+ *                timeline energy · int64 timeline secs · int64 award now ·
+ *                uint16 n · n × string anomaly entered · int32 generation
+ *                [· double cash · double research points
+ *                [· byte stamp source: 0 server, 1 device clock]]
  *
  * Integers are little-endian; a string is a 7-bit-encoded length followed by
  * UTF-8. A section appended after these is ignored rather than refused, so the
  * game can grow the format without a version bump; anything else is a new
  * version, and an unknown version is refused rather than guessed at.
+ *
+ * Section 7 arrived that way, in game 1.1.11, so a code written before it ends
+ * after section 6 and reads with `timeline: null`. It is all-or-nothing up to
+ * the generation: a code that starts it must finish it, since a half-read
+ * timeline would hand the Chronon figures a stray number. Cash and research
+ * points were appended after the first samples, by the same rule, so a code
+ * ending at the generation reads them as null.
  */
 
 /** The only format version this build reads. */
@@ -71,6 +83,56 @@ export interface GameExportClearing {
   secondsLeft: number;
 }
 
+/**
+ * Where the player's timeline stands at the moment of export — the figures a
+ * Time Jump is paid from. See `docs/game-export.md` section 4.5.
+ */
+export interface GameExportTimeline {
+  /**
+   * Unix seconds, UTC: the game's server time when it has synced, the device
+   * clock otherwise. What a code pasted later is brought forward from.
+   */
+  exportedAt: number;
+  /** Chronons held, unspent. */
+  chronons: number;
+  /**
+   * `TimelineEnergyProduced`, online and offline — the `E` the award is
+   * computed from. A save older than the Time Jump counts from its first
+   * launch after that update, and so does `elapsedSeconds`.
+   */
+  energy: number;
+  /** Seconds since the timeline began, on the game's own clock. */
+  elapsedSeconds: number;
+  /**
+   * The game's own award for jumping now, **without** the first-entry bonus:
+   * that one depends on which anomaly the jump picks.
+   */
+  jumpAward: number;
+  /**
+   * Anomalies whose first-entry bonus is spent. Tidal Ascendancy is always
+   * `tidal_ascendancy` here, whatever balance the header names — the bonus
+   * belongs to the anomaly, not to its balance.
+   */
+  anomaliesEntered: string[];
+  /** Time Jumps completed: 0 before the first. */
+  generation: number;
+  /**
+   * The raw signed cash balance — **negative** while the player builds on
+   * credit, down to the limit Build Credit research sets. Null on a code from
+   * before the field.
+   */
+  cash: number | null;
+  /** Research points held; null on a code from before the field. */
+  researchPoints: number | null;
+  /**
+   * Which clock wrote `exportedAt`: the game's server time, or — when the game
+   * had not synced yet — the device's own, which may be off by however far the
+   * device is. Null on a code from before the field, or a value this build
+   * does not know.
+   */
+  stampSource: "server" | "device" | null;
+}
+
 export interface GameExport {
   version: number;
   gameVersion: string;
@@ -84,6 +146,8 @@ export interface GameExport {
   research: Record<string, number>;
   researchInProgress: GameExportProgress[];
   clearing: GameExportClearing[];
+  /** Section 7, or null on a code the game wrote before it had one. */
+  timeline: GameExportTimeline | null;
 }
 
 /**
@@ -136,6 +200,29 @@ class Reader {
     const v = this.#view.getInt32(this.#at, true);
     this.#at += 4;
     return v;
+  }
+
+  /**
+   * `BinaryWriter.Write(long)`, as a number. Every int64 in the format is a
+   * count or a time far inside 2^53, so nothing is lost by not being a bigint.
+   */
+  i64(): number {
+    this.#need(8);
+    const low = this.#view.getUint32(this.#at, true);
+    const high = this.#view.getInt32(this.#at + 4, true);
+    this.#at += 8;
+    return high * 2 ** 32 + low;
+  }
+
+  f64(): number {
+    this.#need(8);
+    const v = this.#view.getFloat64(this.#at, true);
+    this.#at += 8;
+    return v;
+  }
+
+  get done(): boolean {
+    return this.#at >= this.#bytes.length;
   }
 
   /** `BinaryWriter.Write(string)`: a 7-bit-encoded length, then UTF-8. */
@@ -243,6 +330,36 @@ export async function decodeGameExport(text: string): Promise<GameExport> {
     clearing.push({ x: r.i16(), y: r.i16(), secondsLeft: r.i32() });
   }
 
+  let timeline: GameExportTimeline | null = null;
+  if (!r.done) {
+    const exportedAt = r.i64();
+    const chronons = r.i64();
+    const energy = r.f64();
+    const elapsedSeconds = r.i64();
+    const jumpAward = r.i64();
+    const anomaliesEntered: string[] = [];
+    for (let n = r.u16(); n > 0; n--) anomaliesEntered.push(r.str());
+    const generation = r.i32();
+    const hasBalances = !r.done;
+    const cash = hasBalances ? r.f64() : null;
+    const researchPoints = hasBalances ? r.f64() : null;
+    const source = r.done ? null : r.u8();
+    const stampSource =
+      source === 0 ? "server" : source === 1 ? "device" : null;
+    timeline = {
+      exportedAt,
+      chronons,
+      energy,
+      elapsedSeconds,
+      jumpAward,
+      anomaliesEntered,
+      generation,
+      cash,
+      researchPoints,
+      stampSource,
+    };
+  }
+
   return {
     version,
     gameVersion,
@@ -253,5 +370,6 @@ export async function decodeGameExport(text: string): Promise<GameExport> {
     research,
     researchInProgress,
     clearing,
+    timeline,
   };
 }

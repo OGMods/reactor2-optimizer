@@ -1,6 +1,6 @@
 # CLAUDE.md — state layer and board rules
 
-Loaded when working under `src/lib/state/`. The six stores and the dependency
+Loaded when working under `src/lib/state/`. The seven stores and the dependency
 DAG between them are summarised in the root `CLAUDE.md`.
 
 ## The Time Lab and anomalies: the app side
@@ -284,6 +284,174 @@ the board it is solving is no longer the one being looked at.
 duration afterwards (`lastRunDurationMs`, `finishedAt`). The solve has a
 five-minute ceiling, streams its result and shows no progress bar, so without a
 clock nothing separates "four seconds in" from "about to time out".
+
+### `timelineState` (`timeline.svelte.ts`)
+
+The game as a whole, for the header's `TimelineStatus`: every island's power at
+once, and where the Chronon count stands. **Two figures from two sources, and
+keeping them apart is the point.**
+
+- **`totalPower` is the boards here, live.** The island on screen counts from
+  its scored placements; every other game island from its saved layout, re-scored
+  by `refreshIslands` through the simulator's `boardPower` under the current
+  roster, research and anomaly. That one builds its own island context, because
+  the simulator's cache holds one board — the one being edited — and walking
+  eight islands through it would evict it each time. Answers are memoised by
+  board code and rules, and the board on screen is skipped, since it is re-saved
+  after every paint. Custom islands and a previewed layout are not counted.
+- **`projection` is the game's, run forward.** It is the last import's timeline
+  carried from `exportedAt` to `now` at `record.energyPerTick` — the power the
+  game's own boards made, scored at import from the _resolved_ levels rather than
+  whatever the in-progress mode counted as bought. An edit here changes nothing in
+  the game, so it must not move the count; a re-import is what reconciles the two.
+  The formula, the inverse and the jump threshold are the package's
+  (`data/chronons.ts`); island power is energy **per 3-second tick**, which a live
+  save confirmed to the second.
+
+**`record` is the import as the game had it** — `SavedGameImport` under the
+`game_import` key. The roster and boards are edited away after an import; this is
+what survives, for the tools that need the game's truth: the full research map
+(economy and Time Lab, which `configState` never holds), research in progress,
+obstacles being cleared, each island's board as a blueprint (the start of a move
+list), the export and import times, and the timeline — whose cash (signed:
+negative on build credit) and research points are what the cost-aware tools will
+read. `uiState.applyGameImport`
+writes it through `recordImport`, after the import has landed. A record from a
+format version this build cannot read is dropped; the next import rewrites it.
+
+**`chrononTarget` is a jump award the player is waiting for**, and `targetEta`
+counts down to it: real seconds through the package's `secondsUntilAward`, the
+moment on this device's clock, the timeline's length then, and what the player
+would hold after jumping. Unset, it reads today's award, so an empty field
+answers what a jump now would leave the player holding. It is kept in
+`UiPrefs.chrononTarget` so it survives a reload, and **`recordImport` clears it**:
+a new code is a new situation, and a goal set against the last one, left
+standing, read as an import that had not taken. The game's slow ticks (see `docs/game-export.md`) are neither modelled
+nor mentioned: they are the game's bug to fix.
+
+**`pace` reads the rate now against the timeline's average**, in Chronons an
+hour: one Chronon per `chrononSeconds` against the award over the elapsed time.
+Every Chronon takes longer than the last, so once the first falls below the
+second, a fresh timeline that runs like this one would be earning faster — the
+classic point to jump. The panel says that as a reading of two rates, not an
+order: its one assumption is that the next timeline is much like this one, and
+research bought at the jump only makes the next one faster.
+
+**`withSolvesPower` is every island with its stored solve built.** Each solve is
+read off `solverStorage` and re-scored through `boardPower` on its island's
+terrain under today's roster, research and anomaly, so one found before an
+upgrade counts at the tier the player has now — no signature check, because the
+shape is all that is used. An island whose solve makes less than its board keeps
+the board. `targetEta.secondsWithSolves` is the wait at that power, shown only
+when it beats the game's. Storage is not reactive, so `TimelineStatus`'s refresh
+effect also reads `solverState.optimizationResult` and `appliedVariant`: a solve
+landing or a variant applied is what changes a stored solve.
+
+**Without a timeline, nothing that needs one shows.** A game code from a build
+that writes no section 7 — or no import at all — leaves `record.timeline` null,
+and every Chronon figure, the target, the pace, the solve figures, the Time Lab
+planner and its two entry points and the clock warnings are absent rather than explained away: the panel is the all-islands
+power alone, with an Import button only when nothing has been imported. What
+needs only the islands and research every game code carries — Solve all, the
+move steps and their prices — works the same either way.
+
+`now` ticks once a second only while something shows a timeline:
+`startClock()` returns its own stop, for a component's `$effect` to hand back.
+
+### The Time Lab planner (`TimeLabPlannerModal`)
+
+What to buy with the Chronons a jump leaves. The levels are the game's, read off
+the import (`timelineState.timeLabLevels`); the plan is extra levels on top
+(`timeLabPlan`), kept for the session and cleared by an import, since it is
+priced against the levels the last code reported. **The budget is the target's**
+— `targetEta.held`, what the panel says a jump would leave — plus the +88 when
+`planWithBonus` is set and an anomaly is left to earn it, so moving the target
+re-prices the plan.
+
+It measures what it can and only that. Chronon Reactor's next level is priced in
+Chronons a jump at the energy the jump is made at (`reactorNextGain`). The three
+stat researches are priced in power by `refreshPlanPower`, which re-scores every
+island's saved board under the game's research, the plan, and the plan plus one
+level of each — on **one island context per board** (`boardPowers`), since
+research changes only what a tile is rated, never the context. Those are floors:
+the boards as built, not re-solved, so a research the layout is not short of
+reads "no gain". The economy researches get their figure and their cost and no
+invented worth: they move cash, research and obstacle clocks the optimizer does
+not model.
+
+### Move steps (`uiState.planMoveSteps`, `simulation/moveSteps.ts`)
+
+**Steps** in the readout's head, beside Copy, turns the solve on screen into the
+steps that get there **from the player's board in Edit** — straight after an
+import that is the game's island, and once they have rearranged it, it is where
+they say they are. The clears come from the game's board as imported
+(`timelineState.record.islands`): a tile cleared here may still stand in the
+game. Prices count each building's copies on the boards here, this island from
+Edit. The kinds are what the game
+allows: a building can be **moved** (paired with one of its kind wanted
+elsewhere, nearest first) and put down **on top of another** (a tile whose
+building changes is one **replace**); the rest are sells and builds, and clears
+lead. When the island changes almost entirely, one **sell everything** and the
+builds is the shorter route, and whichever route is shorter is planned.
+
+**As few steps as it takes.** Of a solve's tied layouts, the one nearest the
+island (`stepCount`) is put on screen and aimed at. The order is greedy on power
+— each step takes the available action that leaves the most — so the gains come
+first, and the plan **stops at the solve's power** (`stopAtPower`, scored by the
+same scorer): what would be left only rearranges buildings, and the last step
+says so. An island already at the solve's power gets no plan, just a toast.
+Every candidate is scored by `createBoardScorer` — one island context, each
+building's rating per tile cached — ~0.2ms a board; the planner yields every 30ms
+and reports progress.
+
+**Step mode shows the one building a step is about.** The canvas fades every
+other building, pad and badge (`GridRenderer.setFocus`), drops the fill gauges,
+state and anomaly icons and the pulse, marks the step's tiles and draws a move
+as an arrow.
+
+**Step mode is a sub-mode of the solver view.** While `stepsActive`,
+`visiblePlacements` is the scored board after the step on screen, so the canvas,
+the inspector, the links and the readout's power all describe that board with no
+case of their own (the readout reads `visiblePower` in step mode). The bar
+(`hud/MoveStepsBar`) takes the HUD's place and says the step in words, with the
+game's coordinates; the board marks its tiles (`GridRenderer.setStepMarks`).
+`stepsActive` checks the plan is for this island **and this very solve**, so a
+switch, a new run or the Edit view each end it without anyone closing it — a
+plan can never be drawn over a board it does not describe.
+
+**Every step is priced** (`priceSteps`, the package's `buildPrice` /
+`sellRefund`): a build at the next copy's price, a sale refunding a share of the
+current one, a replace as both, a move and a clear free. The copies are counted
+across **every** island — the game's as last imported, or the boards here — and
+move with each step, so a sale lowers the next price. The rules are the player's
+research (`priceRules`). The bar shows each step's cash and, at the start, what
+the plan spends and refunds and the most it needs at once (refunds land along
+the way, so that peak is what a player must hold, not the net). It is **not**
+set against the cash in the export: that is a snapshot, stale as soon as the
+game earns on and doubled by a rush hour, so a comparison would mislead.
+
+### Solve all islands (`uiState.solveAllIslands`)
+
+One press — Setup's footer beside the run-length modes on a wide screen, the
+head of the island list on a phone (`sidebar/SolveAllButton`) — solves every
+island the game has unlocked (every shipped island
+before any import) and keeps each one's best, so the timeline's "With solves"
+covers the whole game. **It walks the islands rather than solving them off
+screen**: each is opened exactly as the island list opens one, run through the
+same `runOptimizer` the Run button uses, and the player is returned to the island
+they started on. A run is built around the board on screen — the layout it
+defends, the per-island merge, the streamed progress — and a second path through
+that code to solve an island out of sight is the larger risk; Setup is hidden
+during any run anyway, and watching each island solved is the progress bar.
+
+Each island's stored solve is defended (`keepBest`) whenever it was searched
+under the same anomaly and plan — the Run dialog's own test — and otherwise the
+fresh run stands. Stop (`requestSolve`'s stop branch) ends the batch after the
+island running. A hidden tab holds the next island back until it is visible:
+a background tab is where a forgotten batch would run a battery down. It is
+**never automatic** — a solve takes every core for its budget, and Quick often
+loses to a hand-built board, so unasked it would be heat spent on results
+thrown away. `solveAll.test.ts` pins the walk with the search stood in for.
 
 ### `viewportState` (`viewport.svelte.ts`)
 

@@ -12,6 +12,7 @@
     Header,
     ImportModal,
     HudToolbar,
+    MoveStepsBar,
     PixiCanvas,
     PreviewBanner,
     SettingsModal,
@@ -19,6 +20,7 @@
     ShareModal,
     SolveModal,
     SolveModeInfoModal,
+    TimeLabPlannerModal,
     UpgradePlanModal,
   } from "./lib/components";
   import { Eye } from "lucide-svelte";
@@ -273,7 +275,15 @@
     </div>
 
     {#if !readOnly && !hudHidden}
-      <HudToolbar />
+      <!--
+        Step mode takes the HUD's place: the solve's board is read-only, so
+        the HUD has no tools to offer there, and the steps need the room.
+      -->
+      {#if uiState.stepsActive || uiState.moveStepsPlanning}
+        <MoveStepsBar />
+      {:else}
+        <HudToolbar />
+      {/if}
     {/if}
   {/if}
 
@@ -322,6 +332,7 @@
   <SolveModal />
   <SolveModeInfoModal />
   <UpgradePlanModal />
+  <TimeLabPlannerModal />
 
   <!--
     The app's one-line message, wherever it comes from — see
