@@ -347,6 +347,14 @@ when it beats the game's. Storage is not reactive, so `TimelineStatus`'s refresh
 effect also reads `solverState.optimizationResult` and `appliedVariant`: a solve
 landing or a variant applied is what changes a stored solve.
 
+**Without a timeline, nothing that needs one shows.** A game code from a build
+that writes no section 7 — or no import at all — leaves `record.timeline` null,
+and every Chronon figure, the target, the pace, the solve figures, the Time Lab
+planner and its two entry points and the clock warnings are absent rather than explained away: the panel is the all-islands
+power alone, with an Import button only when nothing has been imported. What
+needs only the islands and research every game code carries — Solve all, the
+move steps and their prices — works the same either way.
+
 `now` ticks once a second only while something shows a timeline:
 `startClock()` returns its own stop, for a component's `$effect` to hand back.
 
@@ -371,9 +379,62 @@ reads "no gain". The economy researches get their figure and their cost and no
 invented worth: they move cash, research and obstacle clocks the optimizer does
 not model.
 
+### Move steps (`uiState.planMoveSteps`, `simulation/moveSteps.ts`)
+
+**Steps** in the readout's head, beside Copy, turns the solve on screen into the
+steps that get there **from the player's board in Edit** — straight after an
+import that is the game's island, and once they have rearranged it, it is where
+they say they are. The clears come from the game's board as imported
+(`timelineState.record.islands`): a tile cleared here may still stand in the
+game. Prices count each building's copies on the boards here, this island from
+Edit. The kinds are what the game
+allows: a building can be **moved** (paired with one of its kind wanted
+elsewhere, nearest first) and put down **on top of another** (a tile whose
+building changes is one **replace**); the rest are sells and builds, and clears
+lead. When the island changes almost entirely, one **sell everything** and the
+builds is the shorter route, and whichever route is shorter is planned.
+
+**As few steps as it takes.** Of a solve's tied layouts, the one nearest the
+island (`stepCount`) is put on screen and aimed at. The order is greedy on power
+— each step takes the available action that leaves the most — so the gains come
+first, and the plan **stops at the solve's power** (`stopAtPower`, scored by the
+same scorer): what would be left only rearranges buildings, and the last step
+says so. An island already at the solve's power gets no plan, just a toast.
+Every candidate is scored by `createBoardScorer` — one island context, each
+building's rating per tile cached — ~0.2ms a board; the planner yields every 30ms
+and reports progress.
+
+**Step mode shows the one building a step is about.** The canvas fades every
+other building, pad and badge (`GridRenderer.setFocus`), drops the fill gauges,
+state and anomaly icons and the pulse, marks the step's tiles and draws a move
+as an arrow.
+
+**Step mode is a sub-mode of the solver view.** While `stepsActive`,
+`visiblePlacements` is the scored board after the step on screen, so the canvas,
+the inspector, the links and the readout's power all describe that board with no
+case of their own (the readout reads `visiblePower` in step mode). The bar
+(`hud/MoveStepsBar`) takes the HUD's place and says the step in words, with the
+game's coordinates; the board marks its tiles (`GridRenderer.setStepMarks`).
+`stepsActive` checks the plan is for this island **and this very solve**, so a
+switch, a new run or the Edit view each end it without anyone closing it — a
+plan can never be drawn over a board it does not describe.
+
+**Every step is priced** (`priceSteps`, the package's `buildPrice` /
+`sellRefund`): a build at the next copy's price, a sale refunding a share of the
+current one, a replace as both, a move and a clear free. The copies are counted
+across **every** island — the game's as last imported, or the boards here — and
+move with each step, so a sale lowers the next price. The rules are the player's
+research (`priceRules`). The bar shows each step's cash and, at the start, what
+the plan spends and refunds and the most it needs at once (refunds land along
+the way, so that peak is what a player must hold, not the net). It is **not**
+set against the cash in the export: that is a snapshot, stale as soon as the
+game earns on and doubled by a rush hour, so a comparison would mislead.
+
 ### Solve all islands (`uiState.solveAllIslands`)
 
-One press solves every island the game has unlocked (every shipped island
+One press — Setup's footer beside the run-length modes on a wide screen, the
+head of the island list on a phone (`sidebar/SolveAllButton`) — solves every
+island the game has unlocked (every shipped island
 before any import) and keeps each one's best, so the timeline's "With solves"
 covers the whole game. **It walks the islands rather than solving them off
 screen**: each is opened exactly as the island list opens one, run through the

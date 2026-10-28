@@ -36,6 +36,7 @@
     ChevronUp,
     Copy,
     Eye,
+    ListOrdered,
     Hammer,
     Loader2,
     RotateCcw,
@@ -206,12 +207,17 @@
   /*
    * The solve reports its own total rather than having it re-summed here: it
    * is the figure the search actually optimised, and `#scoreLayout` is what
-   * produced both it and the rows above.
+   * produced both it and the rows above. In step mode the board on screen is
+   * the island partway there, so the card reads that board's power instead —
+   * a card printing the finished solve over a half-built island is the
+   * mismatch `visiblePlacements` exists to prevent.
    */
   let power = $derived(
-    panel === "solver"
-      ? (solverState.optimizationResult?.totalPower ?? 0)
-      : board.power,
+    uiState.stepsActive
+      ? uiState.visiblePower
+      : panel === "solver"
+        ? (solverState.optimizationResult?.totalPower ?? 0)
+        : board.power,
   );
 
   /*
@@ -602,6 +608,21 @@
               >
             </span>
           {:else if panel === "solver" && !layoutState.isPreview}
+            <!--
+              From the player's board in Edit to this layout, step by step
+              on the board: see `uiState.planMoveSteps`. Hidden in step mode,
+              which the bar at the foot of the screen runs.
+            -->
+            {#if uiState.canPlanMoveSteps && !uiState.stepsActive}
+              <button
+                class="head-btn"
+                onclick={() => uiState.planMoveSteps()}
+                title="The moves, builds and sells that turn your island into this layout"
+              >
+                <ListOrdered size={13} />
+                <span class="sure">Steps</span>
+              </button>
+            {/if}
             <!--
               The way off a read-only board. A solve is as often a starting
               point as an answer, and rebuilding forty buildings by hand to

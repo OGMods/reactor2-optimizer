@@ -20,7 +20,8 @@
     ratingShifts,
   } from "../../simulation/simulator";
   import { anomalyIconFor, STATE_ICON } from "../../data/boardIcons";
-  import type { BuildingOverlay } from "../../pixi/gridPainter";
+  import type { BuildingOverlay, StepMark } from "../../pixi/gridPainter";
+  import type { MoveStep } from "../../simulation/moveSteps";
   import { onMount, onDestroy, untrack } from "svelte";
   import { Application, Container, Rectangle } from "pixi.js";
   import { loadAtlas } from "../../pixi/atlas";
@@ -825,12 +826,15 @@
    */
   $effect(() => {
     // Read first, so this stays a dependency on the path that returns early.
+    // Off in step mode too: a board of pulsing pads is noise around the one
+    // building a step is about. The viewport keeps the player's own choice.
     const on = uiState.animations;
+    const pulse = on && !uiState.stepsActive;
     // `gridRenderer` is a plain `let`, so assigning it does not re-run this.
     // `isAtlasLoaded` is the `$state` that flips right after it is built —
     // the same handle the render effect below uses to wait for it.
     if (!isAtlasLoaded) return;
-    gridRenderer?.setAnimated(on);
+    gridRenderer?.setAnimated(pulse);
     // The same answer governs the board's own motion. With it off the glide,
     // the bounce and the double-tap zoom all still land where they were going,
     // they just do not travel there.
@@ -863,6 +867,48 @@
     const chain = uiState.chainLinks;
     if (!isAtlasLoaded) return;
     gridRenderer?.setLinks(focus ? linksFrom(flows, focus, chain) : []);
+  });
+
+  /** The tiles a move step touches: where things arrive, and where they go. */
+  function marksFor(step: MoveStep): StepMark[] {
+    switch (step.kind) {
+      case "move":
+        return [
+          { ...step.from, kind: "leave" },
+          { ...step.to, kind: "arrive" },
+        ];
+      case "build":
+      case "replace":
+        return [{ x: step.x, y: step.y, kind: "arrive" }];
+      case "sell":
+      case "clear":
+        return [{ x: step.x, y: step.y, kind: "leave" }];
+      case "sellAll":
+        return step.tiles.map((t) => ({ ...t, kind: "leave" as const }));
+    }
+  }
+
+  /*
+   * In step mode, the step that made the board on screen: its tiles marked, a
+   * move drawn as an arrow, and every other building faded so the one the step
+   * is about stands out. At the start, before any step, the board is shown
+   * whole. `stepsActive` rather than `moveSteps`, so a plan for another board
+   * never marks or fades this one.
+   */
+  $effect(() => {
+    const m = uiState.stepsActive ? uiState.moveSteps : null;
+    const step = m && m.index > 0 ? m.plan.steps[m.index - 1] : null;
+    if (!isAtlasLoaded) return;
+    const marks = step ? marksFor(step) : [];
+    gridRenderer?.setStepMarks(
+      marks,
+      step?.kind === "move" ? [{ from: step.from, to: step.to }] : [],
+    );
+    gridRenderer?.setFocus(
+      step && step.kind !== "sellAll"
+        ? new Set(marks.map((mk) => `${mk.x},${mk.y}`))
+        : null,
+    );
   });
 
   /*
@@ -924,6 +970,15 @@
    */
   let buildingOverlays = $derived.by((): BuildingOverlay[] => {
     const placements = uiState.visiblePlacements;
+    // Step mode wears none of it: a gauge and a state icon over every
+    // building drown the one a step is about.
+    if (uiState.stepsActive) {
+      return placements.map(() => ({
+        fill: null,
+        stateIcon: null,
+        anomalyIcon: null,
+      }));
+    }
     const grid = layoutState.grid;
     const prestige = layoutState.placementPrestige;
     const anomaly = layoutState.placementAnomaly;

@@ -88,6 +88,23 @@ export interface BuildingOverlay {
 const ACCENT = 0x00f3ff;
 
 /**
+ * `--danger`, for the one board mark that means something goes away: the tile
+ * a step sells from, clears, or moves a building off. Pinned like `ACCENT`
+ * above, and never themed — it is the board's language.
+ */
+const DANGER = 0xff4757;
+
+/**
+ * A tile a move step touches: where something arrives (`arrive`) or what it
+ * leaves, is sold from, or is cleared of (`leave`). See `setStepMarks`.
+ */
+export interface StepMark {
+  x: number;
+  y: number;
+  kind: "arrive" | "leave";
+}
+
+/**
  * The pad drawn on the tile beneath a building, saying whether it is running.
  *
  * One colour per state, which is the whole point: `starved` and `idle` both
@@ -242,6 +259,13 @@ export class GridRenderer {
 
   private hoverHighlight: Graphics;
 
+  /** See `setStepMarks`. Drawn over the buildings. */
+  private stepMarks: Graphics;
+  private stepMarkKey = "";
+
+  /** See `setFocus`: the tiles left at full strength, or null for all. */
+  private focus: ReadonlySet<string> | null = null;
+
   /** See `setLinks`. Its own layer, so `clear()` never touches it. */
   private linkGraphics: Graphics;
   private links: BoardLink[] = [];
@@ -327,6 +351,12 @@ export class GridRenderer {
     this.gridContainer.addChild(this.propsContainer);
     this.gridContainer.addChild(this.badgeContainer);
     this.gridContainer.addChild(this.ghostContainer);
+    // A step's tiles, over everything: on the ground they hid under the very
+    // building that had just arrived. So an outline and a faint wash, which
+    // the building shows through.
+    this.stepMarks = new Graphics();
+    this.stepMarks.eventMode = "none";
+    this.gridContainer.addChild(this.stepMarks);
 
     // Hover Highlight Overlay
     this.hoverHighlight = new Graphics();
@@ -346,6 +376,7 @@ export class GridRenderer {
     this.clear();
     this.hoverHighlight.destroy({ children: true });
     this.linkGraphics.destroy();
+    this.stepMarks.destroy();
     this.islandContainer.destroy({ children: true });
     this.gridLinesContainer.destroy({ children: true });
     this.propsContainer.destroy({ children: true });
@@ -448,6 +479,8 @@ export class GridRenderer {
 
     this.gridLinesContainer.addChild(this.hoverHighlight);
     this.updateState(grid, gridWidth, gridHeight);
+    // New nodes start opaque; a focus set before the rebuild still holds.
+    this.applyFocus();
   }
 
   /**
@@ -854,6 +887,97 @@ export class GridRenderer {
         alpha: 0.95 * strength,
         cap: "round",
       });
+    }
+  }
+
+  /**
+   * Marks the tiles of the move step being looked at: cyan where a building
+   * arrives, red where one leaves, is sold or an obstacle is cleared. Skipped
+   * when unchanged, since the board effect that pushes it re-runs on every
+   * repaint.
+   */
+  public setStepMarks(
+    marks: StepMark[],
+    arrows: readonly {
+      from: { x: number; y: number };
+      to: { x: number; y: number };
+    }[] = [],
+  ): void {
+    const key =
+      marks.map((m) => `${m.x},${m.y},${m.kind}`).join("|") +
+      "/" +
+      arrows
+        .map((a) => `${a.from.x},${a.from.y}>${a.to.x},${a.to.y}`)
+        .join("|");
+    if (key === this.stepMarkKey) return;
+    this.stepMarkKey = key;
+    this.stepMarks.clear();
+    for (const mark of marks) {
+      const iso = gridToIso(mark.x, mark.y);
+      const color = mark.kind === "arrive" ? ACCENT : DANGER;
+      this.stepMarks
+        .poly(TILE_DIAMOND.map((v, i) => v + (i % 2 === 0 ? iso.x : iso.y)))
+        .fill({ color, alpha: 0.16 })
+        .stroke({ width: 3, color, alpha: 1 });
+    }
+    // A move is also an arrow from the tile it leaves to the one it takes,
+    // stopping short of the target's centre so the head sits on its edge.
+    for (const { from, to } of arrows) {
+      const a = gridToIso(from.x, from.y);
+      const b = gridToIso(to.x, to.y);
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1) continue;
+      const ux = dx / len;
+      const uy = dy / len;
+      const tip = {
+        x: b.x - ux * (TILE_HEIGHT / 3),
+        y: b.y - uy * (TILE_HEIGHT / 3),
+      };
+      const head = 12;
+      this.stepMarks
+        .moveTo(a.x, a.y)
+        .lineTo(tip.x - ux * head * 0.6, tip.y - uy * head * 0.6)
+        .stroke({ width: 4, color: ACCENT, alpha: 1, cap: "round" });
+      this.stepMarks
+        .poly([
+          tip.x,
+          tip.y,
+          tip.x - ux * head - uy * head * 0.6,
+          tip.y - uy * head + ux * head * 0.6,
+          tip.x - ux * head + uy * head * 0.6,
+          tip.y - uy * head - ux * head * 0.6,
+        ])
+        .fill({ color: ACCENT, alpha: 1 });
+    }
+  }
+
+  /**
+   * Fades every building, pad and badge but those on `tiles` — step mode's
+   * way of making the one building a step is about stand out on a board of a
+   * hundred. Null puts every tile back at full strength. The terrain is never
+   * faded, so the island still reads as itself.
+   */
+  public setFocus(tiles: ReadonlySet<string> | null): void {
+    this.focus = tiles;
+    this.applyFocus();
+  }
+
+  private applyFocus(): void {
+    const focus = this.focus;
+    for (let y = 0; y < this.propTileNodes.length; y++) {
+      const row = this.propTileNodes[y];
+      for (let x = 0; x < row.length; x++) {
+        const alpha = !focus || focus.has(`${x},${y}`) ? 1 : 0.18;
+        for (const node of [
+          row[x],
+          this.gridTileNodes[y]?.[x],
+          this.badgeTileNodes[y]?.[x],
+        ]) {
+          if (node) node.alpha = alpha;
+        }
+      }
     }
   }
 

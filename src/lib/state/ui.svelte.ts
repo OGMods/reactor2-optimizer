@@ -1,11 +1,24 @@
 import type { PixiCanvas } from "../components";
-import type { ImageScale, PlacedBuilding, PlacementView } from "../types";
+import type {
+  ImageScale,
+  OptimizationResult,
+  PlacedBuilding,
+  PlacementView,
+  Tile,
+} from "../types";
+import { isObstacleType } from "../types/grid";
 import type { BuildingCategory } from "@reactor2/solver";
 import { buildShareUrl, clearSharedCode } from "../encoding/shareLink";
 import { downloadBlob, toFileSlug } from "../utils/downloadFile";
 import {
   applyInProgress,
   blueprintRules,
+  BUILDINGS,
+  buildPrice,
+  decodeBlueprint,
+  findBuilding,
+  priceRules,
+  sellRefund,
   decodeGameExport,
   formatNumberForFilename,
   ISLAND_TEMPLATES,
@@ -24,6 +37,20 @@ import {
 } from "../utils/analytics";
 import { uiStorage } from "../storage/storage";
 import { evaluatePlan, type PlanReport } from "../simulation/upgradePlan";
+import {
+  createBoardScorer,
+  simulatePlacedBuildings,
+} from "../simulation/simulator";
+import {
+  planMoveSteps,
+  PlanCancelled,
+  stepCount,
+  priceSteps,
+  type BoardBuilding,
+  type MovePlan,
+  type StepPrice,
+} from "../simulation/moveSteps";
+import { createPlacement } from "../data/placements";
 import { configState } from "./config.svelte";
 import { layoutState } from "./layout.svelte";
 import { solverState } from "./solver.svelte";
@@ -616,6 +643,7 @@ class UIState {
    * board is not showing.
    */
   get visiblePlacements(): PlacedBuilding[] {
+    if (this.stepsActive) return this.#stepBoard;
     if (this.showingSolver) {
       return solverState.optimizationResult?.placements ?? [];
     }
@@ -631,6 +659,8 @@ class UIState {
    * so its rows — already scored by `simulation/simulator.ts` — are added up.
    */
   get visiblePower(): number {
+    if (this.stepsActive)
+      return this.moveSteps!.plan.powers[this.moveSteps!.index];
     if (this.showingSolver)
       return solverState.optimizationResult?.totalPower ?? 0;
     return layoutState.placements.reduce((sum, p) => sum + p.powerGenerated, 0);
@@ -692,6 +722,8 @@ class UIState {
    * A no-op write still costs a storage round-trip, so it is skipped.
    */
   setPlacementView(view: PlacementView) {
+    // The steps lead to the solve; leaving the solve leaves them too.
+    if (view === "user") this.closeMoveSteps();
     if (this.placementView === view) return;
     this.placementView = view;
     uiStorage.savePrefs({ placementView: view });
@@ -847,6 +879,219 @@ class UIState {
    * island back until it is visible again: a background tab is where a batch
    * the player has forgotten about would otherwise run their battery down.
    */
+  // ── Move steps: from the game's board to the solve ─────────────────────
+
+  /**
+   * The steps from the player's board in Edit to the solve on screen, and the
+   * one being looked at — see `simulation/moveSteps.ts`. Null outside step
+   * mode.
+   */
+  moveSteps = $state<{
+    templateId: string;
+    result: OptimizationResult;
+    plan: MovePlan;
+    index: number;
+    /** Each step's cash, in order — see `priceSteps`. */
+    prices: StepPrice[];
+  } | null>(null);
+
+  /** Planning in progress: steps decided of steps in all. */
+  moveStepsPlanning = $state<{ done: number; total: number } | null>(null);
+  #moveStepsSeq = 0;
+
+  /**
+   * Whether step mode is what the board shows: the steps were planned for this
+   * island and this very solve, and the solve is on screen. A switch of island,
+   * a new run or the Edit view each make it false without anyone closing it,
+   * so a plan can never be drawn over a board it does not describe.
+   */
+  get stepsActive(): boolean {
+    const m = this.moveSteps;
+    return (
+      m !== null &&
+      this.showingSolver &&
+      m.templateId === layoutState.activeTemplateId &&
+      m.result === solverState.optimizationResult
+    );
+  }
+
+  /** Whether "Steps" can be offered for the board on screen now. */
+  get canPlanMoveSteps(): boolean {
+    return (
+      this.showingSolver &&
+      !this.isPreview &&
+      !solverState.isOptimizing &&
+      this.moveStepsPlanning === null &&
+      (solverState.optimizationResult?.placements.length ?? 0) > 0
+    );
+  }
+
+  /** The board after the step being looked at, scored. */
+  #stepBoard: PlacedBuilding[] = $derived.by(() => {
+    const m = this.moveSteps;
+    if (!m) return [];
+    const upgrades = configState.buildingUpgrades;
+    return simulatePlacedBuildings(
+      layoutState.grid,
+      BUILDINGS,
+      m.plan.boards[m.index].map((b) =>
+        createPlacement(b.buildingId, b.x, b.y, upgrades),
+      ),
+      configState.prestige,
+      configState.activeAnomaly,
+    );
+  });
+
+  /**
+   * Plans the steps for the island on screen and enters step mode at the
+   * start. The starting board is the game's, as last imported, so the steps
+   * are ones the player can take in the game; an island the import does not
+   * cover starts from their board here instead. Superseded by a later call,
+   * and abandoned if the solve or the island changes while it plans.
+   */
+  async planMoveSteps() {
+    if (!this.canPlanMoveSteps) return;
+    const seq = ++this.#moveStepsSeq;
+    const templateId = layoutState.activeTemplateId;
+    const grid = $state.snapshot(layoutState.grid);
+    const upgrades = $state.snapshot(configState.buildingUpgrades);
+
+    /*
+     * The steps start from the board in Edit: straight after an import that is
+     * the game's island, and once the player has rearranged it, it is where
+     * they say they are. The obstacles come from the game's board as imported,
+     * when there is one — a tile cleared here may still stand in the game, and
+     * building on it there needs a clear first.
+     */
+    const start: BoardBuilding[] = layoutState.placements.map(
+      ({ buildingId, x, y }) => ({ buildingId, x, y }),
+    );
+    let obstacles: { x: number; y: number; type: Tile["type"] }[] = [];
+    const code = timelineState.record?.islands[templateId];
+    if (code) {
+      try {
+        obstacles = (await decodeBlueprint(code)).grid
+          .flat()
+          .filter((t) => isObstacleType(t.type))
+          .map((t) => ({ x: t.x, y: t.y, type: t.type }));
+      } catch {
+        // An unreadable import leaves the clears out rather than the plan.
+      }
+    }
+    // Of the solve's layouts — every one at the same power — aim at the one
+    // nearest the island: the same answer in the fewest steps. It is put on
+    // screen, since the steps lead to the board being looked at.
+    const shapeOf = (r: OptimizationResult): BoardBuilding[] =>
+      r.placements.map(({ buildingId, x, y }) => ({ buildingId, x, y }));
+    const variants = solverState.variants;
+    if (variants.length > 1) {
+      let nearest = solverState.variantIndex;
+      let fewest = Infinity;
+      variants.forEach((v, i) => {
+        const n = stepCount(start, shapeOf(v));
+        if (n < fewest) [fewest, nearest] = [n, i];
+      });
+      if (nearest !== solverState.variantIndex)
+        solverState.showVariant(nearest);
+    }
+    const result = solverState.optimizationResult!;
+    const target = shapeOf(result);
+    const free = grid
+      .flat()
+      .filter((t) => t.type === "grass")
+      .map(({ x, y }) => ({ x, y }));
+    const score = createBoardScorer(
+      grid,
+      BUILDINGS,
+      upgrades,
+      configState.prestige,
+      configState.activeAnomaly,
+    );
+
+    const stale = () =>
+      seq !== this.#moveStepsSeq ||
+      layoutState.activeTemplateId !== templateId ||
+      solverState.optimizationResult !== result;
+
+    this.moveStepsPlanning = { done: 0, total: 0 };
+    try {
+      const plan = await planMoveSteps(start, target, obstacles, free, score, {
+        onProgress: (done, total) => {
+          if (!stale()) this.moveStepsPlanning = { done, total };
+        },
+        cancelled: stale,
+        // Scored by the planner's own scorer, so the goal and the steps are
+        // measured alike: once the island makes this, the rest only shuffles.
+        stopAtPower: score(
+          new Map(target.map((b) => [`${b.x},${b.y}`, b.buildingId])),
+        ),
+      });
+      if (stale()) return;
+      if (plan.steps.every((step) => step.kind === "clear")) {
+        this.showToast("Your island already makes as much as this layout");
+        return;
+      }
+      const rules = priceRules(timelineState.record?.research ?? {});
+      const baseOf = (id: string) => findBuilding(id)?.price ?? 0;
+      const prices = priceSteps(
+        plan,
+        await this.#copiesAcrossIslands(),
+        (id, n) => buildPrice(baseOf(id), n, rules),
+        (id, n) => sellRefund(baseOf(id), n, rules),
+      );
+      if (stale()) return;
+      this.moveSteps = {
+        templateId,
+        result,
+        plan,
+        index: 0,
+        prices,
+      };
+      this.closeInspector();
+    } catch (err) {
+      if (!(err instanceof PlanCancelled)) throw err;
+    } finally {
+      if (seq === this.#moveStepsSeq) this.moveStepsPlanning = null;
+    }
+  }
+
+  /**
+   * Each building's count across every island — what a price climbs with —
+   * on the boards here, as the steps start from them: the island on screen
+   * from its board in Edit, every other from its saved layout.
+   */
+  async #copiesAcrossIslands(): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    const active = layoutState.activeTemplateId;
+    for (const p of layoutState.placements)
+      counts.set(p.buildingId, (counts.get(p.buildingId) ?? 0) + 1);
+    const codes = ISLAND_TEMPLATES.filter((t) => t.game && t.id !== active).map(
+      (t) => layoutState.savedGrids[t.id]?.code ?? t.code,
+    );
+    for (const code of codes) {
+      try {
+        for (const p of (await decodeBlueprint(code)).placements)
+          counts.set(p.buildingId, (counts.get(p.buildingId) ?? 0) + 1);
+      } catch {
+        // An unreadable board counts for nothing rather than failing the plan.
+      }
+    }
+    return counts;
+  }
+
+  /** Shows the board after step `index` (0 is the start, before any step). */
+  showMoveStep(index: number) {
+    const m = this.moveSteps;
+    if (!m) return;
+    m.index = Math.max(0, Math.min(index, m.plan.steps.length));
+  }
+
+  closeMoveSteps() {
+    this.#moveStepsSeq++;
+    this.moveSteps = null;
+    this.moveStepsPlanning = null;
+  }
+
   async solveAllIslands() {
     if (!this.canSolveAll) return;
     const islands = this.solveAllTargets;

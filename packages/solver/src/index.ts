@@ -29,6 +29,7 @@ export * from "./solver/report";
 export * from "./solver/solver";
 
 export * from "./data/anomalies";
+export * from "./data/buildingPrices";
 export * from "./data/buildings";
 export * from "./data/chronons";
 export * from "./data/effectiveBuildings";

@@ -4,6 +4,7 @@
   import TemplateSelector from "./TemplateSelector.svelte";
   import BuildingUnlockList from "./BuildingUnlockList.svelte";
   import SolveModeSelector from "./SolveModeSelector.svelte";
+  import SolveAllButton from "./SolveAllButton.svelte";
   import AnomalySelector from "./AnomalySelector.svelte";
   import PrestigeUpgrades from "./PrestigeUpgrades.svelte";
   import {
@@ -386,8 +387,12 @@
         {@render setupBody()}
       </div>
 
-      <!-- Run is in the HUD; see the note on the sheet's `run-slot` above. -->
+      <!--
+        Run is in the HUD; see the note on the sheet's `run-slot` above.
+        "Solve all" sits over the modes it runs with, under every tab.
+      -->
       <div class="sidebar-foot">
+        <SolveAllButton />
         <SolveModeSelector />
       </div>
     </div>
@@ -663,6 +668,9 @@
   }
 
   .sidebar-foot {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
     padding: 0.75rem 1rem;
     border-top: 1px solid var(--accent-faint);
     /* A region set apart inside the panel — see `--surface-inset`, which the

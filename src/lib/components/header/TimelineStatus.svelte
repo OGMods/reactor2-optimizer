@@ -414,18 +414,21 @@
         </button>
       </footer>
     {:else}
+      <!--
+        No timeline: nothing imported, or a code from a game build that does
+        not write one. Every Chronon figure needs it, so none is mentioned —
+        only the power, which the boards here answer on their own, and the
+        way in when there has been no import at all.
+      -->
       <dl class="plain">
         <dt>Power, all islands</dt>
         <dd>{@render energy()}{formatNumber(power)}</dd>
       </dl>
-      <p class="aside">
-        {record
-          ? "Your last import is from before game 1.1.11, which has no timeline."
-          : "Import your game's code to count your Chronons here."}
-      </p>
-      <button type="button" class="link start" onclick={importCode}>
-        Import game code
-      </button>
+      {#if !record}
+        <button type="button" class="link start" onclick={importCode}>
+          Import game code
+        </button>
+      {/if}
     {/if}
   </div>
 {/if}

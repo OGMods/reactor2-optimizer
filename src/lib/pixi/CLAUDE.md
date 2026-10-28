@@ -158,6 +158,14 @@ false` on a writing press), and commits on the second tap's _up_.
   `ctrlKey` or a `deltaX` pans instead, and `deltaMode` is normalised through
   `WHEEL_LINE_PX` (Firefox reports lines, ~3 against Chrome's ~100).
 
+### Step marks sit on top
+
+`setStepMarks` outlines the tiles of the move step on screen — cyan where a
+building arrives, red (`DANGER`, `--danger` pinned like `ACCENT`) where one
+leaves, is sold or an obstacle is cleared. Drawn **above** the buildings, as a
+thick outline over a faint wash: on the ground they hid under the very building
+that had just arrived.
+
 ### Nothing above the board hovers it
 
 Pixi listens for pointer moves on the **whole document**, so a drag keeps going

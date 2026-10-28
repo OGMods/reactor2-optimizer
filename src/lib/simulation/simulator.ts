@@ -4,6 +4,7 @@ import type { Placement } from "@reactor2/solver";
 import {
   effectiveAtValue,
   getAnomaly,
+  levelValue,
   type AnomalyDefinition,
   type EffectiveBuilding,
   type PrestigeScales,
@@ -195,6 +196,60 @@ export function boardPower(
   if (ctx.n === 0) return 0;
   const { placement } = layoutFor(ctx, buildings, placedBuildings, prestige);
   return simulateIsland(placement, ctx).totalPower;
+}
+
+/**
+ * Scores many versions of one board fast: the island context is built once,
+ * and each building's rating on each tile is resolved once and reused.
+ *
+ * For the move-step planner, which scores the board after every candidate
+ * action at every step — thousands of layouts of one island, differing by a
+ * building or two. `score` takes the board as tile key (`"x,y"`) to building
+ * id, at the tiers `unlocks` gives, and returns its power; a building on a
+ * tile the island cannot build on, or not in the catalogue, counts for nothing.
+ */
+export function createBoardScorer(
+  grid: Tile[][],
+  buildings: readonly BuildingDefinition[],
+  unlocks: Record<string, number>,
+  prestige?: PrestigeScales,
+  anomaly: AnomalyDefinition = getAnomaly(undefined),
+): (board: ReadonlyMap<string, string>) => number {
+  if (!grid?.length || !grid[0]?.length) return () => 0;
+  const ctx = buildIslandContext(grid, undefined, anomaly);
+  const tileOf = new Map<string, number>();
+  for (let t = 0; t < ctx.n; t++) tileOf.set(`${ctx.xs[t]},${ctx.ys[t]}`, t);
+
+  const rated = new Map<string, EffectiveBuilding | null>();
+  const ratedAt = (t: number, buildingId: string) => {
+    const key = `${t}|${buildingId}`;
+    let r = rated.get(key);
+    if (r === undefined) {
+      const def = buildings.find((b) => b.id === buildingId);
+      if (def) {
+        const level = unlocks[buildingId] ?? 0;
+        const baseValue = levelValue(
+          def.levels[Math.min(level, def.levels.length - 1)],
+        );
+        r = ctx.rate(t, tierAtValue(def, baseValue, prestige));
+      } else {
+        r = null;
+      }
+      rated.set(key, r);
+    }
+    return r;
+  };
+
+  const placement: Placement = new Array(ctx.n).fill(null);
+  return (board) => {
+    placement.fill(null);
+    for (const [key, buildingId] of board) {
+      const t = tileOf.get(key);
+      if (t === undefined) continue;
+      placement[t] = ratedAt(t, buildingId);
+    }
+    return simulateIsland(placement, ctx).totalPower;
+  };
 }
 
 /**

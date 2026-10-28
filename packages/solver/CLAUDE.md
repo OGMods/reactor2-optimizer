@@ -79,6 +79,17 @@ by `HeatProducerBuildingSO`. That is why Infinite Grid goes out of its way to
 name turbines. The rule is "every heat producer", and a reactor is the only one
 the game ships, so it is modelled as reactors.
 
+### Building prices
+
+`data/buildingPrices.ts` is what a building costs in the game: `base ×
+scaler^copies × (1 − Construction Permits) × (1 − Quantum Replicator)`, the
+copies counted across all islands and the scaler 1.14 until Standardized Builds
+lowers it, and a sale refunds Salvage Protocols' share of the **current** price.
+The research tables are hand-transcribed from `tools/data/progression.json`;
+the base prices are the catalogue's `price`. Salvage Protocols' level 0 (50%) is
+an assumption — the record starts at level 1 — and says so. The rules were
+confirmed by the player; moves are free.
+
 ### The Time Lab table
 
 `data/timeLab.ts` carries all twelve Time Lab researches with each level's
