@@ -24,6 +24,16 @@
     UpgradePlanModal,
   } from "./lib/components";
   import { Eye } from "lucide-svelte";
+  import { keepScreenAwake } from "./lib/utils";
+
+  /*
+   * The screen stays on for as long as a solve runs, Solve all's gaps between
+   * islands included: a phone that sleeps mid-run freezes the page with it.
+   */
+  $effect(() => {
+    keepScreenAwake(solverState.isOptimizing || uiState.solveAll !== null);
+  });
+  $effect(() => () => keepScreenAwake(false));
 
   /*
    * On a compact viewport the config panel is a bottom sheet, and once it is

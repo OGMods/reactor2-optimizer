@@ -5,3 +5,4 @@ export * from "./downloadFile";
 export * from "./formatters";
 export * from "./haptics";
 export * from "./isoMath";
+export * from "./wakeLock";

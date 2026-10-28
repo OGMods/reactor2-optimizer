@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { layoutState, uiState, viewportState } from "../../state";
+  import {
+    layoutState,
+    timelineState,
+    uiState,
+    viewportState,
+  } from "../../state";
   import { LocateFixed, Share2 } from "lucide-svelte";
   import { asset } from "../../utils";
   import GridControls from "./GridControls.svelte";
@@ -28,6 +33,17 @@
    * from — it is one that does not exist for this board.
    */
   let showSize = $derived(!compact && layoutState.canEditTerrain);
+
+  /*
+   * On a phone the bar cannot hold the word "Optimizer" beside the power
+   * pill: logo, word, pill, Center View and the menu overflow a 360px row.
+   * The pill is the one the player came for, so the word gives way while it
+   * shows; the mark alone still says whose tool this is, and the heading
+   * keeps its full accessible name.
+   */
+  let hideWord = $derived(
+    compact && (timelineState.totalPower > 0 || timelineState.record !== null),
+  );
 
   /*
    * Publishes where this bar ends, for everything anchored beneath it: the
@@ -75,7 +91,7 @@
       width="163"
       height="132"
     />
-    <span class="tool">Optimizer</span>
+    <span class={hideWord ? "sr-only" : "tool"}>Optimizer</span>
   </h1>
 
   <div class="actions">
