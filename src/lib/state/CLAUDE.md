@@ -316,7 +316,10 @@ obstacles being cleared, each island's board as a blueprint (the start of a move
 list), the export and import times, and the timeline — whose cash (signed:
 negative on build credit) and research points are what the cost-aware tools will
 read. `uiState.applyGameImport`
-writes it through `recordImport`, after the import has landed. A record from a
+writes it through `recordImport`, after the import has landed. An obstacle the
+game was clearing comes in **cleared** when its clear has finished since the
+export, or has no more left than Erased from Time's free window
+(`resolveGameExport`'s `now`); the record keeps the game's list as exported. A record from a
 format version this build cannot read is dropped; the next import rewrites it.
 
 **`chrononTarget` is a jump award the player is waiting for**, and `targetEta`
@@ -405,9 +408,11 @@ building's rating per tile cached — ~0.2ms a board; the planner yields every 3
 and reports progress.
 
 **Step mode shows the one building a step is about.** The canvas fades every
-other building, pad and badge (`GridRenderer.setFocus`), drops the fill gauges,
-state and anomaly icons and the pulse, marks the step's tiles and draws a move
-as an arrow.
+other building, pad and badge to 40% (`GridRenderer.setFocus`) and draws the
+step's own a little larger, drops the state and anomaly icons and the pulse,
+outlines the step's tiles on the ground beneath their buildings and draws a
+move as an arrow over everything. The fill gauges stay: how hard each building works after a step is half
+of what the step is for, and with them gone players read the board as broken.
 
 **Step mode is a sub-mode of the solver view.** While `stepsActive`,
 `visiblePlacements` is the scored board after the step on screen, so the canvas,
@@ -429,6 +434,28 @@ the plan spends and refunds and the most it needs at once (refunds land along
 the way, so that peak is what a player must hold, not the net). It is **not**
 set against the cash in the export: that is a snapshot, stale as soon as the
 game earns on and doubled by a rush hour, so a comparison would mislead.
+
+### Transfer between browsers (`uiState.openTransfer`, `encoding/transfer.ts`)
+
+**Transfer to another device** (overflow menu, hidden in preview) packs
+everything this browser holds into one `R2T1.` code: the roster, Time Lab,
+anomaly and plan, every board (`layoutState.boardsSnapshot`, the one on screen
+encoded fresh), each island's picked solve as bare shape, the game import record
+and the Chronon target. It travels as a link with the code in the **fragment**,
+offered as a QR code, a copy button, the system share sheet and the bare code,
+which Import routes to the same dialog. The format (binary, base41 so the QR
+code can hold it in alphanumeric mode, solves as boards) is built to fit one QR
+code: a game import with all eight islands edited and solved measured 3.4 KB of
+link, inside the largest QR code. A bigger one shows no code, and the other
+routes remain. Both ways
+round — the PC that solves and the phone the game runs on each send and receive.
+
+Opening one never applies it: `receiveTransferLink` at startup (or a pasted
+code) opens `transferIn`, which says what it holds and **replaces on a second
+press**. `applyTransfer` sets the roster, writes the solves unscored and lets
+`carryOverSolves` re-score each on its board at this browser's roster — the path
+any roster change takes — then `layoutState.adoptBoards` and
+`timelineState.adoptRecord`. A code without a game import keeps the receiver's.
 
 ### Solve all islands (`uiState.solveAllIslands`)
 

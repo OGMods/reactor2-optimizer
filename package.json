@@ -50,6 +50,7 @@
   "dependencies": {
     "@reactor2/solver": "*",
     "lucide-svelte": "^1.0.1",
-    "pixi.js": "^8.19.0"
+    "pixi.js": "^8.19.0",
+    "qrcode-generator": "^2.0.4"
   }
 }

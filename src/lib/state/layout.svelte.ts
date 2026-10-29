@@ -29,7 +29,11 @@ import {
   createPlacementAtLevel,
   rebaseToUnlocks,
 } from "../data/placements";
-import { gridStorage, type SavedTemplateData } from "../storage/storage";
+import {
+  gridStorage,
+  type SavedTemplateData,
+  type StoragePayload,
+} from "../storage/storage";
 import { simulatePlacedBuildings } from "../simulation/simulator";
 
 /**
@@ -932,6 +936,55 @@ class LayoutState {
       const template = this.findTemplate(this.activeTemplateId);
       if (template) await this.loadTemplate(template, unlockedUpgrades);
     }
+  }
+
+  /**
+   * Every board as storage holds it, with the one on screen encoded now
+   * rather than whenever its queued save lands — what a transfer code sends.
+   */
+  async boardsSnapshot(): Promise<StoragePayload> {
+    const savedGrids = { ...this.savedGrids };
+    if (!this.isPreview && this.activeTemplateId) {
+      if (blueprintKey(this.grid, this.placements) === this.#pristineKey) {
+        delete savedGrids[this.activeTemplateId];
+      } else {
+        const code = await encodeBlueprint(this.grid, this.placements);
+        if (code) savedGrids[this.activeTemplateId] = { code };
+      }
+    }
+    return {
+      activeTemplateId: this.activeTemplateId,
+      savedGrids,
+      customIslands: [...this.customIslands],
+    };
+  }
+
+  /**
+   * Replaces every board — shipped islands' edits and the custom islands —
+   * with another browser's, from a transfer code, and opens its active one.
+   * Like a game import, it drops the undo history with the boards it
+   * describes.
+   */
+  async adoptBoards(
+    state: StoragePayload,
+    unlockedUpgrades: Record<string, number>,
+  ) {
+    if (this.isPreview) {
+      throw new Error("Leave the shared layout before loading a transfer.");
+    }
+    // A save of the board on screen may still be encoding; landing after this
+    // it would overwrite the adopted board with the one it replaced.
+    this.#persistSeq++;
+    this.customIslands = (state.customIslands ?? []).slice(
+      0,
+      MAX_CUSTOM_ISLANDS,
+    );
+    this.savedGrids = { ...state.savedGrids };
+    const template =
+      this.findTemplate(state.activeTemplateId) ?? ISLAND_TEMPLATES[0];
+    this.activeTemplateId = template.id;
+    this.#saveState();
+    await this.loadTemplate(template, unlockedUpgrades);
   }
 
   /**

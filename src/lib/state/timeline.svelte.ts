@@ -386,6 +386,19 @@ class TimelineState {
   }
 
   /**
+   * Takes another browser's game import as this one's, from a transfer code,
+   * with its Chronon target. The record already holds the game boards' power,
+   * worked out where it was imported, so nothing here is re-derived.
+   */
+  adoptRecord(record: SavedGameImport, target: number | null): void {
+    this.record = record;
+    this.now = Date.now();
+    gameImportStorage.save(record);
+    this.setChrononTarget(target);
+    this.timeLabPlan = {};
+  }
+
+  /**
    * Keeps a game import as the game had it — see `SavedGameImport`. Called by
    * `uiState.applyGameImport` once the import has landed.
    *
