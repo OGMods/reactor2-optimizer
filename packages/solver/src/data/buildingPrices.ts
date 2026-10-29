@@ -1,3 +1,4 @@
+import { findBuilding } from "./buildings";
 import { TIME_LAB } from "./timeLab";
 
 /**
@@ -84,4 +85,69 @@ export function sellRefund(
   rules: PriceRules,
 ): number {
   return copies > 0 ? buildPrice(base, copies, rules) * rules.refund : 0;
+}
+
+/** The price rules of a player with none of the price research. */
+const BASE_RULES: PriceRules = {
+  scaler: COST_SCALER[0],
+  discount: 1,
+  refund: REFUND[0],
+};
+
+/**
+ * What building `layout` from an empty board costs, every copy at the price
+ * the next one would be.
+ *
+ * This is what ranks layouts that tie on power, so it only has to order them
+ * right, and the research that lowers prices mostly cannot change the order:
+ * both reductions scale every price alike. The scaler can, a little, and the
+ * copies standing on other islands too, so this is the board's own cost under
+ * the base scaler — a ranking, not a quote.
+ */
+export function layoutCost(
+  layout: readonly { buildingId: string }[],
+  rules: PriceRules = BASE_RULES,
+): number {
+  const copies = new Map<string, number>();
+  for (const p of layout)
+    copies.set(p.buildingId, (copies.get(p.buildingId) ?? 0) + 1);
+  let cost = 0;
+  for (const [id, n] of copies) {
+    const base = findBuilding(id)?.price ?? 0;
+    for (let k = 0; k < n; k++) cost += buildPrice(base, k, rules);
+  }
+  return cost;
+}
+
+/**
+ * Relative slack for "the same cost": two layouts holding the same buildings
+ * sum them in a different order and can disagree in the last bits.
+ */
+const COST_TIE_RELATIVE_TOLERANCE = 1e-9;
+
+/**
+ * Orders layouts that tie on power cheapest first: by `layoutCost`, then — the
+ * prices span thirty orders of magnitude, so a cooler more or less is lost in
+ * the cost of a reactor — by how many buildings stand, fewest first, so the
+ * layout leaving more of the land empty wins. Stable, so layouts neither
+ * figure separates keep the order they came in.
+ *
+ * Each layout is costed once, not once per comparison.
+ */
+export function cheapestFirst<T>(
+  items: readonly T[],
+  placementsOf: (item: T) => readonly { buildingId: string }[],
+): T[] {
+  return items
+    .map((item) => {
+      const placements = placementsOf(item);
+      return { item, cost: layoutCost(placements), count: placements.length };
+    })
+    .sort((a, b) =>
+      Math.abs(a.cost - b.cost) >
+      COST_TIE_RELATIVE_TOLERANCE * Math.max(a.cost, b.cost)
+        ? a.cost - b.cost
+        : a.count - b.count,
+    )
+    .map(({ item }) => item);
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { layoutState, solverState, uiState } from "../../state";
+  import { layoutState, uiState } from "../../state";
   import { Play, Redo2, Square, Undo2 } from "lucide-svelte";
 
   /**
@@ -20,7 +20,7 @@
    * the panel is out of the way.
    */
 
-  let running = $derived(solverState.isOptimizing);
+  let running = $derived(uiState.running);
 
   /*
    * A press here must not also collapse the config panel.

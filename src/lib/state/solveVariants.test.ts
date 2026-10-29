@@ -26,8 +26,13 @@ const store = new Map<string, string>();
 };
 
 const { layoutState } = await import("./layout.svelte");
-const { solverState, chooseSolveVariants, composeIslandBests } =
-  await import("./solver.svelte");
+const {
+  solverState,
+  chooseSolveVariants,
+  composeIslandBests,
+  islandChoices,
+  withIslandLayout,
+} = await import("./solver.svelte");
 const { solverStorage } = await import("../storage/storage");
 const { configState } = await import("./config.svelte");
 const { SolverWorkerClient } = await import("../worker/workerClient");
@@ -127,6 +132,17 @@ describe("what a finished run does to the shortlist", () => {
     const chosen = chooseSolveVariants(held, 0, [nudged, spread(500, 1)]);
     expect(at(chosen.variants)).toEqual([0, 1]);
     expect(chosen.selected).toBe(0);
+  });
+
+  it("puts a cheaper tie first and keeps the user on their layout", () => {
+    const held = [spread(500, 0), spread(500, 1)];
+    // The same power from one building fewer: the cheapest of the three.
+    const cheaper = spread(500, 2);
+    cheaper.placements.pop();
+
+    const chosen = chooseSolveVariants(held, 1, [cheaper]);
+    expect(at(chosen.variants)).toEqual([2, 0, 1]);
+    expect(chosen.selected).toBe(2);
   });
 
   it("replaces the shortlist outright when the run comes back higher", () => {
@@ -617,5 +633,84 @@ describe("what a re-run leaves on screen", () => {
       for (const v of solverState.variants)
         expect(reactorRows(v)).not.toEqual([0, 4]);
     });
+  });
+});
+
+describe("a layout picker per island", () => {
+  // Two islands: x below 10 is the first, the rest the second.
+  const islandOf = (p: PlacedBuilding) => (p.x < 10 ? 0 : 1);
+  const tiles = new Map([
+    [0, 40],
+    [1, 60],
+  ]);
+  const half = (id: string, x0: number) =>
+    [0, 1, 2].map((k) => placed(id, x0 + k, 0));
+  const board = (...halves: PlacedBuilding[][]) => {
+    const r = result(500, 0);
+    r.placements = halves.flat();
+    return r;
+  };
+
+  it("offers each island the layouts the shortlist holds for it", () => {
+    const a0 = half("generator", 0);
+    const b0 = half("cooler1", 0);
+    const a1 = half("generator", 10);
+    const b1 = half("cooler1", 10);
+    const variants = [board(a0, a1), board(b0, a1), board(a0, b1)];
+
+    const pickers = islandChoices(
+      variants,
+      variants[0].placements,
+      islandOf,
+      tiles,
+    );
+    // Largest first, each on the layout the board on screen has.
+    expect(pickers.map((p) => [p.island, p.choices.length, p.current])).toEqual(
+      [
+        [1, 2, 0],
+        [0, 2, 0],
+      ],
+    );
+
+    // The mix none of the three boards is: both islands on their second.
+    const mixed = withIslandLayout(
+      variants[1].placements,
+      1,
+      pickers[0].choices[1],
+      islandOf,
+    );
+    expect(mixed.map((p) => p.buildingId)).toEqual(Array(6).fill("cooler1"));
+  });
+
+  it("leaves out an island the shortlist never varies", () => {
+    const a1 = half("generator", 10);
+    const variants = [
+      board(half("generator", 0), a1),
+      board(half("cooler1", 0), a1),
+    ];
+    const pickers = islandChoices(
+      variants,
+      variants[0].placements,
+      islandOf,
+      tiles,
+    );
+    expect(pickers.map((p) => p.island)).toEqual([0]);
+  });
+
+  it("counts an island left empty as one of its layouts", () => {
+    const a0 = half("generator", 0);
+    const a1 = half("generator", 10);
+    const b1 = half("cooler1", 10);
+    const variants = [board(a0, a1), board(b1), board(a0, b1)];
+
+    const pickers = islandChoices(
+      variants,
+      variants[1].placements,
+      islandOf,
+      tiles,
+    );
+    const first = pickers.find((p) => p.island === 0)!;
+    expect(first.choices.map((c) => c.length)).toEqual([3, 0]);
+    expect(first.current).toBe(1);
   });
 });

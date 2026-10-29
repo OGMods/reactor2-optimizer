@@ -23,7 +23,12 @@ import {
 } from "../worker/solveModes";
 import { BUILDINGS } from "@reactor2/solver";
 import { getEffectiveBuildings } from "@reactor2/solver";
-import { isDistinctLayout, powerTies } from "@reactor2/solver";
+import {
+  cheapestFirst,
+  isDistinctLayout,
+  layoutKey,
+  powerTies,
+} from "@reactor2/solver";
 import {
   canCoolDirectProducer,
   countGrassTiles,
@@ -73,9 +78,10 @@ const WATCHDOG_GRACE_MS = 5_000;
  * A fresh layout joins only if it is `MIN_ALTERNATE_DISTANCE` tiles away from
  * every layout already in the list — two runs finding the same arrangement is
  * common and it is one answer, not two, and two runs finding it a cooler apart
- * is the same again. Held layouts stay in front, and go in unfiltered so the
- * applied one keeps its index: a shortlist stored without that rule would
- * otherwise lose an entry ahead of the user's pick and shift it.
+ * is the same again. Held layouts go in unfiltered: a shortlist stored without
+ * that rule would otherwise lose an entry. The pooled list is then put
+ * cheapest first (`cheapestFirst`), as every shortlist is, and `selected`
+ * follows the layout the user was on to wherever that puts it.
  *
  * **The bar is the best layout held, not the one being looked at.** Cycling is
  * a preview, so `heldIndex` is wherever the user's eye happens to be — and a
@@ -103,12 +109,14 @@ export function chooseSolveVariants(
     return { variants: fresh.slice(0, limit), selected: 0, defended: false };
 
   // A stored index can outrun a shortlist that has since been rebuilt; the
-  // first entry is the layout the search settled on, so it is the safe home.
+  // first entry is the cheapest at the shortlist's power, so it is a safe home.
   const selected = Math.min(Math.max(heldIndex, 0), held.length - 1);
   // Under an upgrade plan `rank` is the power *after* the plan, which is what
   // the search maximised; `totalPower` is today's, which it did not.
   const bestHeldPower = Math.max(...held.map(rank));
-  const freshPower = rank(fresh[0]);
+  // The best of the fresh shortlist, not its first entry: that is the
+  // cheapest of its ties, which may sit a hair below the run's best.
+  const freshPower = Math.max(...fresh.map(rank));
 
   if (powerTies(freshPower, bestHeldPower)) {
     const variants = held.slice();
@@ -123,7 +131,14 @@ export function chooseSolveVariants(
         continue;
       variants.push(variant);
     }
-    return { variants, selected, defended: false };
+    const onScreen = variants[selected];
+    // Stable, so equal costs keep held layouts ahead of fresh ones.
+    const ranked = cheapestFirst(variants, (v) => v.placements);
+    return {
+      variants: ranked,
+      selected: ranked.indexOf(onScreen),
+      defended: false,
+    };
   }
 
   if (bestHeldPower > freshPower) {
@@ -202,6 +217,86 @@ export function composeIslandBests(
     if (isDistinctLayout(placements, composed)) composed.push(placements);
   }
   return composed;
+}
+
+/** One island's own layouts, out of a shortlist of whole boards. */
+export interface IslandChoices {
+  /** The island, as `islandOf` numbers it. */
+  island: number;
+  /** Its buildable tiles, which is what orders the pickers largest first. */
+  tiles: number;
+  /** Each distinct layout of this island the shortlist holds, in its order. */
+  choices: PlacedBuilding[][];
+  /** Which of them `current` has on this island. */
+  current: number;
+}
+
+/**
+ * The islands a player can choose a layout for one at a time: every island
+ * that more than one board in the shortlist lays out differently, largest
+ * first.
+ *
+ * The shortlist holds whole boards, so on a board of two big landmasses its
+ * entries mostly move one landmass at a time and the combination the player
+ * wants — this one's second layout with that one's third — is usually not in
+ * it. Islands never interact, so any mix is a legal board; this is what lets
+ * the card offer a picker per island instead.
+ */
+export function islandChoices(
+  variants: readonly OptimizationResult[],
+  current: readonly PlacedBuilding[],
+  islandOf: (p: PlacedBuilding) => number,
+  tiles: ReadonlyMap<number, number>,
+): IslandChoices[] {
+  const split = (placements: readonly PlacedBuilding[]) => {
+    const byIsland = new Map<number, PlacedBuilding[]>();
+    for (const p of placements) {
+      const k = islandOf(p);
+      if (k < 0) continue;
+      const rows = byIsland.get(k);
+      if (rows) rows.push(p);
+      else byIsland.set(k, [p]);
+    }
+    return byIsland;
+  };
+
+  const choices = new Map<number, Map<string, PlacedBuilding[]>>();
+  for (const variant of variants) {
+    const byIsland = split(variant.placements);
+    // Every island, built on or not: a board leaving an island empty is one
+    // of that island's layouts too, and the picker has to be able to reach it.
+    for (const k of tiles.keys()) {
+      const rows = byIsland.get(k) ?? [];
+      let seen = choices.get(k);
+      if (!seen) choices.set(k, (seen = new Map()));
+      const key = layoutKey(rows);
+      if (!seen.has(key)) seen.set(key, rows);
+    }
+  }
+
+  const onScreen = split(current);
+  const out: IslandChoices[] = [];
+  for (const [island, seen] of choices) {
+    if (seen.size < 2) continue;
+    const keys = [...seen.keys()];
+    out.push({
+      island,
+      tiles: tiles.get(island) ?? 0,
+      choices: [...seen.values()],
+      current: keys.indexOf(layoutKey(onScreen.get(island) ?? [])),
+    });
+  }
+  return out.sort((a, b) => b.tiles - a.tiles || a.island - b.island);
+}
+
+/** `current` with `island`'s buildings replaced by `layout`. */
+export function withIslandLayout(
+  current: readonly PlacedBuilding[],
+  island: number,
+  layout: readonly PlacedBuilding[],
+  islandOf: (p: PlacedBuilding) => number,
+): PlacedBuilding[] {
+  return [...current.filter((p) => islandOf(p) !== island), ...layout];
 }
 
 /**
@@ -438,8 +533,7 @@ class SolverState {
    * Zero when there is nothing to solve, which is also when there is no figure
    * worth showing.
    */
-  estimateRunMs(mode: SolveMode): number {
-    const grid = layoutState.grid;
+  estimateRunMs(mode: SolveMode, grid: Tile[][] = layoutState.grid): number {
     if (!grid || !grid.length || !grid[0] || !grid[0].length) return 0;
 
     const effectiveBuildings = getEffectiveBuildings(
@@ -543,6 +637,137 @@ class SolverState {
     if (!this.canApplyVariant) return;
     this.appliedVariant = this.variantIndex;
     this.#persistCurrent();
+  }
+
+  /**
+   * Which island each placement stands on, split the way a run under the
+   * result's anomaly splits the board on screen, and each island's size.
+   */
+  #islandIndex(): {
+    islandOf: (p: PlacedBuilding) => number;
+    tiles: Map<number, number>;
+  } {
+    const grid = layoutState.grid;
+    const width = grid[0]?.length ?? 0;
+    const islands = splitGridIntoIslands(
+      grid,
+      canCoolDirectProducer(
+        getEffectiveBuildings(
+          BUILDINGS,
+          configState.buildingUpgrades,
+          configState.prestige,
+        ),
+      ),
+      getAnomaly(this.resultAnomalyId ?? configState.activeAnomaly.id),
+    );
+    const islandAt = new Map<number, number>();
+    const tiles = new Map<number, number>();
+    islands.forEach((island, i) => {
+      tiles.set(i, island.tileCount);
+      island.originalTileIndices.forEach((tile, k) => {
+        if (island.buildable[k] === 1) islandAt.set(tile, i);
+      });
+    });
+    return {
+      islandOf: (p) => islandAt.get(p.y * width + p.x) ?? -1,
+      tiles,
+    };
+  }
+
+  /**
+   * A layout picker per island, for a board where at least two islands each
+   * have more than one layout at this power — empty otherwise, and the
+   * whole-board cycler says everything there is to say. Under a shared
+   * cooling pool the board is one island, so there is never more than one.
+   */
+  get islandPickers(): IslandChoices[] {
+    const result = this.optimizationResult;
+    if (!result || this.variants.length < 2) return [];
+    const { islandOf, tiles } = this.#islandIndex();
+    const pickers = islandChoices(
+      this.variants,
+      result.placements,
+      islandOf,
+      tiles,
+    );
+    return pickers.length >= 2 ? pickers : [];
+  }
+
+  /**
+   * Steps one island to its next (or, with `delta` -1, previous) layout and
+   * leaves every other island as it is on screen.
+   *
+   * The board that makes is often not in the shortlist, since the shortlist
+   * moves one island at a time. It is scored and put into it (`#mixSlot`), so
+   * it previews, applies and is stored like any other entry. A mix that does not tie the
+   * board on screen is skipped. Islands never interact, so mixing ties should
+   * always tie, but a shortlist pooled across runs and re-rated at a new
+   * roster is not guaranteed to be level island by island.
+   */
+  showIslandLayout(island: number, delta: 1 | -1) {
+    const result = this.optimizationResult;
+    if (!result) return;
+    const { islandOf, tiles } = this.#islandIndex();
+    const picker = islandChoices(
+      this.variants,
+      result.placements,
+      islandOf,
+      tiles,
+    ).find((c) => c.island === island);
+    if (!picker) return;
+
+    const count = picker.choices.length;
+    let bound: number | null = null;
+    for (let step = 1; step < count; step++) {
+      const next = (((picker.current + delta * step) % count) + count) % count;
+      const placements = withIslandLayout(
+        result.placements,
+        island,
+        picker.choices[next],
+        islandOf,
+      );
+      const key = layoutKey(placements);
+      const existing = this.variants.findIndex(
+        (v) => layoutKey(v.placements) === key,
+      );
+      if (existing >= 0) {
+        this.showVariant(existing);
+        return;
+      }
+      bound ??= this.estimatedMaxPower;
+      const scored = this.#scoreLayout(placements, bound);
+      if (!powerTies(scored.totalPower, result.totalPower)) continue;
+      const slot = this.#mixSlot();
+      const variants = this.variants.slice();
+      if (slot < 0) variants.push(scored);
+      else variants[slot] = scored;
+      this.#mixes.add(scored);
+      this.variants = variants;
+      this.showVariant(slot < 0 ? variants.length - 1 : slot);
+      return;
+    }
+  }
+
+  /** Boards `showIslandLayout` made, as opposed to ones a run found. */
+  #mixes = new WeakSet<OptimizationResult>();
+
+  /**
+   * Where `showIslandLayout` puts a board it made, -1 for "append": over the
+   * one it made last if that is on screen and not applied, so stepping a
+   * picker does not leave a trail; otherwise appended while the shortlist has
+   * room; otherwise over the dearest entry that is not applied — the list is
+   * cheapest first, so that is the last. The shortlist never outgrows
+   * `MAX_SOLVE_VARIANTS` this way, which a re-run's pooling relies on: a held
+   * list already at the limit takes nothing fresh.
+   */
+  #mixSlot(): number {
+    const on = this.variantIndex;
+    if (on !== this.appliedVariant && this.#mixes.has(this.variants[on]))
+      return on;
+    if (this.variants.length < MAX_SOLVE_VARIANTS) return -1;
+    for (let i = this.variants.length - 1; i >= 0; i--)
+      if (i !== this.appliedVariant) return i;
+    return -1;
   }
 
   /**

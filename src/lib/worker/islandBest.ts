@@ -1,4 +1,9 @@
-import { isDistinctLayout, powerTies, MAX_ALTERNATES } from "@reactor2/solver";
+import {
+  cheapestFirst,
+  isDistinctLayout,
+  powerTies,
+  MAX_ALTERNATES,
+} from "@reactor2/solver";
 import type { IslandSolution } from "@reactor2/solver";
 import type { IslandLayout, PlacedBuilding } from "@reactor2/solver";
 
@@ -28,6 +33,14 @@ import type { IslandLayout, PlacedBuilding } from "@reactor2/solver";
  * own shortlist (`MIN_ALTERNATE_DISTANCE`), so two attempts converging on the
  * same arrangement — common, and the usual case on a small island — count
  * once, and so do two that converged a tile apart.
+ *
+ * **Cheapest first.** Everything held ties on power, so the pool is kept
+ * ordered by `cheapestFirst` and its head is the primary: an attempt that
+ * found the same power for less takes the island over, and once the shortlist
+ * is full a cheaper newcomer pushes out the dearest entry. A later attempt is
+ * still judged against the best power any attempt reached, not the primary's:
+ * a tie may sit a hair below the bar, and measuring from the cheapest would let
+ * the island's figure creep down one tolerance at a time.
  */
 export class IslandBest {
   #primary: IslandLayout = { placements: [], powerOutput: 0 };
@@ -35,6 +48,8 @@ export class IslandBest {
   /** The primary and every alternate kept, for the distance test. */
   #kept: PlacedBuilding[][] = [];
   #settled = false;
+  /** The best power any attempt reached — the bar the next one is held to. */
+  #bar = 0;
   readonly #limit: number;
 
   /** `limit` caps the alternates kept, matching what one search would keep. */
@@ -64,14 +79,14 @@ export class IslandBest {
    * coordinator streams those to the screen on a separate track.
    */
   offer(candidate: IslandSolution): void {
-    const ties =
-      this.#settled &&
-      powerTies(candidate.powerOutput, this.#primary.powerOutput);
+    const ties = this.#settled && powerTies(candidate.powerOutput, this.#bar);
 
-    if (!ties) {
-      if (this.#settled && candidate.powerOutput <= this.#primary.powerOutput)
-        return;
+    if (ties) {
+      this.#bar = Math.max(this.#bar, candidate.powerOutput);
+    } else {
+      if (this.#settled && candidate.powerOutput <= this.#bar) return;
       this.#settled = true;
+      this.#bar = candidate.powerOutput;
       this.#primary = {
         placements: candidate.placements,
         powerOutput: candidate.powerOutput,
@@ -93,11 +108,18 @@ export class IslandBest {
         ]
       : (candidate.alternates ?? []);
 
+    const pool = [this.#primary, ...this.#alternates];
     for (const layout of incoming) {
-      if (this.#alternates.length >= this.#limit) break;
       if (!isDistinctLayout(layout.placements, this.#kept)) continue;
       this.#kept.push(layout.placements);
-      this.#alternates.push(layout);
+      pool.push(layout);
     }
+    const ranked = cheapestFirst(pool, (l) => l.placements).slice(
+      0,
+      this.#limit + 1,
+    );
+    this.#primary = ranked[0];
+    this.#alternates = ranked.slice(1);
+    this.#kept = ranked.map((l) => l.placements);
   }
 }

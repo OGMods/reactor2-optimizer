@@ -1,3 +1,4 @@
+import { cheapestFirst } from "../data/buildingPrices";
 import { AlternateCollector, isDistinctLayout, powerTies } from "./alternates";
 import { EPS } from "./constants";
 import { buildIslandContext, type IslandContext } from "./context";
@@ -20,6 +21,7 @@ import {
   targetCanBeat,
   targetCompositions,
 } from "./search/composition";
+import { EMPTY_GATHER_BUDGET_MS, gatherEmptyTiles } from "./search/emptyTiles";
 import {
   emptyPlacement,
   isDirectProducer,
@@ -184,6 +186,10 @@ async function finalizeAlternates(
   // cuts short is still valid, only less gathered.
   const gatherDeadlineMs =
     performance.now() + EVACUATE_BUDGET_MS + GATHER_BUDGET_MS;
+  // And one for the holes, counted in time actually spent: the coolers' pass
+  // is a no-op under every rule but a pool, and its unused budget is not this
+  // one's to take.
+  let emptyLeftMs = EMPTY_GATHER_BUDGET_MS;
 
   for (const layout of collector.layouts()) {
     // This runs after the search's deadline, and each alternate is a few
@@ -210,12 +216,21 @@ async function finalizeAlternates(
       ctx,
       gatherDeadlineMs,
     );
-    if (!powerTies(sized.power, primaryPower)) continue;
+    const emptyStartedMs = performance.now();
+    const tidied = gatherEmptyTiles(
+      sized.rows,
+      sized.power,
+      effectiveBuildings,
+      ctx,
+      emptyStartedMs + emptyLeftMs,
+    );
+    emptyLeftMs -= performance.now() - emptyStartedMs;
+    if (!powerTies(tidied.power, primaryPower)) continue;
 
-    const rows = toPlacedBuildings(sized.rows);
+    const rows = toPlacedBuildings(tidied.rows);
     if (!isDistinctLayout(rows, kept)) continue;
     kept.push(rows);
-    out.push({ placements: rows, powerOutput: sized.power });
+    out.push({ placements: rows, powerOutput: tidied.power });
   }
 
   return out;
@@ -686,19 +701,30 @@ export async function solveIsland(
     ctx,
     performance.now() + EVACUATE_BUDGET_MS + GATHER_BUDGET_MS,
   );
-  const placements = toPlacedBuildings(sized.rows);
-  return {
+  // Then push the holes the layout leaves out to the shore and the corners.
+  const tidied = gatherEmptyTiles(
+    sized.rows,
+    sized.power,
+    effectiveBuildings,
+    ctx,
+    performance.now() + EMPTY_GATHER_BUDGET_MS,
+  );
+  const placements = toPlacedBuildings(tidied.rows);
+  const alternates = await finalizeAlternates(
+    collector,
     placements,
-    powerOutput: sized.power,
-    alternates: await finalizeAlternates(
-      collector,
-      placements,
-      sized.power,
-      effectiveBuildings,
-      ctx,
-      pacer,
-    ),
-  };
+    tidied.power,
+    effectiveBuildings,
+    ctx,
+    pacer,
+  );
+  // Every one of these ties on power, so the cheapest to build goes first and
+  // is the one the island shows. Stable, so equal costs keep the walk's order.
+  const [best, ...rest] = cheapestFirst(
+    [{ placements, powerOutput: tidied.power }, ...alternates],
+    (l) => l.placements,
+  );
+  return { ...best, alternates: rest };
 }
 
 /**
@@ -721,6 +747,7 @@ export const internals = {
   DOWNGRADE_ROLES,
   constructMultiStartSeed,
   downgradeTiers,
+  gatherEmptyTiles,
   gatherPooledCoolers,
   greedyPolish,
   hillClimb,

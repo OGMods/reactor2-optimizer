@@ -22,6 +22,7 @@ const store = new Map<string, string>();
 
 const {
   applyInProgress,
+  BUILDINGS,
   decodeGameExport,
   ISLAND_TEMPLATES,
   resolveGameExport,
@@ -115,6 +116,26 @@ describe("solve all islands", () => {
     expect(uiState.solveAll).toBeNull();
   });
 
+  /*
+   * Between two islands the solver is idle while the next board loads. Setup
+   * used to key on the solver alone, so it flashed back in there, and Run
+   * showed where a press would have started a second solve beside the batch.
+   */
+  it("keeps Setup hidden and Run as Stop between islands", async () => {
+    const seen: { hidden: boolean; running: boolean }[] = [];
+    solverState.runOptimizer = async () => {
+      // Called with the solver still idle: the gap between two islands.
+      seen.push({ hidden: uiState.setupHidden, running: uiState.running });
+    };
+
+    await uiState.solveAllIslands();
+
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen.every((s) => s.hidden && s.running)).toBe(true);
+    expect(uiState.running).toBe(false);
+    expect(uiState.setupHidden).toBe(false);
+  });
+
   it("solves every shipped island when nothing has been imported", () => {
     expect(uiState.solveAllTargets.map((t) => t.id)).toEqual(
       ISLAND_TEMPLATES.filter((t) => t.game).map((t) => t.id),
@@ -152,5 +173,75 @@ describe("solve all islands", () => {
       solverState.isOptimizing = false;
     }
     expect(calls).toHaveLength(0);
+  });
+
+  /*
+   * The estimate used to be the island on screen times the island count. An
+   * island in several pieces packs onto the pool differently from one in a
+   * single piece, so its own figure differs — on a four-core phone, Quick on a
+   * split island can come out at 24s against everyone else's 30s — and the
+   * total moved with whichever island was open. Each island is counted at its
+   * own figure now, which takes its board decoding in the background first.
+   */
+  it("estimates the same total whichever island is open", async () => {
+    // Not an earlier case's import: its anomaly may be a cooling pool, which
+    // makes every map one island and every estimate alike.
+    const anomaly = configState.anomalyId;
+    configState.anomalyId = "none";
+    const roster = configState.buildingUpgrades;
+    configState.buildingUpgrades = Object.fromEntries(
+      BUILDINGS.map((b) => [b.id, b.levels.length - 1]),
+    );
+    Object.defineProperty(globalThis.navigator, "hardwareConcurrency", {
+      value: 4,
+      configurable: true,
+    });
+    const mode = solverState.solveModeId;
+    solverState.solveModeId = "quick";
+    try {
+      // The shipped maps, obstacles and all, at every building's top tier:
+      // several are split into pieces that pack onto the pool unevenly.
+      const targets = uiState.solveAllTargets;
+      const own = new Map<string, number>();
+      for (const t of targets) {
+        await layoutState.loadTemplate(t, configState.buildingUpgrades);
+        own.set(t.id, solverState.estimatedRunMs);
+      }
+      const low = targets.reduce((a, b) =>
+        own.get(b.id)! < own.get(a.id)! ? b : a,
+      );
+      const high = targets.reduce((a, b) =>
+        own.get(b.id)! > own.get(a.id)! ? b : a,
+      );
+      // Otherwise the old reading would pass too.
+      expect(own.get(low.id)).toBeLessThan(own.get(high.id)!);
+
+      const settled = async () => {
+        let last = -1;
+        for (let i = 0; i < 50; i++) {
+          const now = uiState.solveAllEstimateMs;
+          if (now === last) return now;
+          last = now;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        return last;
+      };
+      await layoutState.loadTemplate(low, configState.buildingUpgrades);
+      const fromLow = await settled();
+      await layoutState.loadTemplate(high, configState.buildingUpgrades);
+      const fromHigh = await settled();
+
+      expect(fromLow).toBeCloseTo(fromHigh, 6);
+      const sum = [...own.values()].reduce((a, b) => a + b, 0);
+      expect(fromHigh).toBeCloseTo(sum, 6);
+    } finally {
+      solverState.solveModeId = mode;
+      configState.buildingUpgrades = roster;
+      configState.anomalyId = anomaly;
+      // The stub is an own property shadowing the prototype's getter;
+      // deleting it puts the real core count back for whatever runs next.
+      delete (globalThis.navigator as { hardwareConcurrency?: number })
+        .hardwareConcurrency;
+    }
   });
 });

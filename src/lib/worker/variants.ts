@@ -1,5 +1,5 @@
 import { buildOptimizationResult, type IslandPlan } from "@reactor2/solver";
-import { layoutKey, powerTies } from "@reactor2/solver";
+import { cheapestFirst, layoutKey, powerTies } from "@reactor2/solver";
 import type { IslandSolution } from "@reactor2/solver";
 import type { OptimizationResult } from "@reactor2/solver";
 
@@ -24,8 +24,10 @@ import type { OptimizationResult } from "@reactor2/solver";
 export const MAX_SOLVE_VARIANTS = 10;
 
 /**
- * All of them, best first: `[0]` is the layout the search actually settled on,
- * and everything after it ties that layout's power.
+ * All of them, cheapest first (`cheapestFirst`): every one ties the power
+ * of the layout the search settled on, and `[0]` is the one of them that costs
+ * the least to build — which, with each island's own shortlist already in
+ * that order, is usually that layout.
  */
 export function buildSolveVariants(
   plan: IslandPlan,
@@ -74,5 +76,6 @@ export function buildSolveVariants(
     take(swapped);
   }
 
-  return variants;
+  // Stable, so equal costs keep the order they were generated in.
+  return cheapestFirst(variants, (v) => v.placements);
 }

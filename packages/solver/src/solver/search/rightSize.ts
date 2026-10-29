@@ -134,7 +134,7 @@ export function downgradeTiers(
  * The sweep repeats to a fixpoint: downgrading a generator changes the waste
  * its cooler has to absorb, which can free a cooler this sweep already walked
  * past. It terminates because every accepted swap strictly lowers one tile's
- * capacity and the ladders are finite.
+ * capacity, every accepted removal empties a tile, and the ladders are finite.
  *
  * Tiles are visited in ascending index order, which is the game's own spatial
  * order — see `context.ts`.
@@ -168,11 +168,37 @@ export function downgradeOversized(
     changed = false;
 
     for (const tile of occupied) {
-      const building = current[tile]!;
+      const building = current[tile];
+      // Taken away by the idle case below on an earlier sweep.
+      if (building === null) continue;
       const ladder = tiers.get(building.type);
       if (ladder === undefined || ladder.length === 0) continue;
 
       const load = tileLoad(building, rowAt.get(tile)!);
+
+      // Nothing to size: the building is doing nothing. Every tier covers a
+      // load of zero, so without this it would be swapped for the bottom of
+      // its ladder and left standing idle — and it does go idle after the
+      // prune, because shrinking a neighbour moves the split onto one cooler
+      // of two side by side and leaves the other with none. The smallest tier
+      // of an idle building is no building, under the same guard as a swap.
+      if (load <= 0) {
+        current[tile] = null;
+        const trial = simulateIsland(current, ctx);
+        if (
+          covers(trial.totalPower, floor) &&
+          !anyOfflineProducer(current, trial.placements) &&
+          planHolds(current, ctx)
+        ) {
+          power = trial.totalPower;
+          rows = trial.placements;
+          rowAt.clear();
+          for (const r of rows) rowAt.set(r.idx, r);
+          changed = true;
+          continue;
+        }
+        put(current, ctx, tile, building);
+      }
 
       for (const candidate of ladder) {
         // Rated for this tile before it is compared to anything: `building` is
