@@ -6,6 +6,7 @@ import { ANOMALIES, DEFAULT_ANOMALY_ID } from "./anomalies";
 import { findBuilding } from "./buildings";
 import { ISLAND_TEMPLATES } from "./maps";
 import { PRESTIGE_UPGRADES } from "./prestige";
+import { timeLabLevels, timeLabResearch } from "./timeLab";
 import { MAX_UPGRADE_STEPS, type UpgradeStep } from "./upgradePlan";
 
 /**
@@ -85,7 +86,10 @@ export interface ImportedIsland {
   /** The template's terrain with the player's cleared obstacles cleared. */
   grid: Tile[][];
   placements: BlueprintPlacement[];
-  /** Obstacles the player has cleared. */
+  /**
+   * Obstacles the player has cleared — including the clears still running in
+   * the game that are done by now or free to finish (see `clearsDoneBy`).
+   */
   cleared: number;
   /**
    * Cells where the game's map and ours disagree on something other than a
@@ -111,6 +115,12 @@ export interface ResolvedGameImport {
   unknownAnomaly: string | null;
   /** Research running at export, soonest first — building and Time Lab only. */
   inProgress: ImportedProgress[];
+  /**
+   * Obstacle clears running in the game at export. `done` were taken off the
+   * boards: finished since the export, or with so little left that Erased from
+   * Time finishes them for free. `pending` are still obstacles here.
+   */
+  clears: { done: number; pending: number };
   /** Unlocked islands, as boards. */
   islands: ImportedIsland[];
   /**
@@ -128,13 +138,17 @@ async function resolveIsland(
   templateCode: string,
   link: { originX: number; originY: number },
   island: GameExportIsland,
-): Promise<Omit<ImportedIsland, "templateId" | "name">> {
+  clearsDone: ReadonlySet<string>,
+): Promise<
+  Omit<ImportedIsland, "templateId" | "name"> & { clearsTaken: number }
+> {
   const { grid } = await decodeBlueprint(templateCode);
   const placements: BlueprintPlacement[] = [];
   let cleared = 0;
   let mismatched = 0;
   let blockedBuildings = 0;
   let unknownBuildings = 0;
+  let clearsTaken = 0;
 
   const cellAt = (gx: number, gy: number): string => {
     const i = gx - island.minX;
@@ -172,6 +186,13 @@ async function resolveIsland(
         tile.type = "grass";
         cleared++;
       } else if (
+        OBSTACLES.has(ours) &&
+        clearsDone.has(`${link.originX - tile.y},${link.originY - tile.x}`)
+      ) {
+        tile.type = "grass";
+        cleared++;
+        clearsTaken++;
+      } else if (
         OBSTACLES.has(terrain) ? !OBSTACLES.has(ours) : terrain !== ours
       ) {
         // Which forest stands on a tile is not ours to change, so two kinds
@@ -189,13 +210,43 @@ async function resolveIsland(
     mismatched,
     blockedBuildings,
     unknownBuildings,
+    clearsTaken,
   };
+}
+
+/**
+ * The game cells (`"x,y"`) of the clears in progress that are as good as
+ * done: finished by `now`, or with no more left than Erased from Time's
+ * window, which the game finishes for free at a tap.
+ *
+ * Time passes from the export's own stamp when the code has one; without
+ * `now`, or on a code from before the timeline section, only the seconds left
+ * at export are read — so a test against a fixed code gives a fixed answer.
+ */
+function clearsDoneBy(exp: GameExport, now: number | undefined): Set<string> {
+  const level = timeLabLevels(exp.research).erased_from_time;
+  const window =
+    level > 0 ? timeLabResearch("erased_from_time").values![level - 1] : 0;
+  const since =
+    now !== undefined && exp.timeline
+      ? Math.max(0, now - exp.timeline.exportedAt)
+      : 0;
+  const done = new Set<string>();
+  for (const c of exp.clearing)
+    if (c.secondsLeft - since <= window) done.add(`${c.x},${c.y}`);
+  return done;
 }
 
 /** Resolves a decoded game export. See the module header for the rules. */
 export async function resolveGameExport(
   exp: GameExport,
+  options: {
+    /** Unix seconds now, to count the clears that have finished since. */
+    now?: number;
+  } = {},
 ): Promise<ResolvedGameImport> {
+  const clearsDone = clearsDoneBy(exp, options.now);
+  let clearsTaken = 0;
   const buildingUpgrades: Record<string, number> = {};
   const prestigeLevels: Record<string, number> = {};
 
@@ -259,11 +310,14 @@ export async function resolveGameExport(
       lockedTemplateIds.push(template.id);
       continue;
     }
-    islands.push({
-      templateId: template.id,
-      name: template.name,
-      ...(await resolveIsland(template.code, template.game, area)),
-    });
+    const { clearsTaken: taken, ...board } = await resolveIsland(
+      template.code,
+      template.game,
+      area,
+      clearsDone,
+    );
+    clearsTaken += taken;
+    islands.push({ templateId: template.id, name: template.name, ...board });
   }
 
   return {
@@ -273,6 +327,10 @@ export async function resolveGameExport(
     anomalyId: known ? exp.anomalyId : DEFAULT_ANOMALY_ID,
     unknownAnomaly: known ? null : exp.anomalyId,
     inProgress,
+    clears: {
+      done: clearsTaken,
+      pending: exp.clearing.length - clearsTaken,
+    },
     islands,
     lockedTemplateIds,
   };

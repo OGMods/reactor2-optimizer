@@ -9,6 +9,7 @@
     MoreHorizontal,
     Settings,
     Share2,
+    MonitorSmartphone,
     X,
   } from "lucide-svelte";
 
@@ -140,6 +141,19 @@
         >
           <Download size={16} />
           <span>Import code</span>
+        </button>
+        <!--
+          Everything this browser holds, to another one — see
+          `modals/TransferModal.svelte`. Absent in preview with Import: the
+          board on screen is not the visitor's to send.
+        -->
+        <button
+          class="menu-item"
+          role="menuitem"
+          onclick={() => uiState.openTransfer()}
+        >
+          <MonitorSmartphone size={16} />
+          <span>Transfer to another device</span>
         </button>
       {/if}
 

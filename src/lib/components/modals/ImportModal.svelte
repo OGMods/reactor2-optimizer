@@ -11,6 +11,7 @@
   } from "@reactor2/solver";
   import { AlertCircle, Download, Gamepad2, Loader2 } from "lucide-svelte";
   import { onDestroy } from "svelte";
+  import { isTransferCode } from "../../encoding/transfer";
   import { createConfirmArm } from "../confirmArm.svelte";
   import ModalShell from "./ModalShell.svelte";
 
@@ -32,7 +33,11 @@
   // A game code never takes a custom slot, so the cap only stands in the way
   // of a share code — and must not lock the box a game code is pasted into.
   let isGame = $derived(isGameExportCode(uiState.importCode));
-  let atCapacity = $derived(!layoutState.canAddCustomIsland && !isGame);
+  // A transfer code from another device opens its own dialog.
+  let isTransfer = $derived(isTransferCode(uiState.importCode));
+  let atCapacity = $derived(
+    !layoutState.canAddCustomIsland && !isGame && !isTransfer,
+  );
   let canSubmit = $derived(
     uiState.importCode.trim().length > 0 &&
       !uiState.isImporting &&
@@ -49,7 +54,9 @@
 
   function submit() {
     if (!canSubmit) return;
-    if (game) {
+    if (isTransfer) {
+      void uiState.receiveTransfer(uiState.importCode);
+    } else if (game) {
       if (confirm.press("replace")) void uiState.applyGameImport();
     } else if (!isGame) {
       void uiState.importLayout();
@@ -150,6 +157,23 @@
           <dd>{researchNames.join(", ") || "none"}</dd>
           <dt>Anomaly</dt>
           <dd>{getAnomaly(game.anomalyId).name}</dd>
+          {#if game.clears.done + game.clears.pending > 0}
+            <!--
+              A clear that has finished since the export, or is short enough
+              for Erased from Time to finish free, is already open ground.
+            -->
+            <dt>Clearing</dt>
+            <dd>
+              {#if game.clears.done > 0}
+                {game.clears.done} done or free to finish, counted as cleared
+              {/if}
+              {#if game.clears.pending > 0}
+                <span class={game.clears.done > 0 ? "muted" : ""}>
+                  {game.clears.done > 0 ? "· " : ""}{game.clears.pending} still running
+                </span>
+              {/if}
+            </dd>
+          {/if}
         </dl>
 
         {#if game.inProgress.length > 0}
@@ -245,6 +269,9 @@
       {:else if game}
         <Download size={16} />
         <span>Load my game</span>
+      {:else if isTransfer}
+        <Download size={16} />
+        <span>Open transfer</span>
       {:else}
         <Download size={16} />
         <span>Import as new island</span>

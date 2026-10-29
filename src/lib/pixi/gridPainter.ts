@@ -46,6 +46,17 @@ const BADGE_OFFSET_Y = -TILE_HEIGHT * 0.55;
  */
 const ICON_SCALE = 1.0;
 const ANOMALY_ICON = { x: 0, y: TILE_HEIGHT * 0.18, width: 31 * ICON_SCALE };
+
+/**
+ * How visible step mode leaves the buildings a step is not about. Faint enough
+ * that the step's own building is the one the eye lands on, solid enough that
+ * the rest of the island can still be read around it; at 0.18 players could
+ * not make out what stood where.
+ */
+const FADED_ALPHA = 0.4;
+
+/** How much larger step mode draws the building a step is about. */
+const FOCUS_SCALE = 1.15;
 const STATE_ICON_POS = {
   x: TILE_WIDTH * 0.24,
   y: -TILE_HEIGHT * 0.3,
@@ -259,8 +270,10 @@ export class GridRenderer {
 
   private hoverHighlight: Graphics;
 
-  /** See `setStepMarks`. Drawn over the buildings. */
+  /** See `setStepMarks`: a move's arrow, drawn over the buildings. */
   private stepMarks: Graphics;
+  /** See `setStepMarks`: the step's tile outlines, on the ground beneath them. */
+  private stepTiles: Graphics;
   private stepMarkKey = "";
 
   /** See `setFocus`: the tiles left at full strength, or null for all. */
@@ -298,6 +311,13 @@ export class GridRenderer {
    * frozen; `PixiCanvas` sets the real value in the same tick it mounts.
    */
   private animate = true;
+  /**
+   * Where a stilled breath rests: at its floor, so a failing building still
+   * reads as failing with animation off — or, in step mode, at full strength,
+   * where the pulse is stopped to quiet the board, not to stand in for it, and
+   * a reactor built before its coolers is the very building being shown.
+   */
+  private restAlpha: "floor" | "full" = "floor";
 
   constructor(gridContainer: Container) {
     this.gridContainer = gridContainer;
@@ -348,12 +368,16 @@ export class GridRenderer {
     this.linkGraphics = new Graphics();
     this.linkGraphics.eventMode = "none";
     this.gridContainer.addChild(this.linkGraphics);
+    // A step's tiles lie on the ground too, so the building the step is about
+    // stands on its outline rather than behind it. The outline is bold enough
+    // that the corners a building leaves bare still read.
+    this.stepTiles = new Graphics();
+    this.stepTiles.eventMode = "none";
+    this.gridContainer.addChild(this.stepTiles);
     this.gridContainer.addChild(this.propsContainer);
     this.gridContainer.addChild(this.badgeContainer);
     this.gridContainer.addChild(this.ghostContainer);
-    // A step's tiles, over everything: on the ground they hid under the very
-    // building that had just arrived. So an outline and a faint wash, which
-    // the building shows through.
+    // A move's arrow, over everything: it crosses other buildings on its way.
     this.stepMarks = new Graphics();
     this.stepMarks.eventMode = "none";
     this.gridContainer.addChild(this.stepMarks);
@@ -377,6 +401,7 @@ export class GridRenderer {
     this.hoverHighlight.destroy({ children: true });
     this.linkGraphics.destroy();
     this.stepMarks.destroy();
+    this.stepTiles.destroy();
     this.islandContainer.destroy({ children: true });
     this.gridLinesContainer.destroy({ children: true });
     this.propsContainer.destroy({ children: true });
@@ -678,7 +703,7 @@ export class GridRenderer {
           // keeping it in the registry is what lets `setAnimated(true)` start
           // it moving again without rebuilding the board.
           this.pulsing.set(`${x},${y}`, { sprite: buildingSprite, pulse });
-          if (!this.animate) buildingSprite.alpha = pulse.minAlpha;
+          if (!this.animate) buildingSprite.alpha = this.stillAlpha(pulse);
         }
       }
     }
@@ -742,15 +767,20 @@ export class GridRenderer {
    * Idempotent, because the effect that drives it re-runs on any of its
    * dependencies changing, not only on this one.
    */
-  public setAnimated(on: boolean): void {
-    if (this.animate === on) return;
+  public setAnimated(on: boolean, rest: "floor" | "full" = "floor"): void {
+    if (this.animate === on && this.restAlpha === rest) return;
     this.animate = on;
+    this.restAlpha = rest;
     if (on) return;
 
     this.drawLinks(0);
     for (const { sprite, pulse } of this.pulsing.values()) {
-      if (!sprite.destroyed) sprite.alpha = pulse.minAlpha;
+      if (!sprite.destroyed) sprite.alpha = this.stillAlpha(pulse);
     }
+  }
+
+  private stillAlpha(pulse: Pulse): number {
+    return this.restAlpha === "full" ? 1 : pulse.minAlpha;
   }
 
   /**
@@ -912,13 +942,14 @@ export class GridRenderer {
     if (key === this.stepMarkKey) return;
     this.stepMarkKey = key;
     this.stepMarks.clear();
+    this.stepTiles.clear();
     for (const mark of marks) {
       const iso = gridToIso(mark.x, mark.y);
       const color = mark.kind === "arrive" ? ACCENT : DANGER;
-      this.stepMarks
+      this.stepTiles
         .poly(TILE_DIAMOND.map((v, i) => v + (i % 2 === 0 ? iso.x : iso.y)))
-        .fill({ color, alpha: 0.16 })
-        .stroke({ width: 3, color, alpha: 1 });
+        .fill({ color, alpha: 0.35 })
+        .stroke({ width: 4, color, alpha: 1 });
     }
     // A move is also an arrow from the tile it leaves to the one it takes,
     // stopping short of the target's centre so the head sits on its edge.
@@ -969,7 +1000,10 @@ export class GridRenderer {
     for (let y = 0; y < this.propTileNodes.length; y++) {
       const row = this.propTileNodes[y];
       for (let x = 0; x < row.length; x++) {
-        const alpha = !focus || focus.has(`${x},${y}`) ? 1 : 0.18;
+        const focused = focus?.has(`${x},${y}`) ?? false;
+        const alpha = !focus || focused ? 1 : FADED_ALPHA;
+        // The step's own building is drawn a little larger as well.
+        row[x]?.scale.set(focused ? FOCUS_SCALE : 1);
         for (const node of [
           row[x],
           this.gridTileNodes[y]?.[x],

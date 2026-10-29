@@ -21,6 +21,7 @@
     SolveModal,
     SolveModeInfoModal,
     TimeLabPlannerModal,
+    TransferModal,
     UpgradePlanModal,
   } from "./lib/components";
   import { Eye } from "lucide-svelte";
@@ -343,6 +344,7 @@
   <SolveModeInfoModal />
   <UpgradePlanModal />
   <TimeLabPlannerModal />
+  <TransferModal />
 
   <!--
     The app's one-line message, wherever it comes from — see

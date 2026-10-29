@@ -1,7 +1,7 @@
 import { mount } from "svelte";
 import "./app.css";
 import { default as App } from "./App.svelte";
-import { hydrateState } from "./lib/state";
+import { hydrateState, uiState } from "./lib/state";
 import { preloadAtlas } from "./lib/pixi/atlas";
 import { analyticsOptedOut, setAnalyticsEnabled } from "./lib/utils/analytics";
 import { uiStorage } from "./lib/storage/storage";
@@ -44,6 +44,9 @@ try {
 const app = mount(App, {
   target: document.getElementById("app")!,
 });
+
+// A transfer link from another device: offered, never applied unasked.
+void uiState.receiveTransferLink();
 
 /*
  * Analytics goes last, and then waits for the browser to be idle: everything

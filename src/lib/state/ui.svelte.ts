@@ -9,6 +9,15 @@ import type {
 import { isObstacleType } from "../types/grid";
 import type { BuildingCategory } from "@reactor2/solver";
 import { buildShareUrl, clearSharedCode } from "../encoding/shareLink";
+import {
+  buildTransferUrl,
+  clearTransferLink,
+  decodeTransfer,
+  encodeTransfer,
+  readTransferLink,
+  type TransferBundle,
+  type TransferSolve,
+} from "../encoding/transfer";
 import { downloadBlob, toFileSlug } from "../utils/downloadFile";
 import {
   applyInProgress,
@@ -16,7 +25,9 @@ import {
   BUILDINGS,
   buildPrice,
   decodeBlueprint,
+  encodeBlueprint,
   findBuilding,
+  getAnomaly,
   priceRules,
   sellRefund,
   decodeGameExport,
@@ -35,7 +46,11 @@ import {
   setAnalyticsEnabled,
   trackEvent,
 } from "../utils/analytics";
-import { uiStorage } from "../storage/storage";
+import {
+  solverStorage,
+  uiStorage,
+  type StoredPlacement,
+} from "../storage/storage";
 import { evaluatePlan, type PlanReport } from "../simulation/upgradePlan";
 import {
   createBoardScorer,
@@ -73,6 +88,8 @@ type ActiveModal =
   | "settings"
   | "upgradePlan"
   | "timeLab"
+  | "transfer"
+  | "transferIn"
   | null;
 
 /**
@@ -1434,7 +1451,8 @@ class UIState {
     }
     try {
       const exp = await decodeGameExport(code);
-      const resolved = await resolveGameExport(exp);
+      // Clears that finished between the export and now come in as cleared.
+      const resolved = await resolveGameExport(exp, { now: Date.now() / 1000 });
       if (seq !== this.#gameReadSeq) return;
       this.#gameExport = exp;
       this.gameImport = resolved;
@@ -1564,7 +1582,212 @@ class UIState {
   }
 
   closeModal() {
+    if (this.activeModal === "transferIn") clearTransferLink();
     this.activeModal = null;
+  }
+
+  // ── Transfer: everything, to another browser ─────────────────────────────
+
+  /** The code and link "Transfer" offers; empty while they are built. */
+  transferCode = $state("");
+  transferUrl = $state("");
+  /** A transfer code read from a link or the import box, waiting for a yes. */
+  transferIn = $state<TransferBundle | null>(null);
+  transferError = $state<string | null>(null);
+  isTransferring = $state(false);
+  /** Bumped by each `openTransfer`, so only the newest build lands. */
+  #transferSeq = 0;
+
+  /**
+   * Opens the transfer dialog and builds the code: the roster, Time Lab,
+   * anomaly and plan, every board as it stands, each island's picked solve,
+   * the last game import and the Chronon target.
+   */
+  async openTransfer() {
+    const seq = ++this.#transferSeq;
+    this.overflowOpen = false;
+    this.transferCode = "";
+    this.transferUrl = "";
+    this.activeModal = "transfer";
+    const solves: Record<string, TransferSolve> = {};
+    for (const id of solverStorage.solveIds()) {
+      const saved = solverStorage.loadSolve(id);
+      const grid = saved && (await layoutState.boardOf(id));
+      if (!saved || !grid) continue;
+      const picked =
+        saved.variants?.[saved.selectedVariant ?? 0]?.map(
+          ([buildingId, x, y]) => ({ buildingId, x, y }),
+        ) ?? saved.result.placements;
+      solves[id] = {
+        code: await encodeBlueprint(grid, picked),
+        anomalyId: saved.anomalyId ?? configState.activeAnomaly.id,
+        planKey: saved.planKey ?? "",
+        durationMs: saved.durationMs,
+        finishedAt: saved.finishedAt,
+      };
+    }
+    const boards = await layoutState.boardsSnapshot();
+    const code = await encodeTransfer({
+      buildingUpgrades: $state.snapshot(configState.buildingUpgrades),
+      prestigeLevels: $state.snapshot(configState.prestigeLevels),
+      anomalyId: configState.activeAnomaly.id,
+      upgradePlan: $state.snapshot(configState.upgradePlan),
+      activeTemplateId: boards.activeTemplateId,
+      customIslands: boards.customIslands ?? [],
+      boards: Object.fromEntries(
+        Object.entries(boards.savedGrids).map(([id, g]) => [id, g.code]),
+      ),
+      solves,
+      gameImport: timelineState.record
+        ? $state.snapshot(timelineState.record)
+        : null,
+      chrononTarget: timelineState.chrononTarget,
+    });
+    if (seq !== this.#transferSeq || this.activeModal !== "transfer") return;
+    this.transferCode = code;
+    this.transferUrl = buildTransferUrl(code);
+  }
+
+  /**
+   * Reads a transfer code — from a link the page opened with, or pasted into
+   * Import — and asks before loading it.
+   */
+  async receiveTransfer(code: string) {
+    try {
+      this.transferIn = await decodeTransfer(code);
+      this.transferError = null;
+    } catch (err) {
+      this.transferIn = null;
+      this.transferError =
+        err instanceof Error ? err.message : "That code could not be read.";
+    }
+    this.overflowOpen = false;
+    this.activeModal = "transferIn";
+  }
+
+  /** At startup: offers the transfer a link carried, if it carried one. */
+  async receiveTransferLink() {
+    const code = readTransferLink();
+    if (code && !this.isPreview) await this.receiveTransfer(code);
+    else clearTransferLink();
+  }
+
+  /**
+   * Replaces everything here with the transfer read by `receiveTransfer`.
+   * The dialog asks twice first: it overwrites boards, solves and the game
+   * import this browser may hold and nowhere else.
+   */
+  async applyTransfer() {
+    const t = this.transferIn;
+    if (!t || this.isTransferring) return;
+    this.isTransferring = true;
+    this.transferError = null;
+    try {
+      await solverState.settleOptimizer();
+      this.closeMoveSteps();
+      configState.applyGameImport(
+        {
+          buildingUpgrades: t.buildingUpgrades,
+          prestigeLevels: t.prestigeLevels,
+          upgradePlan: t.upgradePlan,
+        },
+        t.anomalyId,
+      );
+      layoutState.setPrestige(configState.prestige);
+      layoutState.setAnomaly(configState.activeAnomaly);
+
+      // Solves first, unscored: re-filing them below scores each one on its
+      // board at this browser's roster, as after any roster change.
+      for (const id of solverStorage.solveIds()) solverStorage.clearSolve(id);
+      for (const [id, s] of Object.entries(t.solves)) {
+        const { placements } = await decodeBlueprint(s.code);
+        solverStorage.saveSolve({
+          templateId: id,
+          signature: "",
+          result: {
+            totalPower: 0,
+            placements: [],
+            activeTilesCount: 0,
+            unusedTilesCount: 0,
+            summary: {
+              totalHeatProduced: 0,
+              totalHeatConsumed: 0,
+              totalWasteGenerated: 0,
+              totalCoolingCapacity: 0,
+            },
+            theoreticalMaxPower: 0,
+          },
+          variants: [
+            placements.map((p): StoredPlacement => [p.buildingId, p.x, p.y, 0]),
+          ],
+          selectedVariant: 0,
+          anomalyId: getAnomaly(s.anomalyId).id,
+          planKey: s.planKey,
+          durationMs: s.durationMs,
+          finishedAt: s.finishedAt,
+        });
+      }
+
+      await layoutState.adoptBoards(
+        {
+          activeTemplateId: t.activeTemplateId,
+          savedGrids: Object.fromEntries(
+            Object.entries(t.boards).map(([id, code]) => [id, { code }]),
+          ),
+          customIslands: t.customIslands,
+        },
+        configState.buildingUpgrades,
+      );
+      await solverState.carryOverSolves([]);
+      if (t.gameImport)
+        timelineState.adoptRecord(t.gameImport, t.chrononTarget);
+      void timelineState.refreshIslands();
+
+      clearTransferLink();
+      this.transferIn = null;
+      this.activeModal = null;
+      solverState.restore();
+      this.closeInspector();
+      this.recenterCanvas();
+      this.showToast("Loaded everything from your other device");
+    } catch (err) {
+      this.transferError =
+        err instanceof Error
+          ? err.message
+          : "That transfer could not be loaded.";
+    } finally {
+      this.isTransferring = false;
+    }
+  }
+
+  /** Copies the transfer link or code. */
+  async copyTransfer(form: "link" | "code") {
+    const text = form === "link" ? this.transferUrl : this.transferCode;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      this.showToast("Copied", "ok", 2000);
+    } catch {
+      // Unavailable or denied: the link is on screen and selectable.
+    }
+  }
+
+  /** Hands the link to the system share sheet, where there is one. */
+  get canShareTransfer(): boolean {
+    return typeof navigator !== "undefined" && "share" in navigator;
+  }
+
+  async shareTransfer() {
+    if (!this.transferUrl) return;
+    try {
+      await navigator.share({
+        title: "Reactor 2 Optimizer",
+        text: "Open to load my islands and solves",
+        url: this.transferUrl,
+      });
+    } catch {
+      // Dismissed, or refused — nothing to report.
+    }
   }
 }
 

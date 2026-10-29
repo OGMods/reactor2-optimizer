@@ -827,14 +827,17 @@
   $effect(() => {
     // Read first, so this stays a dependency on the path that returns early.
     // Off in step mode too: a board of pulsing pads is noise around the one
-    // building a step is about. The viewport keeps the player's own choice.
+    // building a step is about — and there the stilled buildings rest at full
+    // strength, not faded, since a fresh reactor waiting on its coolers is
+    // often the step's own. The viewport keeps the player's own choice.
     const on = uiState.animations;
-    const pulse = on && !uiState.stepsActive;
+    const steps = uiState.stepsActive;
+    const pulse = on && !steps;
     // `gridRenderer` is a plain `let`, so assigning it does not re-run this.
     // `isAtlasLoaded` is the `$state` that flips right after it is built —
     // the same handle the render effect below uses to wait for it.
     if (!isAtlasLoaded) return;
-    gridRenderer?.setAnimated(pulse);
+    gridRenderer?.setAnimated(pulse, steps ? "full" : "floor");
     // The same answer governs the board's own motion. With it off the glide,
     // the bounce and the double-tap zoom all still land where they were going,
     // they just do not travel there.
@@ -970,15 +973,10 @@
    */
   let buildingOverlays = $derived.by((): BuildingOverlay[] => {
     const placements = uiState.visiblePlacements;
-    // Step mode wears none of it: a gauge and a state icon over every
-    // building drown the one a step is about.
-    if (uiState.stepsActive) {
-      return placements.map(() => ({
-        fill: null,
-        stateIcon: null,
-        anomalyIcon: null,
-      }));
-    }
+    // Step mode keeps the gauges — how hard each building works after a step
+    // is half of what the step is for — but drops the state and anomaly
+    // icons, which over every building drown the one a step is about.
+    const steps = uiState.stepsActive;
     const grid = layoutState.grid;
     const prestige = layoutState.placementPrestige;
     const anomaly = layoutState.placementAnomaly;
@@ -1006,9 +1004,11 @@
       const role = findBuilding(p.buildingId)?.type;
       return {
         fill: showFill && r ? placementFillPercent(p, r) : null,
-        stateIcon: STATE_ICON[states[i]],
+        stateIcon: steps ? null : STATE_ICON[states[i]],
         anomalyIcon:
-          shifts && role ? anomalyIconFor(anomaly, shifts[i], role) : null,
+          !steps && shifts && role
+            ? anomalyIconFor(anomaly, shifts[i], role)
+            : null,
       };
     });
   });
