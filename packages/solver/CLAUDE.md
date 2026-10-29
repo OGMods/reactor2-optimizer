@@ -620,7 +620,7 @@ is the entry point. `planSolve()` does the shared setup:
    reserved before the layout exists and converges long before its cap, so what
    it hands back becomes another short walk rather than idle time. Each stage
    is a file under `search/` (`seed`, `anneal`, `composition`, `repair`,
-   `rightSize`, `pooledCoolers`, over the shared `placement` and `stability`
+   `rightSize`, `pooledCoolers`, `emptyTiles`, over the shared `placement` and `stability`
    primitives); `placementSearch.ts` keeps `solveIsland`, the budget split,
    the deterministic replay and `internals`, and stays the one module anything
    outside imports the search from. The reasoning for each stage is in
@@ -662,7 +662,17 @@ at 2%, so nothing in the walk prefers the tier a tile actually needs, and the
 roster's top cooler lands where a twentieth of it would do — real money the
 player spends on capacity that never runs. Each swap is re-simulated and kept
 only if power holds and every producer stays online, so it can change which
-building sits on a tile and nothing else. Tied layouts go through it too.
+building sits on a tile and nothing else — except a building doing nothing at
+all, which it takes away rather than shrinking: every tier covers a load of
+zero, so such a cooler used to become the cheapest one and stand there idle.
+Tied layouts go through it too.
+
+**`gatherEmptyTiles` runs last, under every rule**, and is the same kind of
+pass: it moves the holes a layout leaves inside the land out to the shore and
+into corners, a nearer-the-edge building stepping into each, re-simulated and
+kept only if power holds, no producer goes offline, nothing new goes idle and
+the plan holds. Under a pool it leaves coolers where `gatherPooledCoolers` put
+them. Its budget (`EMPTY_GATHER_BUDGET_MS`) is added to a run.
 
 **`distribution.ts` is a port of Unity's `FlowNetwork.cs`.** Two shapes in it are
 load-bearing and look like details:

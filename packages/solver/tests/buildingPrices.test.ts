@@ -7,7 +7,13 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildPrice, priceRules, sellRefund } from "../src/data/buildingPrices";
+import {
+  buildPrice,
+  cheapestFirst,
+  layoutCost,
+  priceRules,
+  sellRefund,
+} from "../src/data/buildingPrices";
 import { decodeGameExport } from "../src/encoding/gameExport";
 
 const DIR = join(dirname(fileURLToPath(import.meta.url)), "gameExports");
@@ -51,5 +57,35 @@ describe("buildPrice and sellRefund", () => {
       9,
     );
     expect(sellRefund(100, 0, rules)).toBe(0);
+  });
+});
+
+describe("cheapestFirst", () => {
+  const at = (...ids: string[]) => ids.map((buildingId) => ({ buildingId }));
+  const order = (...layouts: { buildingId: string }[][]) =>
+    cheapestFirst(layouts, (l) => l).map((l) => l.map((p) => p.buildingId));
+
+  it("puts the cheaper layout first", () => {
+    // Heat Sink #1 is 10, #2 is 125.
+    expect(order(at("cooler2"), at("cooler1"))).toEqual([
+      ["cooler1"],
+      ["cooler2"],
+    ]);
+  });
+
+  it("charges every copy at the price the next one would be", () => {
+    expect(layoutCost(at("cooler1", "cooler1"))).toBeCloseTo(10 + 10 * 1.14, 9);
+  });
+
+  it("falls back to fewer buildings when the cost does not say", () => {
+    // Ids the catalogue does not price cost nothing, so only the count is left.
+    expect(order(at("x", "y"), at("x"))).toEqual([["x"], ["x", "y"]]);
+  });
+
+  it("keeps the incoming order where neither figure separates them", () => {
+    expect(order(at("y", "x"), at("x", "y"))).toEqual([
+      ["y", "x"],
+      ["x", "y"],
+    ]);
   });
 });

@@ -9,7 +9,8 @@
  * player pays for the difference.
  *
  * What it may change is narrow, and that is what these pin: the tier on a tile,
- * never which tiles are occupied, and never the power.
+ * never the power, and which tiles are occupied only by taking away a building
+ * the layout leaves doing nothing at all.
  *
  * Ported from `DowngradeOversizedTests` in the reference solver's
  * `tests/test_search.py`.
@@ -116,6 +117,27 @@ describe("downgradeOversized", () => {
 
     expect(after.power).toBeCloseTo(before.totalPower, 9);
     // The generator wastes 25, so the 25 tier is the smallest that covers it.
+    expect(ids.get(2)!.buildingId).toBe("cooler_m");
+  });
+
+  it("takes away an idle cooler rather than shrinking it", () => {
+    // Two coolers side by side, and only the first beside the generator: the
+    // second carries nothing. Every tier covers a load of zero, so before the
+    // pass learned this it became the cheapest cooler and stayed, idle.
+    const roster = [
+      reactor(100),
+      generator(100),
+      cooler(10, "cooler_s"),
+      cooler(25, "cooler_m"),
+    ];
+    const { before, after, ids } = sizeUp(
+      [roster[0], roster[1], roster[3], roster[3]],
+      roster,
+    );
+
+    expect(before.placements.find((r) => r.idx === 3)!.coolingProvided).toBe(0);
+    expect(after.power).toBeCloseTo(before.totalPower, 9);
+    expect(ids.has(3)).toBe(false);
     expect(ids.get(2)!.buildingId).toBe("cooler_m");
   });
 
