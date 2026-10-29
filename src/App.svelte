@@ -32,7 +32,7 @@
    * islands included: a phone that sleeps mid-run freezes the page with it.
    */
   $effect(() => {
-    keepScreenAwake(solverState.isOptimizing || uiState.solveAll !== null);
+    keepScreenAwake(uiState.running);
   });
   $effect(() => () => keepScreenAwake(false));
 

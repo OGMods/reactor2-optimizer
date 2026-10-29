@@ -763,10 +763,11 @@ class UIState {
     // one. This is the backstop for the keyboard and for anything that reaches
     // the verb another way.
     if (this.isPreview) return;
-    if (solverState.isOptimizing) {
-      // Stop ends a "Solve all" too, not just the island it is on.
+    if (this.running) {
+      // Stop ends a "Solve all" too, not just the island it is on — and
+      // between two of its islands there is no search to stop, only the batch.
       if (this.solveAll) this.#solveAllCancelled = true;
-      solverState.stopOptimizer();
+      if (solverState.isOptimizing) solverState.stopOptimizer();
       return;
     }
     /*
@@ -862,6 +863,70 @@ class UIState {
   get solveAllTargets(): IslandTemplate[] {
     const locked = timelineState.record?.lockedTemplateIds ?? [];
     return ISLAND_TEMPLATES.filter((t) => t.game && !locked.includes(t.id));
+  }
+
+  /**
+   * Each Solve all island's terrain, decoded in the background for the
+   * estimate: one entry per island, with the code it was decoded from — the
+   * player's saved board where there is one, the shipped map otherwise. An
+   * edit changes the code, and the entry is replaced rather than added to, so
+   * this never holds more than one board per island. Raw: whole boards are
+   * not worth proxying.
+   */
+  #estimateGrids = $state.raw<Record<string, { code: string; grid: Tile[][] }>>(
+    {},
+  );
+  /**
+   * The code each island's decode was started for, while it runs — and after
+   * it fails, so a code that cannot be read is not decoded again on every
+   * recompute. The next edit changes the code and tries once more.
+   */
+  #estimateDecoding = new Map<string, string>();
+
+  /** `#estimateGrids` for one island, starting its decode if it has none yet. */
+  #estimateGrid(template: IslandTemplate): Tile[][] | undefined {
+    const id = template.id;
+    const code = layoutState.savedGrids[id]?.code ?? template.code;
+    const held = this.#estimateGrids[id];
+    if (held?.code === code) return held.grid;
+    if (this.#estimateDecoding.get(id) === code) return undefined;
+    this.#estimateDecoding.set(id, code);
+    void decodeBlueprint(code)
+      .then((decoded) => {
+        // Edited again while this decoded: a newer decode owns the entry.
+        if (this.#estimateDecoding.get(id) !== code) return;
+        this.#estimateDecoding.delete(id);
+        this.#estimateGrids = {
+          ...this.#estimateGrids,
+          [id]: { code, grid: decoded.grid },
+        };
+      })
+      .catch(() => {
+        // Left out: the island borrows the on-screen estimate, as below.
+      });
+    return undefined;
+  }
+
+  /**
+   * About how long Solve all takes in the current mode: each island's own
+   * run, summed. Islands differ several times over in size, so the island on
+   * screen times the island count — what this was — moved with whichever
+   * island happened to be open. The one on screen is read live, edits and
+   * all; one still decoding borrows its figure for the moment.
+   */
+  get solveAllEstimateMs(): number {
+    const mode = solverState.solveMode;
+    const onScreen = solverState.estimateRunMs(mode);
+    let total = 0;
+    for (const template of this.solveAllTargets) {
+      if (template.id === layoutState.activeTemplateId) {
+        total += onScreen;
+        continue;
+      }
+      const grid = this.#estimateGrid(template);
+      total += grid ? solverState.estimateRunMs(mode, grid) : onScreen;
+    }
+    return total;
   }
 
   /** Whether "Solve all" can start now — the controls are hidden otherwise. */
@@ -1188,7 +1253,18 @@ class UIState {
    * Stop is untouched — it lives in the HUD, which stays.
    */
   get setupHidden(): boolean {
-    return solverState.isOptimizing;
+    return this.running;
+  }
+
+  /**
+   * Whether a run is under way, counting a whole "Solve all" as one: between
+   * two of its islands the solver is idle for a moment while the next board
+   * loads, and anything keyed on `isOptimizing` alone flickered there —
+   * Setup flashed back in, and Run showed for a beat, where a press would
+   * have started a second solve beside the batch.
+   */
+  get running(): boolean {
+    return solverState.isOptimizing || this.solveAll !== null;
   }
 
   toggleSidebar() {

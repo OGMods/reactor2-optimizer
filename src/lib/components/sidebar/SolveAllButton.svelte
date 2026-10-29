@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ListChecks } from "lucide-svelte";
-  import { solverState, uiState } from "../../state";
+  import { uiState } from "../../state";
   import { formatSpan } from "../../utils";
 
   /*
@@ -16,15 +16,11 @@
    * gone then anyway), on a previewed board, or with a roster that makes no
    * power. Not the action colour: RUN is the one filled control in the app.
    *
-   * The estimate is the run the current mode would take on the island on
-   * screen, once per island. Islands differ in size, so it is a scale ("about
-   * four minutes"), not a promise.
+   * The estimate is each island's own run in the current mode, summed
+   * (`uiState.solveAllEstimateMs`) — a scale ("about four minutes"), not a
+   * promise, since a run's length depends on the cores the browser reports.
    */
-  let estimate = $derived(
-    formatSpan(
-      (solverState.estimatedRunMs * uiState.solveAllTargets.length) / 1000,
-    ),
-  );
+  let estimate = $derived(formatSpan(uiState.solveAllEstimateMs / 1000));
 </script>
 
 {#if uiState.canSolveAll}
