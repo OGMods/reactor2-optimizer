@@ -144,4 +144,33 @@ describe("IslandBest", () => {
 
     expect(shapes(best)).toHaveLength(3); // primary + 2 alternates
   });
+
+  it("makes the cheaper of two tied layouts the primary", () => {
+    const best = new IslandBest();
+    best.offer(layout("cooler2", 0, 100));
+    best.offer(layout("cooler1", 1, 100));
+    expect(shapes(best)).toEqual(["cooler1@1", "cooler2@0"]);
+  });
+
+  it("lets a cheaper tie push the dearest out of a full shortlist", () => {
+    const best = new IslandBest(1);
+    best.offer({
+      ...layout("cooler2", 0, 100),
+      alternates: [layout("cooler3", 1, 100)],
+    });
+    best.offer(layout("cooler1", 2, 100));
+    expect(shapes(best)).toEqual(["cooler1@2", "cooler2@0"]);
+  });
+
+  it("holds later attempts to the best power reached, not the cheapest's", () => {
+    // Ties are relative (1e-9), so a cheaper tie can sit a hair under the
+    // best. Measured from it, a third attempt a hair under *that* would tie
+    // too, and the island's figure would creep down.
+    const best = new IslandBest();
+    const p = 1e20;
+    best.offer(layout("cooler3", 0, p));
+    best.offer(layout("cooler2", 1, p - 0.6e11));
+    best.offer(layout("cooler1", 2, p - 1.2e11));
+    expect(shapes(best)).toEqual(["cooler2@1", "cooler3@0"]);
+  });
 });

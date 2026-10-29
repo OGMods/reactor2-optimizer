@@ -115,6 +115,14 @@
   );
 
   /*
+   * One picker per island when the board has two or more islands with layouts
+   * of their own to choose between — two big landmasses, typically. The
+   * whole-board cycler moves one island at a time across ten boards, so the
+   * mix a player wants is rarely one of them; these build it.
+   */
+  let islandPickers = $derived(cycling ? solverState.islandPickers : []);
+
+  /*
    * Folded down to one line, on a small screen only. A desktop card sits in a
    * corner of a wide canvas; a phone card lies across the map being played.
    */
@@ -863,6 +871,36 @@
                     {/if}
                   </span>
                 </div>
+                {#each islandPickers as picker, i (picker.island)}
+                  <div class="row variants">
+                    <span
+                      class="row-label"
+                      title={`${picker.tiles} buildable tiles`}
+                      >Part {i + 1}</span
+                    >
+                    <span class="variant-controls">
+                      <button
+                        class="head-btn"
+                        onclick={() =>
+                          solverState.showIslandLayout(picker.island, -1)}
+                        aria-label={`Previous layout for part ${i + 1}`}
+                      >
+                        <ChevronLeft size={14} />
+                      </button>
+                      <span class="variant-count">
+                        {picker.current + 1} / {picker.choices.length}
+                      </span>
+                      <button
+                        class="head-btn"
+                        onclick={() =>
+                          solverState.showIslandLayout(picker.island, 1)}
+                        aria-label={`Next layout for part ${i + 1}`}
+                      >
+                        <ChevronRight size={14} />
+                      </button>
+                    </span>
+                  </div>
+                {/each}
               {/if}
             {/if}
 

@@ -106,7 +106,15 @@ taking its cluster's output with it.
 **When the solve has ties, the card grows a Layout row** — arrows, `n / total`,
 and Apply. It renders only above one variant and never while a run is in flight:
 the shortlist that run will produce does not exist yet, and the layout streaming
-into the panel is not one of its entries.
+into the panel is not one of its entries. The shortlist is ordered cheapest
+first (`cheapestFirst`), so `1 / n` is the cheapest board at that power.
+
+**Below it, a Part row per island** when two or more islands each have more than
+one layout in the shortlist (`solverState.islandPickers`) — typically a board of
+two big landmasses. Stepping one swaps that island's layout and leaves the rest
+as shown; the board that makes is scored and appended to the shortlist
+(`showIslandLayout`), so it previews, applies and is stored like any other
+entry. Never under a cooling pool, where the board is one island.
 
 **Reset asks twice** and acts on whichever board is showing: the solve, or every
 hand-placed building. Switching panels disarms it, otherwise a press aimed at one
