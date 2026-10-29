@@ -441,6 +441,42 @@ describe("resolveGameExport", () => {
   });
 });
 
+/**
+ * `gen2_city52_9c43e4b7` was exported with three obstacles being cleared, 5h7m,
+ * 5h43m and 6h20m from done, and Erased from Time at level 5 — a 70-minute
+ * free window, so none of them free yet.
+ */
+describe("obstacles being cleared", () => {
+  const name = "gen2_city52_9c43e4b7";
+  const read = async (now?: number) => {
+    const exp = await decodeGameExport(
+      readFileSync(join(DIR, `${name}.txt`), "utf8"),
+    );
+    const r = await resolveGameExport(exp, { now });
+    const cleared = r.islands.reduce((n, i) => n + i.cleared, 0);
+    return { exp, r, cleared };
+  };
+
+  it("stay obstacles while they have longer left than the free window", async () => {
+    const { r } = await read();
+    expect(r.clears).toEqual({ done: 0, pending: 3 });
+  });
+
+  it("come in cleared once finished, or once inside the free window", async () => {
+    const before = await read();
+    const at = before.exp.timeline!.exportedAt;
+    // 18420 s left on the first: done after that, free from 4200 s before it.
+    const free = await read(at + 18420 - 4200);
+    expect(free.r.clears).toEqual({ done: 1, pending: 2 });
+    expect(free.cleared).toBe(before.cleared + 1);
+    const all = await read(at + 30000);
+    expect(all.r.clears).toEqual({ done: 3, pending: 0 });
+    expect(all.cleared).toBe(before.cleared + 3);
+    // The clock is read from the export's own stamp, not before it.
+    expect((await read(at - 99999)).r.clears.done).toBe(0);
+  });
+});
+
 describe("research in progress", () => {
   it("is a building upgrade the plan can hold", async () => {
     const r = await resolveGameExport(await decodeGameExport(city47));

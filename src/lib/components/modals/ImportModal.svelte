@@ -150,6 +150,23 @@
           <dd>{researchNames.join(", ") || "none"}</dd>
           <dt>Anomaly</dt>
           <dd>{getAnomaly(game.anomalyId).name}</dd>
+          {#if game.clears.done + game.clears.pending > 0}
+            <!--
+              A clear that has finished since the export, or is short enough
+              for Erased from Time to finish free, is already open ground.
+            -->
+            <dt>Clearing</dt>
+            <dd>
+              {#if game.clears.done > 0}
+                {game.clears.done} done or free to finish, counted as cleared
+              {/if}
+              {#if game.clears.pending > 0}
+                <span class={game.clears.done > 0 ? "muted" : ""}>
+                  {game.clears.done > 0 ? "· " : ""}{game.clears.pending} still running
+                </span>
+              {/if}
+            </dd>
+          {/if}
         </dl>
 
         {#if game.inProgress.length > 0}

@@ -1434,7 +1434,8 @@ class UIState {
     }
     try {
       const exp = await decodeGameExport(code);
-      const resolved = await resolveGameExport(exp);
+      // Clears that finished between the export and now come in as cleared.
+      const resolved = await resolveGameExport(exp, { now: Date.now() / 1000 });
       if (seq !== this.#gameReadSeq) return;
       this.#gameExport = exp;
       this.gameImport = resolved;
