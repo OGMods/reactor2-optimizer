@@ -5,6 +5,7 @@
   import { onDestroy } from "svelte";
   import BuildingUnlockCard from "./BuildingUnlockCard.svelte";
   import UpgradePlanSummary from "./UpgradePlanSummary.svelte";
+  import CashLimitRow from "./CashLimitRow.svelte";
   import { createConfirmArm } from "../confirmArm.svelte";
 
   /**
@@ -87,6 +88,7 @@
     every screen of it.
   -->
   <UpgradePlanSummary />
+  <CashLimitRow />
 
   <div class="utility-row">
     <button class="action-btn" onclick={() => configState.unlockAll()}>

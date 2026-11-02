@@ -2,8 +2,10 @@ import type { OptimizationResult, PlacedBuilding, Tile } from "../types";
 import {
   DEFAULT_ANOMALY_ID,
   getAnomaly,
+  netSpend,
   type AnomalyDefinition,
   type AnomalyId,
+  type CashBudget,
 } from "@reactor2/solver";
 import {
   SolverWorkerClient,
@@ -57,6 +59,14 @@ import { layoutState } from "./layout.svelte";
  * spinning with no way back but the Stop button.
  */
 const WATCHDOG_GRACE_MS = 5_000;
+
+/**
+ * Whether a layout fits a cash limit, with the slack the engine allows for
+ * summing prices thirty orders of magnitude apart.
+ */
+function affordable(placements: PlacedBuilding[], budget: CashBudget): boolean {
+  return netSpend(placements, budget) <= budget.cash * (1 + 1e-9);
+}
 
 /**
  * What a finished run does to the shortlist already held for this island.
@@ -1233,11 +1243,14 @@ class SolverState {
    * genuinely can come back worse — which is the whole reason the choice is
    * put to the user (see `uiState.requestSolve`) rather than assumed.
    */
-  async runOptimizer(options: { keepBest?: boolean } = {}) {
+  async runOptimizer(
+    options: { keepBest?: boolean; cashBudget?: CashBudget } = {},
+  ) {
     if (this.isOptimizing) {
       this.stopOptimizer();
       return;
     }
+    const runBudget = options.cashBudget;
 
     // Captured before the panel starts streaming the new run over it. The
     // whole shortlist is held, not just the layout on screen: a run that comes
@@ -1247,8 +1260,12 @@ class SolverState {
     // A result with no shortlist behind it can only be a streaming snapshot
     // left by a run that failed, and it is not something to defend — falling
     // back to it would hand the next run a bar of nearly zero.
-    const previousVariants =
-      options.keepBest && this.variants.length > 0 ? this.variants : [];
+    //
+    // Under a cash limit a held layout is a bar only if the player could buy
+    // it: one over the limit is an answer to a question nobody is asking.
+    const previousVariants = (
+      options.keepBest && this.variants.length > 0 ? this.variants : []
+    ).filter((v) => !runBudget || affordable(v.placements, runBudget));
     const previousIndex = this.variantIndex;
 
     /*
@@ -1416,6 +1433,7 @@ class SolverState {
           anomalyId: this.#runAnomalyId,
           prestige: configState.prestige,
           upgradePlan: runPlan?.along,
+          cashBudget: runBudget,
         },
       );
       this.activeTask = handle;
@@ -1450,18 +1468,22 @@ class SolverState {
         // each run won some islands, the boards made of every island's winner
         // beat both, and stand in for the fresh run (`composeIslandBests`).
         // Scored against the board on screen, so only while it is this run's.
-        const composed = onScreen()
-          ? this.#composeIslands(
-              previousVariants,
-              finalVariants,
-              runGrid,
-              runPlan
-                ? runPlan.target
-                : $state.snapshot(configState.buildingUpgrades),
-              runAnomaly,
-              islandPower,
-            )
-          : null;
+        //
+        // Not under a cash limit: each board was bought within it, and one
+        // landmass of each together may not be.
+        const composed =
+          onScreen() && !runBudget
+            ? this.#composeIslands(
+                previousVariants,
+                finalVariants,
+                runGrid,
+                runPlan
+                  ? runPlan.target
+                  : $state.snapshot(configState.buildingUpgrades),
+                runAnomaly,
+                islandPower,
+              )
+            : null;
         const { variants, selected, defended } = chooseSolveVariants(
           previousVariants,
           previousIndex,

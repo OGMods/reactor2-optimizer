@@ -1,3 +1,5 @@
+import type { PriceRules } from "../data/buildingPrices";
+
 export type BuildingType =
   "cooler" | "reactor" | "generator" | "direct_producer";
 
@@ -420,6 +422,30 @@ export interface SearchHooks {
   reportIntervalMs?: number;
 }
 
+/**
+ * A cash limit on a solve: what turning the board as it stands into the layout
+ * may cost, net of what the sales along the way pay back. Moves are free, so a
+ * building kept costs nothing wherever it ends up.
+ *
+ * A budget makes the board one problem — prices climb with copies across every
+ * landmass on it — so a budgeted solve hands the board over whole, as a cooling
+ * pool does.
+ */
+export interface CashBudget {
+  /** The most the change may spend, net of refunds. Zero or more. */
+  cash: number;
+  /** What stands on the board now, in board coordinates. */
+  standing: { x: number; y: number; buildingId: string }[];
+  /**
+   * Each building's count on the player's other islands. Prices climb with
+   * every copy anywhere, so these make this board's copies dearer; they are
+   * held where they are.
+   */
+  elsewhere: Record<string, number>;
+  /** The player's price research — `priceRules`. */
+  prices: PriceRules;
+}
+
 export interface SolveOptions {
   onProgress?: (result: OptimizationResult) => void;
   shouldStop?: () => boolean;
@@ -471,6 +497,11 @@ export interface SolveOptions {
    * the search changes.
    */
   upgradePlan?: Record<string, number>[];
+  /**
+   * A cash limit — see `CashBudget`. Power is still what is maximised; no
+   * layout over the limit is ever kept. Omitted means no limit.
+   */
+  cashBudget?: CashBudget;
 }
 
 // ============================================================================
@@ -495,6 +526,11 @@ export type IslandWorkerRequest =
        * so the research folded into them crosses with them.
        */
       upgradeSteps?: EffectiveBuilding[][];
+      /**
+       * The cash limit, its standing board in this island's coordinates —
+       * which for the whole-board island a budget solves on are the board's.
+       */
+      cashBudget?: CashBudget;
     }
   | { id: string; type: "STOP" };
 

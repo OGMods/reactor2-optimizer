@@ -139,6 +139,13 @@ unmount for as long as the sheet is open at _any_ detent, so what that bought wa
 a view of a board nothing could touch. Setup is a task you finish and leave; the
 grabber still drags it back down.
 
+**The cash limit is the row under it** (`CashLimitRow`), inline rather than
+behind a dialog: it is one figure, and a player tries several in a row. It takes
+a plain number, e-notation or the game's ladder (`parseHugeNumber`), commits on
+Enter or blur so a half-typed figure never reaches the store, and says so when a
+figure does not read rather than dropping it silently. The clear button exists
+only while a limit is set.
+
 **The upgrade plan is a row at the top of the Buildings tab that opens a
 dialog** (`UpgradePlanSummary` → `modals/UpgradePlanModal`). On that tab because a
 plan is a statement about buildings — the tiers the roster below will hold next —

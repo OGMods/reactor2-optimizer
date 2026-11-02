@@ -6,6 +6,7 @@ import { Pacer } from "./pacer";
 import { randomSeed, Rng } from "./rng";
 import type {
   AnomalyDefinition,
+  CashBudget,
   EffectiveBuilding,
   IslandLayout,
   IslandSubGrid,
@@ -14,6 +15,13 @@ import type {
   SearchHooks,
 } from "./types";
 import { hillClimb } from "./search/anneal";
+import {
+  affordableRoster,
+  layoutSpend,
+  setCashLimit,
+  standingPlacement,
+  withinBudget,
+} from "./search/cashLimit";
 import {
   arrangeComposition,
   generatorCapacityTable,
@@ -108,9 +116,14 @@ export { downgradeOversized } from "./search/rightSize";
  * **Under an upgrade plan "stable" means stable at every step.** The search
  * scores at the plan's target, but every gate that admits a layout — the best
  * record, repair, the composition swaps, pruning, right-sizing, the tie
- * shortlist and `stabilize` itself — also asks `planHolds`, so a layout that
+ * shortlist and `stabilize` itself — also asks `layoutHolds`, so a layout that
  * overheats at any tier on the way is never kept. Without a plan that call
  * returns at once and nothing here changes.
+ *
+ * **Under a cash limit an answer is also one the player can afford** — the
+ * same gates, through the same call (see `search/cashLimit.ts`). `stabilize`
+ * steps a layout down until it fits, so anything it hands back is affordable,
+ * and the walk refuses an over-budget move before simulating it.
  */
 
 /** Share of the time budget reserved for repair before and after annealing. */
@@ -344,7 +357,12 @@ export async function solveIsland(
   rngSeed?: number,
   anomaly?: AnomalyDefinition,
   upgradeSteps?: EffectiveBuilding[][],
+  cashBudget?: CashBudget,
 ): Promise<IslandSolution> {
+  // A building the budget can never buy is no candidate anywhere; `planSolve`
+  // has already done this, and it is idempotent.
+  if (cashBudget !== undefined)
+    effectiveBuildings = affordableRoster(effectiveBuildings, cashBudget);
   const ctx = buildIslandContext(
     island.grid,
     island.buildable,
@@ -363,6 +381,10 @@ export async function solveIsland(
       buffer: emptyPlacement(ctx.n),
     });
   }
+  // What the layout may cost to build from the board as it stands — see
+  // `search/cashLimit.ts`. Like the plan, it only narrows what may be kept.
+  if (cashBudget !== undefined)
+    setCashLimit(ctx, effectiveBuildings, cashBudget);
 
   // The pools every stage draws on, in the units the board will hold: a rule
   // that scales a whole role (a cooling pool's `coolerMultiplier`) is folded in here, so the
@@ -486,6 +508,7 @@ export async function solveIsland(
     generators,
     coolers,
     directProducers,
+    cashBudget !== undefined,
   );
   const polishBudgetMs = timeBudgetMs * POLISH_SHARE;
 
@@ -537,6 +560,28 @@ export async function solveIsland(
     );
     if (plainPolished.power + EPS >= polished.power) polished = plainPolished;
   }
+
+  // Under a cash limit the seed above is built for power and then stepped down
+  // until it fits, which can leave little of it. The board as it stands costs
+  // nothing at all, so it is always an answer the budget allows: repaired on
+  // the same terms, the search starts from whichever runs higher, the board
+  // on a tie — it is the one that spends nothing.
+  if (cashBudget !== undefined) {
+    const standing = emptyPlacement(ctx.n);
+    standingPlacement(ctx, effectiveBuildings, cashBudget, standing);
+    const standingPolished = await greedyPolish(
+      standing,
+      ctx,
+      candidates,
+      Math.min(
+        deadlineMs,
+        performance.now() + Math.max(polishElapsedMs, PLAIN_SEED_POLISH_MIN_MS),
+      ),
+      pacer,
+    );
+    if (standingPolished.power + EPS >= polished.power)
+      polished = standingPolished;
+  }
   let placement = polished.placement;
   let bestPower = polished.power;
 
@@ -575,6 +620,10 @@ export async function solveIsland(
     ) {
       break;
     }
+    // A composition's spend is its counts' alone, so one the budget cannot
+    // buy is known before it is arranged. Not a `break`: the list descends by
+    // power, not by price, and a smaller target further down may fit.
+    if (!withinBudget(target.composition, ctx)) continue;
 
     const arranged = await arrangeComposition(
       target.composition,
@@ -720,9 +769,18 @@ export async function solveIsland(
   );
   // Every one of these ties on power, so the cheapest to build goes first and
   // is the one the island shows. Stable, so equal costs keep the walk's order.
+  // Under a cash limit "cheapest" is what it spends from the board standing,
+  // which is the figure the limit is on.
   const [best, ...rest] = cheapestFirst(
     [{ placements, powerOutput: tidied.power }, ...alternates],
     (l) => l.placements,
+    cashBudget === undefined
+      ? undefined
+      : (l) =>
+          layoutSpend(
+            l.map((p) => ({ id: p.buildingId })),
+            ctx,
+          ) ?? 0,
   );
   return { ...best, alternates: rest };
 }

@@ -1,3 +1,4 @@
+import type { CashBudget } from "../solver/types";
 import { findBuilding } from "./buildings";
 import { TIME_LAB } from "./timeLab";
 
@@ -120,6 +121,41 @@ export function layoutCost(
 }
 
 /**
+ * What turning the board `budget.standing` holds into `layout` costs, net of
+ * what the sales pay back — the figure a cash limit is on.
+ *
+ * Moves are free, so no type is sold and rebuilt: a type whose count rises
+ * buys each new copy at the next copy's price, one whose count falls refunds
+ * each sale at the current one, and the order between types changes nothing.
+ * Copies on the player's other islands (`budget.elsewhere`) count towards
+ * every price.
+ */
+export function netSpend(
+  layout: readonly { buildingId: string }[],
+  budget: CashBudget,
+): number {
+  const count = (list: readonly { buildingId: string }[]) => {
+    const m = new Map<string, number>();
+    for (const p of list) m.set(p.buildingId, (m.get(p.buildingId) ?? 0) + 1);
+    return m;
+  };
+  const after = count(layout);
+  const before = count(budget.standing);
+  let spend = 0;
+  for (const id of new Set([...after.keys(), ...before.keys()])) {
+    const base = findBuilding(id)?.price ?? 0;
+    const others = budget.elsewhere[id] ?? 0;
+    const c = before.get(id) ?? 0;
+    const t = after.get(id) ?? 0;
+    for (let k = c; k < t; k++)
+      spend += buildPrice(base, others + k, budget.prices);
+    for (let k = c; k > t; k--)
+      spend -= sellRefund(base, others + k, budget.prices);
+  }
+  return spend;
+}
+
+/**
  * Relative slack for "the same cost": two layouts holding the same buildings
  * sum them in a different order and can disagree in the last bits.
  */
@@ -132,20 +168,23 @@ const COST_TIE_RELATIVE_TOLERANCE = 1e-9;
  * layout leaving more of the land empty wins. Stable, so layouts neither
  * figure separates keep the order they came in.
  *
- * Each layout is costed once, not once per comparison.
+ * Each layout is costed once, not once per comparison. `costOf` replaces
+ * `layoutCost` where cost means something else — under a cash limit, what the
+ * layout spends from the board standing.
  */
-export function cheapestFirst<T>(
+export function cheapestFirst<T, P extends { buildingId: string }>(
   items: readonly T[],
-  placementsOf: (item: T) => readonly { buildingId: string }[],
+  placementsOf: (item: T) => readonly P[],
+  costOf: (placements: readonly P[]) => number = layoutCost,
 ): T[] {
   return items
     .map((item) => {
       const placements = placementsOf(item);
-      return { item, cost: layoutCost(placements), count: placements.length };
+      return { item, cost: costOf(placements), count: placements.length };
     })
     .sort((a, b) =>
       Math.abs(a.cost - b.cost) >
-      COST_TIE_RELATIVE_TOLERANCE * Math.max(a.cost, b.cost)
+      COST_TIE_RELATIVE_TOLERANCE * Math.max(Math.abs(a.cost), Math.abs(b.cost))
         ? a.cost - b.cost
         : a.count - b.count,
     )

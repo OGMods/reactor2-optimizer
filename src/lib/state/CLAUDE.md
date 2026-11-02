@@ -65,6 +65,27 @@ The search side is in `docs/SOLVER.md`; the readout's plan line in
   uses. Null during a run and on a preview, which is someone else's board at
   their tiers.
 
+## The cash limit: the app side
+
+The search side is in `docs/SOLVER.md`.
+
+- **`configState.cashLimit` is a figure the player types**, persisted, null for
+  none. Never read off a game export: its cash is stale by the time anyone
+  solves.
+- **`uiState` builds the `CashBudget` at launch** (`#cashBudget`), because the
+  price research is on the timeline and `solverState` cannot read it. What
+  stands is `layoutState.placements` — the board in Edit is the player's, a
+  shown solve is not — and every other game island's copies come from
+  `layoutState.copiesOnOtherIslands()`, the same count step mode prices with.
+  The decode makes the launch asynchronous, so `#launching` refuses a second
+  press until the run has started.
+- **A held layout over the limit defends nothing**: `runOptimizer` drops it from
+  `previousVariants`, so "keep the better one" never keeps an unaffordable board.
+  And **islands from two runs are not combined** under a limit: each board fit
+  it, and one landmass of each together may not.
+- **Solve all is hidden** while a limit is set (`canSolveAll`): one figure
+  cannot be handed to every island in turn.
+
 ## The stores
 
 **`layoutState` imports nothing from the rest of the state layer.** It is the

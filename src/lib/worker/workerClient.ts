@@ -2,6 +2,7 @@ import type {
   Tile,
   AnomalyId,
   BuildingDefinition,
+  CashBudget,
   OptimizationResult,
   PrestigeScales,
 } from "@reactor2/solver";
@@ -82,6 +83,11 @@ export interface SolveRunOptions {
    * only layouts that also run at every one of these.
    */
   upgradePlan?: Record<string, number>[];
+  /**
+   * A cash limit — see `CashBudget`. The run still maximises power, and keeps
+   * no layout that would cost more than this to build from the board standing.
+   */
+  cashBudget?: CashBudget;
 }
 
 export interface SolveTaskHandle {
@@ -148,6 +154,7 @@ export class SolverWorkerClient {
         anomalyId: run?.anomalyId,
         prestige: run?.prestige,
         upgradePlan: run?.upgradePlan,
+        cashBudget: run?.cashBudget,
         reportIntervalMs: this.options.reportIntervalMs,
         onProgress: (result) => {
           if (!entry.stopped) entry.onProgress?.(result);

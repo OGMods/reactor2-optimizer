@@ -30,6 +30,7 @@ const KEYS = {
   ANOMALY: "anomaly",
   PRESTIGE: "prestige",
   UPGRADE_PLAN: "upgrade_plan",
+  CASH_LIMIT: "cash_limit",
   UI: "ui_prefs",
   SOLVE: "solver_result",
   GAME_IMPORT: "game_import",
@@ -298,6 +299,17 @@ export const upgradePlanStorage = {
       .map(({ buildingId, level }) => ({ buildingId, level }));
   },
   savePlan: (steps: UpgradeStep[]): void => setItem(KEYS.UPGRADE_PLAN, steps),
+};
+
+export const cashLimitStorage = {
+  /** The cash limit a run spends within, or null for none. */
+  loadCashLimit: (): number | null => {
+    const raw = getItem<unknown>(KEYS.CASH_LIMIT, null);
+    return typeof raw === "number" && Number.isFinite(raw) && raw >= 0
+      ? raw
+      : null;
+  },
+  saveCashLimit: (cash: number | null): void => setItem(KEYS.CASH_LIMIT, cash),
 };
 
 export const uiStorage = {

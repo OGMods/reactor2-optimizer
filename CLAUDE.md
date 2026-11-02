@@ -133,6 +133,15 @@ the roster is still the roster. The search side and the measurements behind
 `src/lib/state/CLAUDE.md`; the readout's plan line in
 `src/lib/components/inspector/CLAUDE.md`.
 
+### The cash limit
+
+Beside the plan on the Buildings tab, a **cash limit** solves for the most power
+a sum buys rather than the most at any price: what changing the board in Edit
+into the layout may cost, net of sale refunds, moves free. One budget couples
+every landmass, so a budgeted run is one island, and Solve all is hidden while a
+limit is set. The search side is in `docs/SOLVER.md`; the app side in
+`src/lib/state/CLAUDE.md`.
+
 ## Architecture
 
 ### Folder map

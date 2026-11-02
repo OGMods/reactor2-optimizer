@@ -7,7 +7,7 @@ import { simulateIsland } from "../simulate";
 import type { EffectiveBuilding, IslandSubGrid, Placement } from "../types";
 import { chebyshev, put, ratedFor, SWAP_RADIUS } from "./placement";
 import { POLISH_REACTOR_TIERS } from "./repair";
-import { anyOfflineProducer, planHolds } from "./stability";
+import { anyOfflineProducer, layoutHolds } from "./stability";
 
 /**
  * Composition retargeting: deciding WHAT to build is a counting problem, so it
@@ -444,7 +444,7 @@ export async function arrangeComposition(
       if (
         trial.totalPower - basePower > bestGain &&
         !anyOfflineProducer(current, trial.placements) &&
-        planHolds(current, ctx)
+        layoutHolds(current, ctx)
       ) {
         bestGain = trial.totalPower - basePower;
         bestSwap = [a, b];

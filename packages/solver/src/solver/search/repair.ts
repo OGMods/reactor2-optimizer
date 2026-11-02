@@ -10,7 +10,7 @@ import {
   ratedFor,
   toPlacedBuildings,
 } from "./placement";
-import { anyOfflineProducer, planHolds, stabilize } from "./stability";
+import { anyOfflineProducer, layoutHolds, stabilize } from "./stability";
 
 /**
  * Local repair and pruning: steepest ascent over single-tile changes, and the
@@ -35,20 +35,25 @@ const POLISH_DIRTY_RADIUS = 2;
  * that a weaker one is genuinely useful for topping up a generator's spare heat
  * capacity when there is leftover cooling, so a few reactor tiers are kept.
  * Every extra candidate costs another full pass over the island.
+ *
+ * Under a cash limit that argument fails: the top tier is the one the budget
+ * runs out on, and a weaker generator or cooler is often what the last of the
+ * cash buys. `budgeted` keeps as many tiers of every role as of reactors.
  */
 export function polishCandidates(
   reactors: EffectiveBuilding[],
   generators: EffectiveBuilding[],
   coolers: EffectiveBuilding[],
   directProducers: EffectiveBuilding[],
+  budgeted = false,
 ): (EffectiveBuilding | null)[] {
-  const candidates: (EffectiveBuilding | null)[] = reactors.slice(
-    0,
-    POLISH_REACTOR_TIERS,
-  );
-  if (generators.length > 0) candidates.push(generators[0]);
-  if (coolers.length > 0) candidates.push(coolers[0]);
-  if (directProducers.length > 0) candidates.push(directProducers[0]);
+  const tiers = budgeted ? POLISH_REACTOR_TIERS : 1;
+  const candidates: (EffectiveBuilding | null)[] = [
+    ...reactors.slice(0, POLISH_REACTOR_TIERS),
+    ...generators.slice(0, tiers),
+    ...coolers.slice(0, tiers),
+    ...directProducers.slice(0, tiers),
+  ];
   // Leaving the tile empty is a real option.
   candidates.push(null);
   return candidates;
@@ -76,7 +81,10 @@ export async function greedyPolish(
   let current = placement.slice();
   const sim = simulateIsland(current, ctx);
   let bestPower = sim.totalPower;
-  if (anyOfflineProducer(current, sim.placements) || !planHolds(current, ctx)) {
+  if (
+    anyOfflineProducer(current, sim.placements) ||
+    !layoutHolds(current, ctx)
+  ) {
     const stabilized = stabilize(current, ctx);
     current = stabilized.placement;
     bestPower = stabilized.power;
@@ -136,7 +144,7 @@ export async function greedyPolish(
           if (
             trial.totalPower - bestPower > 0 &&
             !anyOfflineProducer(current, trial.placements) &&
-            planHolds(current, ctx)
+            layoutHolds(current, ctx)
           ) {
             gain = trial.totalPower - bestPower;
           }
@@ -167,7 +175,7 @@ export async function greedyPolish(
     if (
       trial.totalPower - bestPower > 0 &&
       !anyOfflineProducer(current, trial.placements) &&
-      planHolds(current, ctx)
+      layoutHolds(current, ctx)
     ) {
       bestPower = trial.totalPower;
       for (let tile = 0; tile < ctx.n; tile++) {
@@ -251,7 +259,7 @@ export function pruneDeadWeight(
     if (
       trial.totalPower >= bestPower - EPS &&
       !anyOfflineProducer(current, trial.placements) &&
-      planHolds(current, ctx)
+      layoutHolds(current, ctx)
     ) {
       bestPower = trial.totalPower;
       rows = trial.placements;

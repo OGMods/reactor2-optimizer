@@ -6,12 +6,13 @@ import { generatorEnergyRatio, wasteIsCovered } from "../physics";
 import { Rng } from "../rng";
 import { type SimPlacedBuilding, simulateIsland } from "../simulate";
 import type { EffectiveBuilding, Placement } from "../types";
+import { withinBudget } from "./cashLimit";
 import { copyInto, put, ratedFor } from "./placement";
 import { islandProgress } from "./repair";
 import {
   anyOfflineProducer,
   isUnderFed,
-  planHolds,
+  layoutHolds,
   stabilize,
 } from "./stability";
 
@@ -96,14 +97,14 @@ export async function hillClimb(
         powerTies(power, collector.power) &&
         collector.accepts(snapshot) &&
         !anyOfflineProducer(snapshot, rows) &&
-        planHolds(snapshot, ctx)
+        layoutHolds(snapshot, ctx)
       ) {
         collector.offer(power, snapshot);
       }
       return;
     }
 
-    if (!anyOfflineProducer(snapshot, rows) && planHolds(snapshot, ctx)) {
+    if (!anyOfflineProducer(snapshot, rows) && layoutHolds(snapshot, ctx)) {
       bestPower = power;
       bestPlacement = snapshot.slice();
       collector?.offer(power, snapshot);
@@ -245,6 +246,10 @@ export async function hillClimb(
           // see `ratedFor`.
           if (ratedFor(ctx, tile, topCooler) !== old) {
             put(current, ctx, tile, topCooler);
+            if (!withinBudget(current, ctx)) {
+              put(current, ctx, tile, old);
+              continue;
+            }
             const trial = simulateIsland(current, ctx);
             if (!accept(trial.totalPower, trial.placements))
               put(current, ctx, tile, old);
@@ -263,6 +268,10 @@ export async function hillClimb(
           const old = current[tile];
           if (ratedFor(ctx, tile, topGenerator) !== old) {
             put(current, ctx, tile, topGenerator);
+            if (!withinBudget(current, ctx)) {
+              put(current, ctx, tile, old);
+              continue;
+            }
             const trial = simulateIsland(current, ctx);
             if (!accept(trial.totalPower, trial.placements))
               put(current, ctx, tile, old);
@@ -316,6 +325,13 @@ export async function hillClimb(
     if (ratedFor(ctx, tile, replacement) === old) continue;
 
     put(current, ctx, tile, replacement);
+    // Under a cash limit the walk never leaves it: an over-budget layout can
+    // never be kept, and simulating one is the whole cost of a step. A swap
+    // moves two buildings and so never changes the spend.
+    if (!withinBudget(current, ctx)) {
+      current[tile] = old;
+      continue;
+    }
     const trial = simulateIsland(current, ctx);
     if (!accept(trial.totalPower, trial.placements)) current[tile] = old;
   }

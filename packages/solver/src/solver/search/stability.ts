@@ -2,11 +2,13 @@ import { EPS } from "../constants";
 import type { IslandContext } from "../context";
 import { type SimPlacedBuilding, simulateIsland } from "../simulate";
 import type { EffectiveBuilding, Placement } from "../types";
+import { trimToBudget, withinBudget } from "./cashLimit";
 import { isDirectProducer } from "./placement";
 
 /**
  * What makes a layout an answer: every producer online, at the target and at
- * every step of an upgrade plan. See the stability rule in `placementSearch.ts`.
+ * every step of an upgrade plan, within the island's cash limit. See the
+ * stability rule in `placementSearch.ts`.
  */
 
 /**
@@ -116,9 +118,13 @@ function planFailure(
   return null;
 }
 
-/** Whether the layout runs at every step of the island's plan. */
-export function planHolds(placement: Placement, ctx: IslandContext): boolean {
-  return planFailure(placement, ctx) === null;
+/**
+ * Whether the layout runs at every step of the island's plan and is within its
+ * cash limit — everything an answer has to be beyond stable at the target.
+ * Free when the island has neither.
+ */
+export function layoutHolds(placement: Placement, ctx: IslandContext): boolean {
+  return withinBudget(placement, ctx) && planFailure(placement, ctx) === null;
 }
 
 interface StableLayout {
@@ -135,12 +141,17 @@ interface StableLayout {
  * can push THEIR waste past what their coolers cover and take them offline in
  * turn. Power can legitimately fall as a result — a layout that only scores
  * well by parking heat in an overheating building is not a layout we want.
+ *
+ * Under a cash limit it first steps the layout down until it fits
+ * (`trimToBudget`); removing a building only ever lowers the spend, so what
+ * the loop then strips stays affordable.
  */
 export function stabilize(
   placement: Placement,
   ctx: IslandContext,
 ): StableLayout {
   const current = placement.slice();
+  trimToBudget(current, ctx);
   let sim = simulateIsland(current, ctx);
 
   for (;;) {

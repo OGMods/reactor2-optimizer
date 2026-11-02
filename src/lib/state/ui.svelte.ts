@@ -7,7 +7,7 @@ import type {
   Tile,
 } from "../types";
 import { isObstacleType } from "../types/grid";
-import type { BuildingCategory } from "@reactor2/solver";
+import type { BuildingCategory, CashBudget } from "@reactor2/solver";
 import { buildShareUrl, clearSharedCode } from "../encoding/shareLink";
 import {
   buildTransferUrl,
@@ -852,7 +852,44 @@ class UIState {
    */
   #beginSolve(options: { keepBest?: boolean } = {}) {
     this.setSheetDetent("closed");
-    void solverState.runOptimizer(options);
+    if (configState.cashLimit === null) {
+      void solverState.runOptimizer(options);
+      return;
+    }
+    // The budget needs the other islands' boards decoded first, and the run
+    // has not started while that happens, so a second press would start a
+    // second run beside it.
+    if (this.#launching) return;
+    this.#launching = true;
+    void this.#cashBudget(configState.cashLimit)
+      .then((cashBudget) =>
+        solverState.runOptimizer({ ...options, cashBudget }),
+      )
+      .finally(() => (this.#launching = false));
+  }
+
+  /** Set while a budgeted run's inputs are being gathered — see `#beginSolve`. */
+  #launching = false;
+
+  /**
+   * The cash limit as a run takes it: the board in Edit is what stands — it
+   * is the player's — every other island's copies make its prices dearer,
+   * and the price research comes off the last game import.
+   *
+   * Built here rather than in `solverState`, which cannot read the timeline.
+   */
+  async #cashBudget(cash: number): Promise<CashBudget> {
+    const standing = layoutState.placements.map(({ x, y, buildingId }) => ({
+      x,
+      y,
+      buildingId,
+    }));
+    return {
+      cash,
+      standing,
+      elsewhere: Object.fromEntries(await layoutState.copiesOnOtherIslands()),
+      prices: priceRules(timelineState.record?.research ?? {}),
+    };
   }
 
   /**
@@ -936,7 +973,10 @@ class UIState {
       !solverState.isOptimizing &&
       this.solveAll === null &&
       configState.canProducePower &&
-      this.solveAllTargets.length > 0
+      this.solveAllTargets.length > 0 &&
+      // One cash figure cannot be spent on every island in turn: each run
+      // would be handed all of it. Hidden while a limit is set.
+      configState.cashLimit === null
     );
   }
 
@@ -1143,21 +1183,9 @@ class UIState {
    * from its board in Edit, every other from its saved layout.
    */
   async #copiesAcrossIslands(): Promise<Map<string, number>> {
-    const counts = new Map<string, number>();
-    const active = layoutState.activeTemplateId;
+    const counts = await layoutState.copiesOnOtherIslands();
     for (const p of layoutState.placements)
       counts.set(p.buildingId, (counts.get(p.buildingId) ?? 0) + 1);
-    const codes = ISLAND_TEMPLATES.filter((t) => t.game && t.id !== active).map(
-      (t) => layoutState.savedGrids[t.id]?.code ?? t.code,
-    );
-    for (const code of codes) {
-      try {
-        for (const p of (await decodeBlueprint(code)).placements)
-          counts.set(p.buildingId, (counts.get(p.buildingId) ?? 0) + 1);
-      } catch {
-        // An unreadable board counts for nothing rather than failing the plan.
-      }
-    }
     return counts;
   }
 
