@@ -386,8 +386,9 @@ move steps and their prices — works the same either way.
 
 What to buy with the Chronons a jump leaves. The levels are the game's, read off
 the import (`timelineState.timeLabLevels`); the plan is extra levels on top
-(`timeLabPlan`), kept for the session and cleared by an import, since it is
-priced against the levels the last code reported. **The budget is the target's**
+(`timeLabPlan`), kept for the session and cleared by an import that changes
+what it was priced against — a jump, another anomaly, levels bought, less power
+(`continuesRun`); a later code from the same run keeps it, and the target too. **The budget is the target's**
 — `targetEta.held`, what the panel says a jump would leave — plus the +88 when
 `planWithBonus` is set and an anomaly is left to earn it, so moving the target
 re-prices the plan.

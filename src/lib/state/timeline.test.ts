@@ -279,6 +279,63 @@ describe("the timeline", () => {
     });
   });
 
+  it("keeps the target and the plan across a later code from the same run", async () => {
+    await importFixture("gen2_city52_9c43e4b7");
+    timelineState.setChrononTarget(15000);
+    timelineState.planLevels("chronon_reactor", 1);
+    // The same code again, and the same run an hour on.
+    await importFixture("gen2_city52_9c43e4b7");
+    const { exp, resolved } = await fixture("gen2_city52_9c43e4b7");
+    const t = exp.timeline!;
+    await timelineState.recordImport(
+      {
+        ...exp,
+        timeline: {
+          ...t,
+          exportedAt: t.exportedAt + 3600,
+          elapsedSeconds: t.elapsedSeconds + 3600,
+          energy: t.energy * 1.01,
+        },
+      },
+      resolved,
+    );
+    expect(timelineState.chrononTarget).toBe(15000);
+    expect(timelineState.timeLabPlan).toEqual({ chronon_reactor: 1 });
+  });
+
+  it("clears the target and the plan once the timeline restarts", async () => {
+    await importFixture("gen2_city52_9c43e4b7");
+    timelineState.setChrononTarget(15000);
+    timelineState.planLevels("chronon_reactor", 1);
+    const { exp, resolved } = await fixture("gen2_city52_9c43e4b7");
+    // A jump into the same anomaly with nothing bought: a fresh clock.
+    await timelineState.recordImport(
+      {
+        ...exp,
+        timeline: { ...exp.timeline!, energy: 0, elapsedSeconds: 60 },
+      },
+      resolved,
+    );
+    expect(timelineState.chrononTarget).toBeNull();
+    expect(timelineState.timeLabPlan).toEqual({});
+  });
+
+  it("clears the target and the plan when the islands make less", async () => {
+    await importFixture("gen2_city52_9c43e4b7");
+    timelineState.setChrononTarget(15000);
+    timelineState.planLevels("chronon_reactor", 1);
+    const { exp, resolved } = await fixture("gen2_city52_9c43e4b7");
+    await timelineState.recordImport(exp, {
+      ...resolved,
+      islands: resolved.islands.map((island) => ({
+        ...island,
+        placements: [],
+      })),
+    });
+    expect(timelineState.chrononTarget).toBeNull();
+    expect(timelineState.timeLabPlan).toEqual({});
+  });
+
   it("clears a target that is not a positive number", () => {
     timelineState.setChrononTarget(-4);
     expect(timelineState.chrononTarget).toBeNull();

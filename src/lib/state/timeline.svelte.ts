@@ -43,6 +43,35 @@ import { layoutState } from "./layout.svelte";
 const GAME_ISLANDS = ISLAND_TEMPLATES.filter((t) => t.game);
 
 /**
+ * Whether `next` is a later code from the same run as `prev`, with nothing
+ * changed that a Chronon target or a Time Lab plan was set against: the same
+ * anomaly at the same balance, every Time Lab research at the same level (a
+ * jump spends Chronons there), the timeline carried on rather than restarted
+ * (a jump zeroes its energy and clock), and the islands making at least what
+ * they made. Re-importing to catch up on a session's progress then keeps both.
+ */
+function continuesRun(
+  prev: SavedGameImport | null,
+  next: SavedGameImport,
+): boolean {
+  if (!prev) return false;
+  if (
+    prev.anomalyId !== next.anomalyId ||
+    prev.anomalyBalance !== next.anomalyBalance
+  )
+    return false;
+  const was = timeLabLevels(prev.research);
+  const now = timeLabLevels(next.research);
+  if (TIME_LAB.some((r) => was[r.id] !== now[r.id])) return false;
+  const a = prev.timeline;
+  const b = next.timeline;
+  if ((a === null) !== (b === null)) return false;
+  if (a && b && (b.energy < a.energy || b.elapsedSeconds < a.elapsedSeconds))
+    return false;
+  return next.energyPerTick >= prev.energyPerTick * (1 - 1e-9);
+}
+
+/**
  * The player's timeline as a whole: the power of every island at once, and
  * where the Chronon count stands.
  *
@@ -71,9 +100,10 @@ class TimelineState {
   /**
    * The jump award the player is waiting for, or null for none set — in which
    * case `targetEta` reads today's award: what a jump now would leave the
-   * player holding. Kept across reloads, and cleared by an import: a new code
-   * is a new situation, and a goal set against the last one left standing
-   * reads as an import that did not take.
+   * player holding. Kept across reloads, and cleared by an import from a new
+   * situation — a goal set against the last one left standing reads as an
+   * import that did not take — but kept across a later code from the same run
+   * (`continuesRun`), which is only catching up on progress.
    */
   chrononTarget = $state<number | null>(
     uiStorage.loadPrefs().chrononTarget ?? null,
@@ -450,12 +480,16 @@ class TimelineState {
           }
         : null,
     };
+    const carriesOn = continuesRun(this.record, record);
     this.record = record;
     this.now = Date.now();
     gameImportStorage.save(record);
+    // A target and a plan are kept across a fresh code from the same run — see
+    // `continuesRun`. Otherwise a plan priced against the last import's levels
+    // is against levels the player may no longer hold, and a target set for
+    // that run's award means nothing to the next.
+    if (carriesOn) return;
     this.setChrononTarget(null);
-    // A plan priced against the last import's levels is against levels the
-    // player may no longer hold.
     this.timeLabPlan = {};
   }
 
@@ -463,8 +497,9 @@ class TimelineState {
 
   /**
    * Extra levels the player means to buy at the jump, by research id. Kept for
-   * the session and cleared by an import, like the target: a plan is priced
-   * against the levels the last code reported.
+   * the session and cleared by an import, like the target and on the same
+   * terms (`continuesRun`): a plan is priced against the levels the last code
+   * reported.
    */
   timeLabPlan = $state<Record<string, number>>({});
 
