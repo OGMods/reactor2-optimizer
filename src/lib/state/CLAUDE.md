@@ -413,10 +413,15 @@ they say they are. The clears come from the game's board as imported
 game. Prices count each building's copies on the boards here, this island from
 Edit. The kinds are what the game
 allows: a building can be **moved** (paired with one of its kind wanted
-elsewhere, nearest first) and put down **on top of another** (a tile whose
-building changes is one **replace**); the rest are sells and builds, and clears
-lead. When the island changes almost entirely, one **sell everything** and the
-builds is the shorter route, and whichever route is shorter is planned.
+elsewhere, nearest first), two can trade tiles in one **swap** (so moves never
+block each other and nothing is sold to be rebuilt, even with no free tile), and
+one can be put down **on top of another** (a tile whose building changes is one
+**replace**); the rest are sells and builds, and clears
+lead. When **nothing** on the island survives into the target, one **sell
+everything** and the builds may be the shorter route, and is then planned; one
+building kept or moved rules it out, since selling it at a share of its price and
+buying it back at the next copy's loses cash a step saved is not worth — under a
+cash limit, enough to put the steps over a budget the layout itself fits.
 
 **As few steps as it takes.** Of a solve's tied layouts, the one nearest the
 island (`stepCount`) is put on screen and aimed at. The order is greedy on power
@@ -430,10 +435,10 @@ and reports progress.
 
 **Step mode shows the one building a step is about.** The canvas fades every
 other building, pad and badge to 40% (`GridRenderer.setFocus`) and draws the
-step's own a little larger, drops the state and anomaly icons and the pulse,
-outlines the step's tiles on the ground beneath their buildings and draws a
-move as an arrow over everything. The fill gauges stay: how hard each building works after a step is half
-of what the step is for, and with them gone players read the board as broken.
+step's own a little larger, drops the fill gauges, the state and anomaly icons
+and the pulse, outlines the step's tiles on the ground beneath their buildings
+and draws a move as an arrow over everything — a swap as two, side by side. The
+step bar carries the power.
 
 **Step mode is a sub-mode of the solver view.** While `stepsActive`,
 `visiblePlacements` is the scored board after the step on screen, so the canvas,

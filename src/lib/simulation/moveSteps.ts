@@ -14,10 +14,14 @@ import type { TileType } from "../types";
  * lead: they free ground, change no power, and in the game they are timers
  * worth starting early.
  *
- * When the island changes almost entirely — a new roster swaps most of its
+ * When the island changes entirely — a new roster swaps every one of its
  * buildings — walking it tile by tile is longer than starting again, so the
- * plan opens with one **sell everything** and builds from there. Whichever of
- * the two routes takes fewer steps is the one planned.
+ * plan opens with one **sell everything** and builds from there. Only then,
+ * though: a building the target keeps, where it stands or moved, would be sold
+ * at a share of its price and bought back at the next copy's, and a step saved
+ * is not worth cash lost — under a cash limit, it is the difference between a
+ * plan the budget pays for and one it does not. With nothing kept the two
+ * routes buy and sell the same copies, so the shorter is planned.
  *
  * The order is greedy on power. At every step each action that can be taken
  * now — a sell or a replace always can; a move or a build once its tile is
@@ -28,10 +32,12 @@ import type { TileType } from "../types";
  * the solve's power well before it *is* the solve; with `stopAtPower` the plan
  * ends there, since the rest would only rearrange it.
  *
- * Moves can block each other in a ring — A wants B's tile while B wants A's.
- * The ring is broken by parking one building on a free tile and moving it on
- * once its destination opens; with no free tile at all, by selling it and
- * building it again.
+ * A move onto a tile another building is still waiting to leave is a
+ * **swap**: the game trades two buildings' places in one action. So moves can
+ * never block each other — not in a ring where A wants B's tile while B wants
+ * A's, nor on a board with no free tile — and nothing is ever sold to be built
+ * again. A swap finishes the one move, and the other building moves on from
+ * where it landed, if it is not already home.
  */
 
 export interface Pos {
@@ -47,6 +53,8 @@ export type MoveStep =
   | { kind: "clear"; x: number; y: number; obstacle: TileType }
   | { kind: "sellAll"; count: number; tiles: Pos[] }
   | { kind: "move"; buildingId: string; from: Pos; to: Pos }
+  /** `a` and `b` trade tiles: `a` ends at `b`'s, `b` at `a`'s. */
+  | { kind: "swap"; a: BoardBuilding; b: BoardBuilding }
   | { kind: "replace"; from: string; to: string; x: number; y: number }
   | { kind: "build"; buildingId: string; x: number; y: number }
   | { kind: "sell"; buildingId: string; x: number; y: number };
@@ -79,7 +87,7 @@ const key = (p: Pos) => `${p.x},${p.y}`;
 const dist = (a: Pos, b: Pos) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 
 /** Steps of equal power go in this order: no sense selling what could move. */
-const PRIORITY = { move: 0, replace: 1, build: 2, sell: 3 } as const;
+const PRIORITY = { move: 0, swap: 1, replace: 2, build: 3, sell: 4 } as const;
 
 /** Power within this fraction of the target counts as reaching it. */
 const REACHED = 1e-9;
@@ -95,6 +103,8 @@ interface Diff {
   replaces: { from: string; to: string; x: number; y: number }[];
   builds: BoardBuilding[];
   sells: BoardBuilding[];
+  /** Start buildings the target keeps on their own tile. */
+  kept: number;
 }
 
 /** What separates two boards, paired into moves and replaces. */
@@ -155,10 +165,20 @@ function diffBoards(
       sells.push(out);
     }
   }
-  return { moves, replaces, builds: [...arrivingAt.values()], sells };
+  return {
+    moves,
+    replaces,
+    builds: [...arrivingAt.values()],
+    sells,
+    kept: start.length - leaving.length,
+  };
 }
 
-/** Steps a route takes, clears aside: tile by tile, or sell everything. */
+/**
+ * Steps a route takes, clears aside: tile by tile, or sell everything — the
+ * latter only open when no building survives into the target, so it never
+ * costs more cash than the walk.
+ */
 function routeLengths(
   start: readonly BoardBuilding[],
   target: readonly BoardBuilding[],
@@ -170,7 +190,10 @@ function routeLengths(
       diff.replaces.length +
       diff.builds.length +
       diff.sells.length,
-    restart: start.length > 0 ? 1 + target.length : Infinity,
+    restart:
+      start.length > 0 && diff.kept === 0 && diff.moves.length === 0
+        ? 1 + target.length
+        : Infinity,
   };
 }
 
@@ -200,7 +223,6 @@ export async function planMoveSteps(
   start: readonly BoardBuilding[],
   target: readonly BoardBuilding[],
   obstacles: readonly (Pos & { type: TileType })[],
-  freeTiles: readonly Pos[],
   score: (board: ReadonlyMap<string, string>) => number,
   options: PlanOptions = {},
 ): Promise<MovePlan> {
@@ -291,7 +313,34 @@ export async function planMoveSteps(
     };
 
     moves.forEach((m, i) => {
-      if (state.has(key(m.to))) return;
+      if (state.has(key(m.to))) {
+        // Taken by a building still to move: swap the two.
+        const j = moves.findIndex((o) => key(o.from) === key(m.to));
+        if (j < 0) return;
+        const other = moves[j];
+        const fromKey = key(m.from);
+        const toKey = key(m.to);
+        state.set(toKey, m.buildingId);
+        state.set(fromKey, other.buildingId);
+        const power = score(state);
+        state.set(toKey, other.buildingId);
+        state.set(fromKey, m.buildingId);
+        consider(power, PRIORITY.swap, () => {
+          state.set(toKey, m.buildingId);
+          state.set(fromKey, other.buildingId);
+          steps.push({
+            kind: "swap",
+            a: { buildingId: m.buildingId, ...m.from },
+            b: { buildingId: other.buildingId, ...m.to },
+          });
+          other.from = { ...m.from };
+          // Drop both if the other is now home, the later index first.
+          const done = [i];
+          if (key(other.from) === key(other.to)) done.push(j);
+          for (const k of done.sort((x, y) => y - x)) moves.splice(k, 1);
+        });
+        return;
+      }
       consider(
         tryOn(m.from, { ...m.to, id: m.buildingId }),
         PRIORITY.move,
@@ -330,38 +379,12 @@ export async function planMoveSteps(
       });
     });
 
-    if (best) {
-      (best as { apply: () => void }).apply();
-      snapshot();
-      continue;
-    }
-
-    // Only moves are left and every one is blocked: a ring. Park the first
-    // on a free tile no pending step wants, or sell and rebuild it.
-    const m = moves[0];
-    const wanted = new Set([
-      ...moves.map((p) => key(p.to)),
-      ...builds.map(key),
-    ]);
-    const park = freeTiles.find(
-      (t) => !state.has(key(t)) && !wanted.has(key(t)),
-    );
-    if (park) {
-      state.delete(key(m.from));
-      state.set(key(park), m.buildingId);
-      steps.push({
-        kind: "move",
-        buildingId: m.buildingId,
-        from: m.from,
-        to: park,
-      });
-      m.from = park;
-    } else {
-      moves.shift();
-      state.delete(key(m.from));
-      steps.push({ kind: "sell", buildingId: m.buildingId, ...m.from });
-      builds.push({ buildingId: m.buildingId, ...m.to });
-    }
+    // Every pending step is always takeable — a sell or a replace at once, a
+    // build onto a tile only a mover can hold, and a blocked move as a swap —
+    // so there is always a best.
+    const chosen = best as { apply: () => void } | null;
+    if (!chosen) throw new Error("No step can be taken: the plan is stuck.");
+    chosen.apply();
     snapshot();
   }
 

@@ -1118,10 +1118,6 @@ class UIState {
     }
     const result = solverState.optimizationResult!;
     const target = shapeOf(result);
-    const free = grid
-      .flat()
-      .filter((t) => t.type === "grass")
-      .map(({ x, y }) => ({ x, y }));
     const score = createBoardScorer(
       grid,
       BUILDINGS,
@@ -1137,7 +1133,7 @@ class UIState {
 
     this.moveStepsPlanning = { done: 0, total: 0 };
     try {
-      const plan = await planMoveSteps(start, target, obstacles, free, score, {
+      const plan = await planMoveSteps(start, target, obstacles, score, {
         onProgress: (done, total) => {
           if (!stale()) this.moveStepsPlanning = { done, total };
         },
