@@ -142,16 +142,19 @@ interface StableLayout {
  * turn. Power can legitimately fall as a result — a layout that only scores
  * well by parking heat in an overheating building is not a layout we want.
  *
- * Under a cash limit it first steps the layout down until it fits
- * (`trimToBudget`); removing a building only ever lowers the spend, so what
- * the loop then strips stays affordable.
+ * Under a cash limit, once nothing is offline it steps the layout down until
+ * it fits (`trimToBudget`) and goes round again, since a cut can take a
+ * producer offline. Offline producers go first because they are going anyway:
+ * trimming first could cut a productive building to cover an overspend that
+ * stripping a dead one would have covered alone. Removing a building only ever
+ * lowers the spend, so nothing stripped afterwards can put the layout back
+ * over. Without a limit `trimToBudget` is a no-op and this is the plain loop.
  */
 export function stabilize(
   placement: Placement,
   ctx: IslandContext,
 ): StableLayout {
   const current = placement.slice();
-  trimToBudget(current, ctx);
   let sim = simulateIsland(current, ctx);
 
   for (;;) {
@@ -160,13 +163,16 @@ export function stabilize(
     // overheats at any step goes too, and so on until every step runs.
     if (offline.length === 0) offline = planFailure(current, ctx) ?? [];
     if (offline.length === 0) {
-      return {
-        placement: current,
-        power: sim.totalPower,
-        rows: sim.placements,
-      };
+      if (!trimToBudget(current, ctx)) {
+        return {
+          placement: current,
+          power: sim.totalPower,
+          rows: sim.placements,
+        };
+      }
+    } else {
+      for (const tile of offline) current[tile] = null;
     }
-    for (const tile of offline) current[tile] = null;
     sim = simulateIsland(current, ctx);
   }
 }

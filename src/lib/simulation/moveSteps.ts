@@ -32,6 +32,14 @@ import type { TileType } from "../types";
  * the solve's power well before it *is* the solve; with `stopAtPower` the plan
  * ends there, since the rest would only rearrange it.
  *
+ * Power is not the only thing a step can run short of: a build put ahead of
+ * the sale that pays for it needs cash the finished change does not. Given
+ * the prices (`PlanOptions.cash`), no step is taken that would leave more
+ * spent, net of refunds so far, than the whole change costs — or than
+ * nothing, for a change that pays out. So the most a player must hold at once
+ * is never more than the layout's own net spend, the figure a cash limit
+ * holds it to. Among the steps that fit, power still decides.
+ *
  * A move onto a tile another building is still waiting to leave is a
  * **swap**: the game trades two buildings' places in one action. So moves can
  * never block each other — not in a ring where A wants B's tile while B wants
@@ -81,7 +89,56 @@ export interface PlanOptions {
   cancelled?: () => boolean;
   /** End the plan once the board makes this much. */
   stopAtPower?: number;
+  /**
+   * Prices to order by: no step may push the cash needed at once past what
+   * the whole change costs net (or past nothing, for one that pays out).
+   */
+  cash?: StepPricing;
 }
+
+/**
+ * The prices a plan is charged at. `copies` is each building's count across
+ * all the player's islands before the first step; `build` and `refund` are
+ * `buildPrice` and `sellRefund` from the solver package, passed in so this
+ * module stays free of the rules' tables.
+ */
+export interface StepPricing {
+  copies: ReadonlyMap<string, number>;
+  build: (buildingId: string, copies: number) => number;
+  refund: (buildingId: string, copies: number) => number;
+}
+
+/**
+ * The copies standing as a plan goes, and what each purchase and sale comes
+ * to: a build at the next copy's price, a sale refunding a share of the
+ * current one, the count moving with each.
+ */
+function cashLedger(p: StepPricing) {
+  const count = new Map(p.copies);
+  const n = (id: string) => count.get(id) ?? 0;
+  return {
+    /** What buying one would cost now. */
+    buyPrice: (id: string) => p.build(id, n(id)),
+    /** What selling one would pay back now. */
+    sellPrice: (id: string) => p.refund(id, n(id)),
+    buy(id: string) {
+      const price = p.build(id, n(id));
+      count.set(id, n(id) + 1);
+      return price;
+    },
+    sell(id: string) {
+      const back = p.refund(id, n(id));
+      count.set(id, Math.max(0, n(id) - 1));
+      return back;
+    },
+  };
+}
+
+/**
+ * Relative slack for "within the cash": spends sum terms across thirty orders
+ * of magnitude, so they are compared against the size of their own terms.
+ */
+const CASH_TOLERANCE = 1e-9;
 
 const key = (p: Pos) => `${p.x},${p.y}`;
 const dist = (a: Pos, b: Pos) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
@@ -91,6 +148,15 @@ const PRIORITY = { move: 0, swap: 1, replace: 2, build: 3, sell: 4 } as const;
 
 /** Power within this fraction of the target counts as reaching it. */
 const REACHED = 1e-9;
+
+/** A step the planner could take next, measured. */
+interface Choice {
+  power: number;
+  rank: number;
+  /** Cash out, net of what it refunds; 0 without prices. */
+  cost: number;
+  apply: () => void;
+}
 
 interface PendingMove {
   buildingId: string;
@@ -263,12 +329,39 @@ export async function planMoveSteps(
     steps.push({ kind: "clear", x: o.x, y: o.y, obstacle: o.type });
     snapshot();
   }
+  /*
+   * The cash. Each type's count only rises or only falls — one leaving and
+   * one arriving would have been paired into a move — so what the change
+   * costs net is the same in any order, and that is the ceiling. It is always
+   * reachable: a sale lowers the cash out, and with none left the cheapest
+   * build or replace now costs at most its share of what remains, since
+   * prices climb with copies and refunds fall with them.
+   */
+  const ledger = options.cash ? cashLedger(options.cash) : null;
+  let spent = 0;
+  let ceiling = Infinity;
+  if (options.cash) {
+    const all = cashLedger(options.cash);
+    let net = 0;
+    if (fresh) for (const b of start) net -= all.sell(b.buildingId);
+    for (const s of sells) net -= all.sell(s.buildingId);
+    for (const r of replaces) net += all.buy(r.to) - all.sell(r.from);
+    for (const b of builds) net += all.buy(b.buildingId);
+    ceiling = Math.max(0, net);
+  }
+  const fits = (cost: number) =>
+    spent + cost <=
+    ceiling +
+      CASH_TOLERANCE *
+        Math.max(Math.abs(ceiling), Math.abs(spent), Math.abs(cost));
+
   if (fresh) {
     steps.push({
       kind: "sellAll",
       count: state.size,
       tiles: start.map(({ x, y }) => ({ x, y })),
     });
+    if (ledger) for (const id of state.values()) spent -= ledger.sell(id);
     state.clear();
     snapshot();
   }
@@ -302,15 +395,28 @@ export async function planMoveSteps(
 
   while (pending() > 0 && !reached()) {
     await breathe();
-    let best: { power: number; rank: number; apply: () => void } | null = null;
-    const consider = (power: number, rank: number, apply: () => void) => {
+    let best: Choice | null = null;
+    // Should no step fit the cash — only rounding could do that — the
+    // cheapest is taken rather than none.
+    let cheapest: Choice | null = null;
+    const consider = (
+      power: number,
+      rank: number,
+      cost: number,
+      apply: () => void,
+    ) => {
+      const c: Choice = { power, rank, cost, apply };
+      if (!cheapest || cost < cheapest.cost) cheapest = c;
+      if (!fits(cost)) return;
       if (
         !best ||
         power > best.power ||
         (power === best.power && rank < best.rank)
       )
-        best = { power, rank, apply };
+        best = c;
     };
+    const buyCost = (id: string) => (ledger ? ledger.buyPrice(id) : 0);
+    const sellBack = (id: string) => (ledger ? ledger.sellPrice(id) : 0);
 
     moves.forEach((m, i) => {
       if (state.has(key(m.to))) {
@@ -325,7 +431,7 @@ export async function planMoveSteps(
         const power = score(state);
         state.set(toKey, other.buildingId);
         state.set(fromKey, m.buildingId);
-        consider(power, PRIORITY.swap, () => {
+        consider(power, PRIORITY.swap, 0, () => {
           state.set(toKey, m.buildingId);
           state.set(fromKey, other.buildingId);
           steps.push({
@@ -344,6 +450,7 @@ export async function planMoveSteps(
       consider(
         tryOn(m.from, { ...m.to, id: m.buildingId }),
         PRIORITY.move,
+        0,
         () => {
           moves.splice(i, 1);
           state.delete(key(m.from));
@@ -356,33 +463,45 @@ export async function planMoveSteps(
       consider(
         tryOn(null, { x: r.x, y: r.y, id: r.to }),
         PRIORITY.replace,
+        buyCost(r.to) - sellBack(r.from),
         () => {
           replaces.splice(i, 1);
           state.set(key(r), r.to);
           steps.push({ kind: "replace", ...r });
+          if (ledger) {
+            const back = ledger.sell(r.from);
+            spent += ledger.buy(r.to) - back;
+          }
         },
       );
     });
     builds.forEach((b, i) => {
       if (state.has(key(b))) return;
-      consider(tryOn(null, { ...b, id: b.buildingId }), PRIORITY.build, () => {
-        builds.splice(i, 1);
-        state.set(key(b), b.buildingId);
-        steps.push({ kind: "build", ...b });
-      });
+      consider(
+        tryOn(null, { ...b, id: b.buildingId }),
+        PRIORITY.build,
+        buyCost(b.buildingId),
+        () => {
+          builds.splice(i, 1);
+          state.set(key(b), b.buildingId);
+          steps.push({ kind: "build", ...b });
+          if (ledger) spent += ledger.buy(b.buildingId);
+        },
+      );
     });
     sells.forEach((s, i) => {
-      consider(tryOn(s, null), PRIORITY.sell, () => {
+      consider(tryOn(s, null), PRIORITY.sell, -sellBack(s.buildingId), () => {
         sells.splice(i, 1);
         state.delete(key(s));
         steps.push({ kind: "sell", ...s });
+        if (ledger) spent -= ledger.sell(s.buildingId);
       });
     });
 
     // Every pending step is always takeable — a sell or a replace at once, a
     // build onto a tile only a mover can hold, and a blocked move as a swap —
-    // so there is always a best.
-    const chosen = best as { apply: () => void } | null;
+    // so there is always a best, or under prices at least a cheapest.
+    const chosen = (best ?? cheapest) as Choice | null;
     if (!chosen) throw new Error("No step can be taken: the plan is stuck.");
     chosen.apply();
     snapshot();
@@ -401,46 +520,32 @@ export interface StepPrice {
 /**
  * Prices a plan's steps in order, as the game would charge them: each build
  * at the next copy's price and each sale refunding a share of the current
- * one, the copies counted across every island and moving with every step.
- *
- * `copies` is each building's count across all the player's islands before
- * the first step; `baseOf` its base price. Prices come from `buildPrice` and
- * `sellRefund` in the solver package, passed in so this module stays free of
- * the rules' tables.
+ * one, the copies counted across every island and moving with every step —
+ * the ledger the planner orders by under `PlanOptions.cash`. `copies`,
+ * `build` and `refund` are a `StepPricing`'s.
  */
 export function priceSteps(
   plan: MovePlan,
   copies: ReadonlyMap<string, number>,
-  build: (buildingId: string, copies: number) => number,
-  refund: (buildingId: string, copies: number) => number,
+  build: StepPricing["build"],
+  refund: StepPricing["refund"],
 ): StepPrice[] {
-  const count = new Map(copies);
-  const n = (id: string) => count.get(id) ?? 0;
-  const sell = (id: string) => {
-    const r = refund(id, n(id));
-    count.set(id, Math.max(0, n(id) - 1));
-    return r;
-  };
-  const buy = (id: string) => {
-    const p = build(id, n(id));
-    count.set(id, n(id) + 1);
-    return p;
-  };
+  const ledger = cashLedger({ copies, build, refund });
   return plan.steps.map((step, i) => {
     switch (step.kind) {
       case "build":
-        return { spend: buy(step.buildingId), refund: 0 };
+        return { spend: ledger.buy(step.buildingId), refund: 0 };
       case "sell":
-        return { spend: 0, refund: sell(step.buildingId) };
+        return { spend: 0, refund: ledger.sell(step.buildingId) };
       case "replace": {
-        const back = sell(step.from);
-        return { spend: buy(step.to), refund: back };
+        const back = ledger.sell(step.from);
+        return { spend: ledger.buy(step.to), refund: back };
       }
       case "sellAll":
         return {
           spend: 0,
           refund: plan.boards[i].reduce(
-            (sum, b) => sum + sell(b.buildingId),
+            (sum, b) => sum + ledger.sell(b.buildingId),
             0,
           ),
         };

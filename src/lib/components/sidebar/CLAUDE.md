@@ -143,8 +143,13 @@ grabber still drags it back down.
 behind a dialog: it is one figure, and a player tries several in a row. It takes
 a plain number, e-notation or the game's ladder (`parseHugeNumber`), commits on
 Enter or blur so a half-typed figure never reaches the store, and says so when a
-figure does not read rather than dropping it silently. The clear button exists
-only while a limit is set.
+figure does not read rather than dropping it silently. **A figure under half
+an hour of income is refused** the same way, naming the floor: income is
+`timelineState.totalPower` (every island's power per tick, which is what selling
+it pays) over `TICK_SECONDS`, and a limit the islands earn back in minutes only
+hides what the next stretch of play buys. The floor is checked when a figure is typed, not against a
+limit already stored, so one that power has since outgrown stays in force. The
+clear button exists only while a limit is set.
 
 **The upgrade plan is a row at the top of the Buildings tab that opens a
 dialog** (`UpgradePlanSummary` → `modals/UpgradePlanModal`). On that tab because a

@@ -139,7 +139,7 @@ describe("changeSpend", () => {
     const before = { nuclear_reactor: 5, cooler1: 3, generator: 2 };
     const after = { nuclear_reactor: 8, cooler1: 1, generator2: 4 };
     const elsewhere = { nuclear_reactor: 20, cooler1: 7 };
-    expect(changeSpend(after, before, elsewhere, rules)).toBeCloseTo(
+    expect(changeSpend(after, before, elsewhere, rules)).toBe(
       netSpend(list(after), {
         cash: 0,
         standing: list(before),

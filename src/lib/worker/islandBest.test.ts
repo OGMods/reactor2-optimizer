@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { IslandBest } from "./islandBest";
+import { MAX_ALTERNATES, priceRules } from "@reactor2/solver";
 import type { IslandLayout, PlacedBuilding } from "@reactor2/solver";
 
 /** One building on an island-local tile, carrying `power` and nothing else. */
@@ -160,6 +161,20 @@ describe("IslandBest", () => {
     });
     best.offer(layout("cooler1", 2, 100));
     expect(shapes(best)).toEqual(["cooler1@2", "cooler2@0"]);
+  });
+
+  it("ranks by the spend from the board standing under a cash limit", () => {
+    // Two hundred cooler1s on the other islands make the next one dearer than
+    // a cooler2, so the tie that is cheaper from empty spends more here.
+    const best = new IslandBest(MAX_ALTERNATES, {
+      cash: 1e300,
+      standing: [],
+      elsewhere: { cooler1: 200 },
+      prices: priceRules({}),
+    });
+    best.offer(layout("cooler1", 0, 100));
+    best.offer(layout("cooler2", 1, 100));
+    expect(shapes(best)).toEqual(["cooler2@1", "cooler1@0"]);
   });
 
   it("holds later attempts to the best power reached, not the cheapest's", () => {

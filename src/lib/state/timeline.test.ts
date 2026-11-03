@@ -320,6 +320,29 @@ describe("the timeline", () => {
     expect(timelineState.timeLabPlan).toEqual({});
   });
 
+  it("clears the target and the plan after a jump the new run has outgrown", async () => {
+    await importFixture("gen2_city52_9c43e4b7");
+    timelineState.setChrononTarget(15000);
+    timelineState.planLevels("chronon_reactor", 1);
+    const { exp, resolved } = await fixture("gen2_city52_9c43e4b7");
+    const t = exp.timeline!;
+    // One jump on, and played past the old snapshot's energy and clock.
+    await timelineState.recordImport(
+      {
+        ...exp,
+        timeline: {
+          ...t,
+          generation: t.generation + 1,
+          elapsedSeconds: t.elapsedSeconds + 7200,
+          energy: t.energy * 1000,
+        },
+      },
+      resolved,
+    );
+    expect(timelineState.chrononTarget).toBeNull();
+    expect(timelineState.timeLabPlan).toEqual({});
+  });
+
   it("clears the target and the plan when the islands make less", async () => {
     await importFixture("gen2_city52_9c43e4b7");
     timelineState.setChrononTarget(15000);

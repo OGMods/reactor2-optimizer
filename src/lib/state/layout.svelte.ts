@@ -558,27 +558,6 @@ class LayoutState {
   }
 
   /**
-   * Each building's count on every game island but the one on screen, each
-   * from its saved layout or its map — the copies a price climbs with that
-   * no change to this board touches. An unreadable board counts for nothing.
-   */
-  async copiesOnOtherIslands(): Promise<Map<string, number>> {
-    const counts = new Map<string, number>();
-    const codes = ISLAND_TEMPLATES.filter(
-      (t) => t.game && t.id !== this.activeTemplateId,
-    ).map((t) => this.savedGrids[t.id]?.code ?? t.code);
-    for (const code of codes) {
-      try {
-        for (const p of (await decodeBlueprint(code)).placements)
-          counts.set(p.buildingId, (counts.get(p.buildingId) ?? 0) + 1);
-      } catch {
-        // Counts for nothing rather than failing the caller.
-      }
-    }
-    return counts;
-  }
-
-  /**
    * Switches templates: pristine terrain, then the user's saved layout for it
    * — terrain *and* placements — if they have one, landing as one write.
    */

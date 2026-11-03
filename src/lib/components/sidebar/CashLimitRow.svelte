@@ -1,7 +1,11 @@
 <script lang="ts">
-  import { formatNumber, parseHugeNumber } from "@reactor2/solver";
+  import {
+    formatNumber,
+    parseHugeNumber,
+    TICK_SECONDS,
+  } from "@reactor2/solver";
   import { X } from "lucide-svelte";
-  import { configState } from "../../state";
+  import { configState, timelineState } from "../../state";
   import { asset } from "../../utils/assetUrl";
 
   /*
@@ -17,10 +21,27 @@
    * moving a building is free. Typed in the game's own notation ("15AC") or as
    * a plain number, read by `parseHugeNumber`, and committed on Enter or blur
    * so a half-typed figure never reaches the store.
+   *
+   * A figure under `MIN_LIMIT_SECONDS` of income is refused: the islands
+   * earn it back in minutes, so a run held to it answers a question nobody is
+   * asking and only hides what the next few seconds of play would buy. Income
+   * is the power every island makes per tick, which is what selling it pays —
+   * before a Rush Hour, which only makes the floor looser.
    */
+  const MIN_LIMIT_SECONDS = 30 * 60;
   let editing = $state(false);
   let draft = $state("");
-  let invalid = $state(false);
+  // What the field showed on focus. The display rounds to 3 significant
+  // figures, so re-parsing an untouched field would silently rewrite the
+  // stored limit to the rounded figure; a draft still equal to this is left
+  // alone.
+  let seeded = "";
+  /** Why the last figure typed was refused, or null. */
+  let refusal = $state<string | null>(null);
+  let invalid = $derived(refusal !== null);
+  let floor = $derived(
+    (timelineState.totalPower * MIN_LIMIT_SECONDS) / TICK_SECONDS,
+  );
 
   let limit = $derived(configState.cashLimit);
   let fieldValue = $derived(
@@ -28,8 +49,8 @@
   );
 
   function startEditing() {
-    draft = limit === null ? "" : formatNumber(limit);
-    invalid = false;
+    draft = seeded = limit === null ? "" : formatNumber(limit);
+    refusal = null;
     editing = true;
   }
 
@@ -37,15 +58,20 @@
     if (!editing) return;
     editing = false;
     const text = draft.trim();
+    if (text === seeded.trim()) return;
     if (text === "") {
       configState.setCashLimit(null);
       return;
     }
     const cash = parseHugeNumber(text);
-    // A figure that does not read is dropped and the field falls back to the
-    // limit it had — marked, so the typing does not just vanish unexplained.
-    invalid = !Number.isFinite(cash) || cash < 0;
-    if (!invalid) configState.setCashLimit(cash);
+    // A figure that does not read, or one too tight to be worth a run, is
+    // dropped and the field falls back to the limit it had — marked, so the
+    // typing does not just vanish unexplained.
+    if (!Number.isFinite(cash) || cash < 0)
+      refusal = "Not a cash figure — try 15AC or 1.5e24";
+    else if (cash < floor)
+      refusal = `Too tight — at least ${formatNumber(floor)}`;
+    else configState.setCashLimit(cash);
   }
 </script>
 
@@ -59,9 +85,11 @@
   />
   <label class="text" for="cash-limit-field">
     <span class="title">Cash limit</span>
-    <span class="sub" class:invalid>
-      {#if invalid}
-        Not a cash figure — try 15AC or 1.5e24
+    <!-- One line that clips on a narrow sheet, so a refusal reads in full on
+         hover too. -->
+    <span class="sub" class:invalid title={refusal ?? undefined}>
+      {#if refusal !== null}
+        {refusal}
       {:else if limit === null}
         Solve for the most power a sum buys
       {:else}
@@ -72,8 +100,10 @@
   <input
     id="cash-limit-field"
     type="text"
-    inputmode="decimal"
+    inputmode="text"
     autocomplete="off"
+    autocapitalize="off"
+    autocorrect="off"
     spellcheck="false"
     placeholder="Any"
     value={fieldValue}
@@ -91,7 +121,7 @@
       aria-label="Remove the cash limit"
       title="Remove the cash limit"
       onclick={() => {
-        invalid = false;
+        refusal = null;
         configState.setCashLimit(null);
       }}
     >

@@ -1,11 +1,16 @@
 import {
   cheapestFirst,
   isDistinctLayout,
+  netSpend,
   powerTies,
   MAX_ALTERNATES,
 } from "@reactor2/solver";
 import type { IslandSolution } from "@reactor2/solver";
-import type { IslandLayout, PlacedBuilding } from "@reactor2/solver";
+import type {
+  CashBudget,
+  IslandLayout,
+  PlacedBuilding,
+} from "@reactor2/solver";
 
 /**
  * The answer for one island, gathered from however many attempts it was given.
@@ -41,6 +46,11 @@ import type { IslandLayout, PlacedBuilding } from "@reactor2/solver";
  * still judged against the best power any attempt reached, not the primary's:
  * a tie may sit a hair below the bar, and measuring from the cheapest would let
  * the island's figure creep down one tolerance at a time.
+ *
+ * Under a cash limit "cheapest" is what the layout spends from the board
+ * standing, as the engine ranked it — not its cost from empty, which would
+ * put a tie that sells the player's dear buildings ahead of one that keeps
+ * them, and evict the engine's choice once the shortlist is full.
  */
 export class IslandBest {
   #primary: IslandLayout = { placements: [], powerOutput: 0 };
@@ -51,10 +61,15 @@ export class IslandBest {
   /** The best power any attempt reached — the bar the next one is held to. */
   #bar = 0;
   readonly #limit: number;
+  readonly #budget: CashBudget | undefined;
 
-  /** `limit` caps the alternates kept, matching what one search would keep. */
-  constructor(limit: number = MAX_ALTERNATES) {
+  /**
+   * `limit` caps the alternates kept, matching what one search would keep;
+   * `budget` is the run's cash limit, if it has one.
+   */
+  constructor(limit: number = MAX_ALTERNATES, budget?: CashBudget) {
     this.#limit = limit;
+    this.#budget = budget;
   }
 
   /** What this island contributes to the board: its best layout and its ties. */
@@ -114,10 +129,12 @@ export class IslandBest {
       this.#kept.push(layout.placements);
       pool.push(layout);
     }
-    const ranked = cheapestFirst(pool, (l) => l.placements).slice(
-      0,
-      this.#limit + 1,
-    );
+    const budget = this.#budget;
+    const ranked = cheapestFirst(
+      pool,
+      (l) => l.placements,
+      budget && ((placements) => netSpend(placements, budget)),
+    ).slice(0, this.#limit + 1);
     this.#primary = ranked[0];
     this.#alternates = ranked.slice(1);
     this.#kept = ranked.map((l) => l.placements);

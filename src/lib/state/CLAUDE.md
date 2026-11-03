@@ -76,13 +76,17 @@ The search side is in `docs/SOLVER.md`.
   price research is on the timeline and `solverState` cannot read it. What
   stands is `layoutState.placements` — the board in Edit is the player's, a
   shown solve is not — and every other game island's copies come from
-  `layoutState.copiesOnOtherIslands()`, the same count step mode prices with.
-  The decode makes the launch asynchronous, so `#launching` refuses a second
-  press until the run has started.
+  `timelineState.copiesOnOtherIslands()`, the same count step mode prices with,
+  read through the memo the island figures fill. Reading it makes the launch
+  asynchronous, so `#launching` refuses a second press until the run has
+  started, and a launch whose island was switched away in the meantime is
+  dropped rather than solving the new island within the old one's budget.
 - **A held layout over the limit defends nothing**: `runOptimizer` drops it from
   `previousVariants`, so "keep the better one" never keeps an unaffordable board.
-  And **islands from two runs are not combined** under a limit: each board fit
-  it, and one landmass of each together may not.
+  And **landmasses from two boards are not combined** under a limit: each board
+  fit it, and one landmass of each together may not. That covers both runs
+  (`#composeIslands`) and the player's own mixing — `islandPickers` is empty
+  while a limit is set.
 - **Solve all is hidden** while a limit is set (`canSolveAll`): one figure
   cannot be handed to every island in turn.
 
@@ -447,7 +451,10 @@ island (`stepCount`) is put on screen and aimed at. The order is greedy on power
 — each step takes the available action that leaves the most — so the gains come
 first, and the plan **stops at the solve's power** (`stopAtPower`, scored by the
 same scorer): what would be left only rearranges buildings, and the last step
-says so. An island already at the solve's power gets no plan, just a toast.
+says so. **Under a cash limit cash comes first** (`PlanOptions.cash`): no step
+may take the cash needed at once past what the whole change costs net, so a
+sale that pays for a build comes before it and a layout that fits the limit
+never has a step that does not; power orders the steps that fit. An island already at the solve's power gets no plan, just a toast.
 Every candidate is scored by `createBoardScorer` — one island context, each
 building's rating per tile cached — ~0.2ms a board; the planner yields every 30ms
 and reports progress.
@@ -744,7 +751,8 @@ nothing changed but obstacles cleared (`sameMap`) — exactly what a saved layou
 on that island can be, so writing it there keeps the fixed-map rule.
 `importOntoTemplate` writes it through `importGameIslands`, and Import offers it
 as a second button behind two presses, since it replaces that island's board.
-The island's solve goes through `carryOverSolves`, as after a game import.
+The island's solve goes through `carryOverSolves`, as after a game import —
+narrowed to that island, so no other island's solve is judged by it.
 `state/importOnto.test.ts` pins the match and the refusals.
 
 **A game code is the one exception, and it keeps the rule.** The game's Export to

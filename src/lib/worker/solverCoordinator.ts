@@ -153,7 +153,9 @@ export class SolverCoordinator {
     }
 
     /** The answer per island: finished attempts only. */
-    const finals = plan.islands.map(() => new IslandBest());
+    const finals = plan.islands.map(
+      () => new IslandBest(undefined, plan.cashBudget),
+    );
 
     /*
      * What the screen shows while the run is in flight — the best anything has

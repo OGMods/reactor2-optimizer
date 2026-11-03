@@ -109,50 +109,116 @@ export function layoutCost(
   layout: readonly { buildingId: string }[],
   rules: PriceRules = BASE_RULES,
 ): number {
-  const copies = new Map<string, number>();
-  for (const p of layout)
-    copies.set(p.buildingId, (copies.get(p.buildingId) ?? 0) + 1);
   let cost = 0;
-  for (const [id, n] of copies) {
+  for (const [id, n] of Object.entries(countBuildings(layout))) {
     const base = findBuilding(id)?.price ?? 0;
     for (let k = 0; k < n; k++) cost += buildPrice(base, k, rules);
   }
   return cost;
 }
 
+/** Building id to how many stand. */
+export type BuildingCounts = Record<string, number>;
+
+/** How many of each building a list holds. */
+export function countBuildings(
+  list: readonly { buildingId: string }[],
+): BuildingCounts {
+  const counts: BuildingCounts = {};
+  for (const p of list) counts[p.buildingId] = (counts[p.buildingId] ?? 0) + 1;
+  return counts;
+}
+
 /**
- * What turning the board `budget.standing` holds into `layout` costs, net of
- * what the sales pay back — the figure a cash limit is on.
+ * The one statement of the rule: what changing a board holding `before` into
+ * one holding `after` costs, net of what the sales pay back.
  *
  * Moves are free, so no type is sold and rebuilt: a type whose count rises
  * buys each new copy at the next copy's price, one whose count falls refunds
  * each sale at the current one, and the order between types changes nothing.
- * Copies on the player's other islands (`budget.elsewhere`) count towards
- * every price.
+ * Copies on the player's other islands (`elsewhere`) count towards every
+ * price. `scale` is the sum of each type's net taken unsigned — the size of
+ * the terms, which "within budget" is judged against.
+ */
+function changeTerms(
+  after: Readonly<BuildingCounts>,
+  before: Readonly<BuildingCounts>,
+  elsewhere: Readonly<BuildingCounts>,
+  rules: PriceRules,
+): { spend: number; scale: number } {
+  let spend = 0;
+  let scale = 0;
+  for (const id of new Set([...Object.keys(after), ...Object.keys(before)])) {
+    const base = findBuilding(id)?.price ?? 0;
+    const others = elsewhere[id] ?? 0;
+    const c = before[id] ?? 0;
+    const t = after[id] ?? 0;
+    let term = 0;
+    for (let k = c; k < t; k++) {
+      const p = buildPrice(base, others + k, rules);
+      spend += p;
+      term += p;
+    }
+    for (let k = c; k > t; k--) {
+      const r = sellRefund(base, others + k, rules);
+      spend -= r;
+      term -= r;
+    }
+    scale += Math.abs(term);
+  }
+  return { spend, scale };
+}
+
+/** `changeTerms`' net spend, read off counts rather than placements. */
+export function countsSpend(
+  after: Readonly<BuildingCounts>,
+  before: Readonly<BuildingCounts>,
+  elsewhere: Readonly<BuildingCounts>,
+  rules: PriceRules,
+): number {
+  return changeTerms(after, before, elsewhere, rules).spend;
+}
+
+/**
+ * What turning the board `budget.standing` holds into `layout` costs, net of
+ * what the sales pay back — the figure a cash limit is on. See `changeTerms`.
  */
 export function netSpend(
   layout: readonly { buildingId: string }[],
   budget: CashBudget,
 ): number {
-  const count = (list: readonly { buildingId: string }[]) => {
-    const m = new Map<string, number>();
-    for (const p of list) m.set(p.buildingId, (m.get(p.buildingId) ?? 0) + 1);
-    return m;
-  };
-  const after = count(layout);
-  const before = count(budget.standing);
-  let spend = 0;
-  for (const id of new Set([...after.keys(), ...before.keys()])) {
-    const base = findBuilding(id)?.price ?? 0;
-    const others = budget.elsewhere[id] ?? 0;
-    const c = before.get(id) ?? 0;
-    const t = after.get(id) ?? 0;
-    for (let k = c; k < t; k++)
-      spend += buildPrice(base, others + k, budget.prices);
-    for (let k = c; k > t; k--)
-      spend -= sellRefund(base, others + k, budget.prices);
-  }
-  return spend;
+  return countsSpend(
+    countBuildings(layout),
+    countBuildings(budget.standing),
+    budget.elsewhere,
+    budget.prices,
+  );
+}
+
+/**
+ * Relative slack for "within budget": a net spend sums buys and refunds
+ * across thirty orders of magnitude, so it is compared against the size of
+ * its own terms rather than exactly. The engine's `countsFit`
+ * (`solver/search/cashLimit.ts`) applies the same rule to the same terms.
+ */
+const SPEND_RELATIVE_TOLERANCE = 1e-9;
+
+/** Whether `layout` is within `budget`'s cash, by the engine's own test. */
+export function fitsBudget(
+  layout: readonly { buildingId: string }[],
+  budget: CashBudget,
+): boolean {
+  const { spend, scale } = changeTerms(
+    countBuildings(layout),
+    countBuildings(budget.standing),
+    budget.elsewhere,
+    budget.prices,
+  );
+  return (
+    spend <=
+    budget.cash +
+      SPEND_RELATIVE_TOLERANCE * Math.max(scale, Math.abs(budget.cash))
+  );
 }
 
 /**

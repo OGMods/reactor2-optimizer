@@ -1,10 +1,11 @@
 import {
   buildPrice,
   computeWaterAdjacency,
+  countsSpend,
   findBuilding,
-  sellRefund,
   timeLabLevels,
   timeLabResearch,
+  type BuildingCounts,
   type PriceRules,
   type Tile,
 } from "@reactor2/solver";
@@ -17,17 +18,9 @@ import {
  * code and the board on screen can derive them live from the same code.
  */
 
-/** Building id to how many stand. */
-export type BuildingCounts = Record<string, number>;
-
-export function countBuildings(
-  placements: readonly { buildingId: string }[],
-): BuildingCounts {
-  const counts: BuildingCounts = {};
-  for (const p of placements)
-    counts[p.buildingId] = (counts[p.buildingId] ?? 0) + 1;
-  return counts;
-}
+// Counting is the package's, so the counts these figures read are the ones
+// its prices are computed over.
+export { countBuildings, type BuildingCounts } from "@reactor2/solver";
 
 /** `into` plus `from`, per building, written into `into`. */
 export function addCounts(into: BuildingCounts, from: BuildingCounts): void {
@@ -193,10 +186,9 @@ export function nextRemoval(
 
 /**
  * What changing a board holding `before` into one holding `after` costs, net
- * of the sales: `netSpend` from the solver package, read off counts. Moves are
- * free, so a type whose count rises buys each new copy at the next copy's
- * price — `elsewhere` copies on other islands counting towards it — and one
- * whose count falls refunds each sale at the current one.
+ * of the sales, `elsewhere` copies on other islands counting towards every
+ * price. The package's `countsSpend` — the rule `netSpend` and a cash limit
+ * are computed by — so the figure printed is the one a run is held to.
  */
 export function changeSpend(
   after: BuildingCounts,
@@ -204,18 +196,7 @@ export function changeSpend(
   elsewhere: BuildingCounts,
   rules: PriceRules,
 ): number {
-  let spend = 0;
-  for (const id of new Set([...Object.keys(after), ...Object.keys(before)])) {
-    const base = findBuilding(id)?.price ?? 0;
-    const others = elsewhere[id] ?? 0;
-    const from = before[id] ?? 0;
-    const to = after[id] ?? 0;
-    for (let k = from; k < to; k++)
-      spend += buildPrice(base, others + k, rules);
-    for (let k = from; k > to; k--)
-      spend -= sellRefund(base, others + k, rules);
-  }
-  return spend;
+  return countsSpend(after, before, elsewhere, rules);
 }
 
 /**

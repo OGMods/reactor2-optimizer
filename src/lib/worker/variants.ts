@@ -1,5 +1,10 @@
 import { buildOptimizationResult, type IslandPlan } from "@reactor2/solver";
-import { cheapestFirst, layoutKey, powerTies } from "@reactor2/solver";
+import {
+  cheapestFirst,
+  layoutKey,
+  netSpend,
+  powerTies,
+} from "@reactor2/solver";
 import type { IslandSolution } from "@reactor2/solver";
 import type { OptimizationResult } from "@reactor2/solver";
 
@@ -76,6 +81,13 @@ export function buildSolveVariants(
     take(swapped);
   }
 
-  // Stable, so equal costs keep the order they were generated in.
-  return cheapestFirst(variants, (v) => v.placements);
+  // Stable, so equal costs keep the order they were generated in. Under a
+  // cash limit the cost is the spend from the board standing, as the engine
+  // ranked each island's shortlist.
+  const budget = plan.cashBudget;
+  return cheapestFirst(
+    variants,
+    (v) => v.placements,
+    budget && ((placements) => netSpend(placements, budget)),
+  );
 }

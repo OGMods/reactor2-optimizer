@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPrice,
+  fitsBudget,
   layoutCost,
   netSpend,
   priceRules,
@@ -89,6 +90,18 @@ describe("netSpend", () => {
       budget(0, [], { cooler3: 3 }),
     );
     expect(spend).toBeCloseTo(buildPrice(price("cooler3"), 3, PRICES), 9);
+  });
+});
+
+describe("fitsBudget", () => {
+  it("holds a layout to its net spend, as the engine does", () => {
+    const standing = [at(0, 0, "cooler3")];
+    const layout = [at(0, 0, "cooler3"), at(1, 0, "cooler3")];
+    const spend = netSpend(layout, budget(0, standing));
+    expect(fitsBudget(layout, budget(spend, standing))).toBe(true);
+    expect(fitsBudget(layout, budget(spend * 0.99, standing))).toBe(false);
+    // Keeping the board as it stands fits any cash, none included.
+    expect(fitsBudget(standing, budget(0, standing))).toBe(true);
   });
 });
 

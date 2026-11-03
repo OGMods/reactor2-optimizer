@@ -29,7 +29,6 @@ import {
   encodeBlueprint,
   findBuilding,
   getAnomaly,
-  priceRules,
   sellRefund,
   decodeGameExport,
   formatNumberForFilename,
@@ -869,10 +868,17 @@ class UIState {
     // second run beside it.
     if (this.#launching) return;
     this.#launching = true;
+    // The budget is read off this island's board, and the run starts from
+    // whichever board is on screen once it is built: an island switched to
+    // in between would be solved within the one left behind. Such a launch is
+    // dropped — the player has moved on from it.
+    const templateId = layoutState.activeTemplateId;
     void this.#cashBudget(configState.cashLimit)
-      .then((cashBudget) =>
-        solverState.runOptimizer({ ...options, cashBudget }),
-      )
+      .then((cashBudget) => {
+        if (layoutState.activeTemplateId !== templateId || this.isPreview)
+          return;
+        return solverState.runOptimizer({ ...options, cashBudget });
+      })
       .finally(() => (this.#launching = false));
   }
 
@@ -895,8 +901,8 @@ class UIState {
     return {
       cash,
       standing,
-      elsewhere: Object.fromEntries(await layoutState.copiesOnOtherIslands()),
-      prices: priceRules(timelineState.record?.research ?? {}),
+      elsewhere: Object.fromEntries(await timelineState.copiesOnOtherIslands()),
+      prices: timelineState.priceRules,
     };
   }
 
@@ -1141,6 +1147,14 @@ class UIState {
 
     this.moveStepsPlanning = { done: 0, total: 0 };
     try {
+      const rules = timelineState.priceRules;
+      const baseOf = (id: string) => findBuilding(id)?.price ?? 0;
+      const pricing = {
+        copies: await this.#copiesAcrossIslands(),
+        build: (id: string, n: number) => buildPrice(baseOf(id), n, rules),
+        refund: (id: string, n: number) => sellRefund(baseOf(id), n, rules),
+      };
+      if (stale()) return;
       const plan = await planMoveSteps(start, target, obstacles, score, {
         onProgress: (done, total) => {
           if (!stale()) this.moveStepsPlanning = { done, total };
@@ -1151,21 +1165,22 @@ class UIState {
         stopAtPower: score(
           new Map(target.map((b) => [`${b.x},${b.y}`, b.buildingId])),
         ),
+        // Under a cash limit the steps must never need more at once than the
+        // layout, which fits it, costs in all: sales that pay for a build
+        // come before it. Without one, power alone orders them.
+        cash: configState.cashLimit !== null ? pricing : undefined,
       });
       if (stale()) return;
       if (plan.steps.every((step) => step.kind === "clear")) {
         this.showToast("Your island already makes as much as this layout");
         return;
       }
-      const rules = priceRules(timelineState.record?.research ?? {});
-      const baseOf = (id: string) => findBuilding(id)?.price ?? 0;
       const prices = priceSteps(
         plan,
-        await this.#copiesAcrossIslands(),
-        (id, n) => buildPrice(baseOf(id), n, rules),
-        (id, n) => sellRefund(baseOf(id), n, rules),
+        pricing.copies,
+        pricing.build,
+        pricing.refund,
       );
-      if (stale()) return;
       this.moveSteps = {
         templateId,
         result,
@@ -1187,7 +1202,7 @@ class UIState {
    * from its board in Edit, every other from its saved layout.
    */
   async #copiesAcrossIslands(): Promise<Map<string, number>> {
-    const counts = await layoutState.copiesOnOtherIslands();
+    const counts = await timelineState.copiesOnOtherIslands();
     for (const p of layoutState.placements)
       counts.set(p.buildingId, (counts.get(p.buildingId) ?? 0) + 1);
     return counts;
@@ -1653,7 +1668,8 @@ class UIState {
         match.id,
         configState.buildingUpgrades,
       );
-      await solverState.carryOverSolves([]);
+      // Only the island this rewrote: the others' solves are untouched.
+      await solverState.carryOverSolves([], [match.id]);
       this.activeModal = null;
       this.importCode = "";
       this.importMatch = null;

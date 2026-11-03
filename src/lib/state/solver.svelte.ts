@@ -2,6 +2,7 @@ import type { OptimizationResult, PlacedBuilding, Tile } from "../types";
 import {
   DEFAULT_ANOMALY_ID,
   getAnomaly,
+  fitsBudget,
   netSpend,
   type AnomalyDefinition,
   type AnomalyId,
@@ -61,14 +62,6 @@ import { layoutState } from "./layout.svelte";
 const WATCHDOG_GRACE_MS = 5_000;
 
 /**
- * Whether a layout fits a cash limit, with the slack the engine allows for
- * summing prices thirty orders of magnitude apart.
- */
-function affordable(placements: PlacedBuilding[], budget: CashBudget): boolean {
-  return netSpend(placements, budget) <= budget.cash * (1 + 1e-9);
-}
-
-/**
  * What a finished run does to the shortlist already held for this island.
  *
  * Three readings of "the run finished", and there is only something to compare
@@ -112,6 +105,7 @@ export function chooseSolveVariants(
   fresh: OptimizationResult[],
   limit: number = MAX_SOLVE_VARIANTS,
   rank: (result: OptimizationResult) => number = (r) => r.totalPower,
+  budget?: CashBudget,
 ): { variants: OptimizationResult[]; selected: number; defended: boolean } {
   if (fresh.length === 0)
     return { variants: held, selected: heldIndex, defended: true };
@@ -142,8 +136,14 @@ export function chooseSolveVariants(
       variants.push(variant);
     }
     const onScreen = variants[selected];
-    // Stable, so equal costs keep held layouts ahead of fresh ones.
-    const ranked = cheapestFirst(variants, (v) => v.placements);
+    // Stable, so equal costs keep held layouts ahead of fresh ones. Under a
+    // cash limit the cost is the spend from the board standing, as the
+    // engine ranked them.
+    const ranked = cheapestFirst(
+      variants,
+      (v) => v.placements,
+      budget && ((placements) => netSpend(placements, budget)),
+    );
     return {
       variants: ranked,
       selected: ranked.indexOf(onScreen),
@@ -689,10 +689,15 @@ class SolverState {
    * have more than one layout at this power — empty otherwise, and the
    * whole-board cycler says everything there is to say. Under a shared
    * cooling pool the board is one island, so there is never more than one.
+   *
+   * None while a cash limit is set: each whole board was bought within it,
+   * but one landmass from each of two boards together may not be — the reason
+   * `#composeIslands` stands aside under a limit too.
    */
   get islandPickers(): IslandChoices[] {
     const result = this.optimizationResult;
-    if (!result || this.variants.length < 2) return [];
+    if (!result || this.variants.length < 2 || configState.cashLimit !== null)
+      return [];
     const { islandOf, tiles } = this.#islandIndex();
     const pickers = islandChoices(
       this.variants,
@@ -716,7 +721,7 @@ class SolverState {
    */
   showIslandLayout(island: number, delta: 1 | -1) {
     const result = this.optimizationResult;
-    if (!result) return;
+    if (!result || configState.cashLimit !== null) return;
     const { islandOf, tiles } = this.#islandIndex();
     const picker = islandChoices(
       this.variants,
@@ -1032,9 +1037,17 @@ class SolverState {
    * roster now give, as `rescoreResult` does for the island on screen. Like it,
    * this searches nothing, so a cleared obstacle shows up as room a re-run can
    * use rather than as a changed layout.
+   *
+   * `only` narrows the pass to the islands an import actually rewrote. A
+   * share code laid onto one island must not touch the others: their solves
+   * would otherwise be judged against the anomaly now in force and cleared,
+   * where `restore()` would have kept them.
    */
-  async carryOverSolves(locked: readonly string[]) {
-    for (const templateId of solverStorage.solveIds()) {
+  async carryOverSolves(
+    locked: readonly string[],
+    only: readonly string[] = solverStorage.solveIds(),
+  ) {
+    for (const templateId of only) {
       const saved = solverStorage.loadSolve(templateId);
       if (!saved) continue;
       const grid = locked.includes(templateId)
@@ -1263,10 +1276,18 @@ class SolverState {
     //
     // Under a cash limit a held layout is a bar only if the player could buy
     // it: one over the limit is an answer to a question nobody is asking.
-    const previousVariants = (
-      options.keepBest && this.variants.length > 0 ? this.variants : []
-    ).filter((v) => !runBudget || affordable(v.placements, runBudget));
-    const previousIndex = this.variantIndex;
+    const heldVariants =
+      options.keepBest && this.variants.length > 0 ? this.variants : [];
+    const previousVariants = heldVariants.filter(
+      (v) => !runBudget || fitsBudget(v.placements, runBudget),
+    );
+    // The layout on screen, found again in the filtered list: the filter can
+    // shift it down, and an index into the unfiltered one would then follow a
+    // different layout. One the limit filtered out leaves the first held.
+    const previousIndex = Math.max(
+      0,
+      previousVariants.indexOf(heldVariants[this.variantIndex]),
+    );
 
     /*
      * The upgrade plan, resolved once at launch like the rules beside it.
@@ -1490,6 +1511,7 @@ class SolverState {
           composed ?? finalVariants,
           MAX_SOLVE_VARIANTS,
           rank,
+          runBudget,
         );
 
         // A defended layout keeps its own run's clock: it is still that solve,

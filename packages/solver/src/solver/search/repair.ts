@@ -10,6 +10,7 @@ import {
   ratedFor,
   toPlacedBuildings,
 } from "./placement";
+import { layoutSpend, withinBudget } from "./cashLimit";
 import { anyOfflineProducer, layoutHolds, stabilize } from "./stability";
 
 /**
@@ -113,10 +114,57 @@ export async function greedyPolish(
   const gains = new Float64Array(ctx.n * nCandidates).fill(-Infinity);
   const dirty = new Uint8Array(ctx.n).fill(1);
 
+  // A cash limit is the one thing locality does not cover: the budget is
+  // shared by the whole island, so a move anywhere can bring a far candidate
+  // back within it — or put it out — without touching its neighbourhood.
+  // Under a limit the budget is checked before the simulation, as `hillClimb`
+  // does, and every (tile, candidate) it turned away is flagged here and
+  // re-checked after each applied move. The re-check is the cheap test alone;
+  // only a candidate that now fits is simulated. Null without a limit, where
+  // the sweep is exactly what it was.
+  const overBudget =
+    layoutSpend(current, ctx) === null
+      ? null
+      : new Uint8Array(ctx.n * nCandidates);
+  let recheckBudget = false;
+
+  const measure = (tile: number, k: number, held: EffectiveBuilding | null) => {
+    const building = candidates[k];
+    if (overBudget !== null) overBudget[tile * nCandidates + k] = 0;
+    // The candidate list is the plain roster, `held` is rated for this tile:
+    // asked the wrong way round, a scaled tile re-simulates its own layout
+    // once per sweep for nothing. See `ratedFor`.
+    if (ratedFor(ctx, tile, building) === held) return -Infinity;
+    let gain = -Infinity;
+    put(current, ctx, tile, building);
+    if (overBudget !== null && !withinBudget(current, ctx)) {
+      overBudget[tile * nCandidates + k] = 1;
+    } else {
+      const trial = simulateIsland(current, ctx);
+      if (
+        trial.totalPower - bestPower > 0 &&
+        !anyOfflineProducer(current, trial.placements) &&
+        layoutHolds(current, ctx)
+      ) {
+        gain = trial.totalPower - bestPower;
+      }
+    }
+    put(current, ctx, tile, held);
+    return gain;
+  };
+
+  const anyOverBudget = (tile: number) => {
+    if (overBudget === null) return false;
+    for (let k = 0; k < nCandidates; k++)
+      if (overBudget[tile * nCandidates + k] === 1) return true;
+    return false;
+  };
+
   while (performance.now() < deadlineMs && !pacer.stopRequested) {
     let cut = false;
     for (let tile = 0; tile < ctx.n; tile++) {
-      if (dirty[tile] === 0) continue;
+      const full = dirty[tile] === 1;
+      if (!full && !(recheckBudget && anyOverBudget(tile))) continue;
       const now = performance.now();
       if (now >= deadlineMs) {
         cut = true;
@@ -133,27 +181,14 @@ export async function greedyPolish(
       dirty[tile] = 0;
       const held = current[tile];
       for (let k = 0; k < nCandidates; k++) {
-        const building = candidates[k];
-        let gain = -Infinity;
-        // The candidate list is the plain roster, `held` is rated for this tile:
-        // asked the wrong way round, a scaled tile re-simulates its own layout
-        // once per sweep for nothing. See `ratedFor`.
-        if (ratedFor(ctx, tile, building) !== held) {
-          put(current, ctx, tile, building);
-          const trial = simulateIsland(current, ctx);
-          if (
-            trial.totalPower - bestPower > 0 &&
-            !anyOfflineProducer(current, trial.placements) &&
-            layoutHolds(current, ctx)
-          ) {
-            gain = trial.totalPower - bestPower;
-          }
-          put(current, ctx, tile, held);
-        }
-        gains[tile * nCandidates + k] = gain;
+        // A clean tile is visited only for its budget-rejected candidates;
+        // the rest keep their cached figure.
+        if (!full && overBudget?.[tile * nCandidates + k] !== 1) continue;
+        gains[tile * nCandidates + k] = measure(tile, k, held);
       }
     }
     if (cut) break;
+    recheckBudget = false;
 
     let bestGain = 0.0;
     let bestTile = -1;
@@ -182,6 +217,11 @@ export async function greedyPolish(
         if (chebyshev(ctx, tile, bestTile) <= POLISH_DIRTY_RADIUS)
           dirty[tile] = 1;
       }
+      // After any applied move, not only one that lowers the total: a type's
+      // price depends on its own count, so a move that sells a copy of one
+      // type makes that type's next copy cheaper elsewhere even while the
+      // total climbs.
+      if (overBudget !== null) recheckBudget = true;
     } else {
       // Stale: the layout moved under it. Back to the sweep for a fresh figure.
       put(current, ctx, bestTile, held);

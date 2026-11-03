@@ -66,7 +66,8 @@ const GAME_ISLANDS = ISLAND_TEMPLATES.filter((t) => t.game);
  * changed that a Chronon target or a Time Lab plan was set against: the same
  * anomaly at the same balance, every Time Lab research at the same level (a
  * jump spends Chronons there), the timeline carried on rather than restarted
- * (a jump zeroes its energy and clock), and the islands making at least what
+ * (the same generation — a jump also zeroes its energy and clock, but a run
+ * played long enough passes the old figures again), and the islands making at least what
  * they made. Re-importing to catch up on a session's progress then keeps both.
  */
 function continuesRun(
@@ -85,7 +86,15 @@ function continuesRun(
   const a = prev.timeline;
   const b = next.timeline;
   if ((a === null) !== (b === null)) return false;
-  if (a && b && (b.energy < a.energy || b.elapsedSeconds < a.elapsedSeconds))
+  // The generation counts jumps outright; energy and clock only betray one
+  // until the new run has caught up with the old snapshot.
+  if (
+    a &&
+    b &&
+    (b.generation !== a.generation ||
+      b.energy < a.energy ||
+      b.elapsedSeconds < a.elapsedSeconds)
+  )
     return false;
   return next.energyPerTick >= prev.energyPerTick * (1 - 1e-9);
 }
@@ -299,6 +308,26 @@ class TimelineState {
     this.#gameObstacles = nextGameObstacles;
   }
 
+  /**
+   * Each building's count on every game island but the one on screen, each
+   * from its saved layout or its map — the copies a price climbs with that
+   * no change to this board touches. An unreadable board counts for nothing.
+   *
+   * Read through the memo the island figures fill, so a budgeted launch does
+   * not decode every board again — they are almost always counted already.
+   */
+  async copiesOnOtherIslands(): Promise<Map<string, number>> {
+    const active = layoutState.activeTemplateId;
+    const codes = GAME_ISLANDS.filter((t) => t.id !== active).map(
+      (t) => layoutState.savedGrids[t.id]?.code ?? t.code,
+    );
+    const counts = new Map<string, number>();
+    for (const code of codes)
+      for (const [id, n] of Object.entries((await this.#factsOf(code)).counts))
+        counts.set(id, (counts.get(id) ?? 0) + n);
+    return counts;
+  }
+
   /** A board's buildings and terrain, memoised by code. */
   async #factsOf(code: string): Promise<BoardFacts> {
     let facts = this.#factsMemo.get(code);
@@ -369,13 +398,21 @@ class TimelineState {
    * one the totals count (see `#livePower`).
    */
   #liveFacts: BoardFacts | null = $derived.by(() => {
+    const terrain = this.#liveTerrain;
+    if (terrain === null) return null;
+    return { counts: countBuildings(layoutState.placements), terrain };
+  });
+
+  /**
+   * The board on screen's terrain, apart from its buildings: a full shore
+   * scan that placing a building — which leaves `grid` alone — must not
+   * repeat on every stroke.
+   */
+  #liveTerrain: TerrainStats | null = $derived.by(() => {
     if (layoutState.isPreview) return null;
     if (!GAME_ISLANDS.some((t) => t.id === layoutState.activeTemplateId))
       return null;
-    return {
-      counts: countBuildings(layoutState.placements),
-      terrain: terrainStats(layoutState.grid),
-    };
+    return terrainStats(layoutState.grid);
   });
 
   /**
