@@ -5,11 +5,13 @@ import {
   splitGridIntoIslands,
 } from "./island";
 import { solveIsland, type IslandSolution } from "./placementSearch";
+import { affordableRoster } from "./search/cashLimit";
 import { getAnomaly } from "../data/anomalies";
 import { getEffectiveBuildings } from "../data/effectiveBuildings";
 import type {
   AnomalyDefinition,
   BuildingDefinition,
+  CashBudget,
   EffectiveBuilding,
   PrestigeScales,
   IslandSubGrid,
@@ -160,6 +162,12 @@ export interface IslandPlan {
    * plan.
    */
   upgradeSteps?: EffectiveBuilding[][];
+  /**
+   * The cash limit, when there is one. The board is then a single island
+   * (`splitGridIntoIslands`' `wholeBoard`), so its standing board's board
+   * coordinates are that island's coordinates too.
+   */
+  cashBudget?: CashBudget;
 }
 
 /**
@@ -179,6 +187,7 @@ export function planSolve(
   anomalyId?: string,
   prestige?: PrestigeScales,
   upgradePlan?: Record<string, number>[],
+  cashBudget?: CashBudget,
 ): IslandPlan | null {
   if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0)
     return null;
@@ -188,11 +197,13 @@ export function planSolve(
 
   // Research folds in here, at the one place the roster is resolved, so every
   // island and every attempt is handed the same already-scaled buildings.
-  const effectiveBuildings = getEffectiveBuildings(
-    buildings,
-    unlockedUpgrades,
-    prestige,
-  );
+  // A cash limit then takes out what it can never buy, here rather than per
+  // island so the bound below is the budget's roster as well as the search's.
+  const unlocked = getEffectiveBuildings(buildings, unlockedUpgrades, prestige);
+  const effectiveBuildings =
+    cashBudget === undefined
+      ? unlocked
+      : affordableRoster(unlocked, cashBudget);
   if (effectiveBuildings.length === 0) return null;
 
   // Taken by id rather than as a definition, because that is also the worker
@@ -208,6 +219,7 @@ export function planSolve(
     grid,
     canCoolDirectProducer(effectiveBuildings),
     anomaly,
+    cashBudget !== undefined,
   );
   if (islands.length === 0) return null;
 
@@ -234,6 +246,7 @@ export function planSolve(
     upgradeSteps: (upgradePlan ?? []).map((unlocks) =>
       getEffectiveBuildings(buildings, unlocks, prestige),
     ),
+    cashBudget,
   };
 }
 
@@ -341,6 +354,7 @@ export async function solve(
     options?.anomalyId,
     options?.prestige,
     options?.upgradePlan,
+    options?.cashBudget,
   );
   if (!plan)
     return createEmptyResult(grid?.[0]?.length ? countGrassTiles(grid) : 0);
@@ -366,6 +380,7 @@ export async function solve(
       plan.seeds[i],
       plan.anomaly,
       plan.upgradeSteps,
+      plan.cashBudget,
     );
     options?.onProgress?.(buildOptimizationResult(plan, islandResults));
   }

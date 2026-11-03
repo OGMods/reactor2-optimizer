@@ -16,6 +16,7 @@ import {
 import {
   anomalyStorage,
   buildingStorage,
+  cashLimitStorage,
   prestigeStorage,
   upgradePlanStorage,
 } from "../storage/storage";
@@ -102,8 +103,23 @@ class ConfigState {
     resolveUpgradePlan(BUILDINGS, this.buildingUpgrades, this.upgradePlan),
   );
 
+  /**
+   * The most a run may spend changing the board into its layout, net of what
+   * the sales pay back — or null, and a run maximises power at any price.
+   *
+   * A solve input like the plan beside it: the player's cash is one figure
+   * across every island, so it is set once rather than per board, and the
+   * board it is spent from is whichever one the run starts on. Persisted.
+   *
+   * It is typed by the player rather than read off a game export, whose cash
+   * is a snapshot from the moment of export and is stale by the time anyone
+   * solves with it.
+   */
+  cashLimit = $state<number | null>(null);
+
   constructor() {
     this.loadCatalog();
+    this.cashLimit = cashLimitStorage.loadCashLimit();
     this.anomalyId = anomalyStorage.loadAnomaly();
     this.prestigeLevels = prestigeStorage.loadPrestige();
     this.upgradePlan = upgradePlanStorage.loadPlan();
@@ -191,6 +207,13 @@ class ConfigState {
 
   #savePlan() {
     upgradePlanStorage.savePlan($state.snapshot(this.upgradePlan));
+  }
+
+  /** Sets the cash limit; null, or anything not a cash figure, clears it. */
+  setCashLimit(cash: number | null) {
+    this.cashLimit =
+      cash !== null && Number.isFinite(cash) && cash >= 0 ? cash : null;
+    cashLimitStorage.saveCashLimit(this.cashLimit);
   }
 
   loadCatalog() {

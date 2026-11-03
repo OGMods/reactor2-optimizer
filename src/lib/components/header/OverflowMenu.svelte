@@ -6,6 +6,7 @@
     Download,
     EyeOff,
     ImageDown,
+    LandPlot,
     MoreHorizontal,
     Settings,
     Share2,
@@ -156,6 +157,19 @@
           <span>Transfer to another device</span>
         </button>
       {/if}
+
+      <!--
+        Read-only figures over the player's own islands, so present in preview
+        too: a previewed board is not counted, and nothing here writes.
+      -->
+      <button
+        class="menu-item"
+        role="menuitem"
+        onclick={() => uiState.openIslandStats()}
+      >
+        <LandPlot size={16} />
+        <span>Island stats</span>
+      </button>
 
       <!--
         Present in preview too, unlike Import: it changes how the app behaves

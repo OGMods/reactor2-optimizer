@@ -22,6 +22,7 @@ import {
   type BoardBuilding,
   type MovePlan,
   type MoveStep,
+  type StepPricing,
 } from "./moveSteps";
 
 const b = (buildingId: string, x: number, y: number): BoardBuilding => ({
@@ -61,6 +62,12 @@ function replay(start: readonly BoardBuilding[], plan: MovePlan) {
         board.delete(at(s.from.x, s.from.y));
         board.set(at(s.to.x, s.to.y), s.buildingId);
         return;
+      case "swap":
+        expect(board.get(at(s.a.x, s.a.y)), `step ${i}`).toBe(s.a.buildingId);
+        expect(board.get(at(s.b.x, s.b.y)), `step ${i}`).toBe(s.b.buildingId);
+        board.set(at(s.a.x, s.a.y), s.b.buildingId);
+        board.set(at(s.b.x, s.b.y), s.a.buildingId);
+        return;
       case "build":
         expect(board.has(at(s.x, s.y)), `step ${i} onto taken`).toBe(false);
         board.set(at(s.x, s.y), s.buildingId);
@@ -88,7 +95,7 @@ describe("planMoveSteps", () => {
       b("generator", 2, 0),
       b("cooler2", 3, 3),
     ];
-    const plan = await planMoveSteps(start, target, [], [], count);
+    const plan = await planMoveSteps(start, target, [], count);
 
     expect(asSet(replay(start, plan))).toEqual(asSet(target));
     expect(asSet(plan.boards.at(-1)!)).toEqual(asSet(target));
@@ -102,7 +109,6 @@ describe("planMoveSteps", () => {
     const plan = await planMoveSteps(
       [b("cooler1", 0, 0), b("cooler1", 9, 9)],
       [b("cooler1", 1, 0), b("cooler1", 8, 9)],
-      [],
       [],
       count,
     );
@@ -134,7 +140,6 @@ describe("planMoveSteps", () => {
         { x: 2, y: 2, type: "rock" },
         { x: 5, y: 5, type: "tree1" },
       ],
-      [],
       count,
     );
     expect(plan.steps[0]).toEqual({
@@ -147,51 +152,76 @@ describe("planMoveSteps", () => {
     expect(plan.steps.filter((s) => s.kind === "clear")).toHaveLength(1);
   });
 
-  it("breaks a ring of moves by parking one on a free tile", async () => {
+  it("swaps two buildings that want each other's tile", async () => {
     const start = [b("cooler1", 0, 0), b("generator", 1, 0)];
     const target = [b("generator", 0, 0), b("cooler1", 1, 0)];
-    const plan = await planMoveSteps(
-      start,
-      target,
-      [],
-      [{ x: 5, y: 5 }],
-      count,
-    );
+    const plan = await planMoveSteps(start, target, [], count);
 
     expect(asSet(replay(start, plan))).toEqual(asSet(target));
-    expect(plan.steps.some((s) => s.kind === "move" && s.to.x === 5)).toBe(
-      true,
-    );
-    expect(plan.steps.every((s) => s.kind === "move")).toBe(true);
+    expect(plan.steps).toEqual([
+      {
+        kind: "swap",
+        a: { buildingId: "cooler1", x: 0, y: 0 },
+        b: { buildingId: "generator", x: 1, y: 0 },
+      },
+    ]);
   });
 
-  it("sells and rebuilds to break a ring with nowhere to park", async () => {
-    const start = [b("cooler1", 0, 0), b("generator", 1, 0)];
-    const target = [b("generator", 0, 0), b("cooler1", 1, 0)];
-    const plan = await planMoveSteps(start, target, [], [], count);
+  it("turns a longer ring with nowhere to park by swaps alone", async () => {
+    // Three buildings each wanting the next one's tile, and no free tile.
+    const start = [
+      b("cooler1", 0, 0),
+      b("generator", 1, 0),
+      b("cooler2", 2, 0),
+    ];
+    const target = [
+      b("cooler2", 0, 0),
+      b("cooler1", 1, 0),
+      b("generator", 2, 0),
+    ];
+    const plan = await planMoveSteps(start, target, [], count);
 
     expect(asSet(replay(start, plan))).toEqual(asSet(target));
-    expect(plan.steps.some((s) => s.kind === "sell")).toBe(true);
-    expect(plan.steps.some((s) => s.kind === "build")).toBe(true);
+    expect(plan.steps.every((s) => s.kind === "swap")).toBe(true);
+    expect(plan.steps).toHaveLength(2);
   });
 
   it("replaces a building in place rather than selling and building", async () => {
     const start = [b("cooler1", 0, 0), b("generator", 1, 0)];
     const target = [b("cooler2", 0, 0), b("generator", 1, 0)];
-    const plan = await planMoveSteps(start, target, [], [], count);
+    const plan = await planMoveSteps(start, target, [], count);
     expect(plan.steps).toEqual([
       { kind: "replace", from: "cooler1", to: "cooler2", x: 0, y: 0 },
     ]);
   });
 
-  it("sells everything and starts again when the island changes almost entirely", async () => {
+  it("sells everything and starts again when nothing on the island survives", async () => {
     // Five tiles, all changing to buildings found nowhere on the start, and
     // the target on tiles the start does not use: walking it is ten steps.
     const start = [0, 1, 2, 3, 4].map((x) => b("cooler1", x, 0));
     const target = [0, 1, 2, 3].map((x) => b("generator", x, 5));
-    const plan = await planMoveSteps(start, target, [], [], count);
+    const plan = await planMoveSteps(start, target, [], count);
     expect(plan.steps[0]).toMatchObject({ kind: "sellAll", count: 5 });
     expect(plan.steps).toHaveLength(1 + target.length);
+    expect(asSet(replay(start, plan))).toEqual(asSet(target));
+  });
+
+  it("never sells everything while a building survives, however many steps it saves", async () => {
+    // One cooler moves and the rest change: starting again would be one step
+    // fewer, but it would sell the cooler and buy it back at a loss.
+    const start = [0, 1, 2, 3, 4].map((x) => b("cooler1", x, 0));
+    const target = [
+      b("cooler1", 0, 5),
+      ...[1, 2, 3].map((x) => b("generator", x, 5)),
+    ];
+    const plan = await planMoveSteps(start, target, [], count);
+    expect(plan.steps.some((s) => s.kind === "sellAll")).toBe(false);
+    expect(plan.steps).toContainEqual({
+      kind: "move",
+      buildingId: "cooler1",
+      from: { x: 0, y: 0 },
+      to: { x: 0, y: 5 },
+    });
     expect(asSet(replay(start, plan))).toEqual(asSet(target));
   });
 
@@ -202,7 +232,6 @@ describe("planMoveSteps", () => {
     const plan = await planMoveSteps(
       [b("cooler1", 0, 0), b("cooler1", 1, 0)],
       [b("generator", 5, 5), b("cooler1", 2, 0), b("cooler1", 3, 0)],
-      [],
       [],
       score,
       { stopAtPower: 1 },
@@ -234,7 +263,6 @@ describe("planMoveSteps", () => {
       running,
       [...running, b("generator", 2, 0), b("cooler1", 3, 0)],
       [],
-      [],
       score,
     );
     expect(
@@ -263,7 +291,7 @@ describe("planMoveSteps", () => {
     );
 
     const t0 = performance.now();
-    const plan = await planMoveSteps([], island.placements, [], [], score);
+    const plan = await planMoveSteps([], island.placements, [], score);
     const ms = performance.now() - t0;
 
     expect(plan.steps).toHaveLength(island.placements.length);
@@ -289,7 +317,6 @@ describe("planMoveSteps", () => {
         [b("cooler1", 0, 0)],
         [b("cooler1", 0, 0), b("cooler1", 1, 0), b("cooler1", 2, 0)],
         [],
-        [],
         count,
       );
       // One cooler1 stands elsewhere too: two copies before the first build.
@@ -304,7 +331,6 @@ describe("planMoveSteps", () => {
       const plan = await planMoveSteps(
         [b("cooler1", 0, 0), b("generator", 5, 5)],
         [b("cooler2", 0, 0), b("generator", 6, 5)],
-        [],
         [],
         count,
       );
@@ -330,13 +356,92 @@ describe("planMoveSteps", () => {
         start,
         [b("generator", 9, 9)],
         [],
-        [],
         count,
       );
       expect(plan.steps[0].kind).toBe("sellAll");
       const prices = priceSteps(plan, new Map([["cooler1", 3]]), build, refund);
       // Sold at three, two and one standing: 400 + 200 + 100.
       expect(prices[0]).toEqual({ spend: 0, refund: 700 });
+    });
+  });
+
+  describe("under prices", () => {
+    // Each type its own base, each copy x2, refunds of half the current price.
+    const BASE: Record<string, number> = {
+      cooler1: 300,
+      cooler2: 100,
+      generator: 50,
+      nuclear_reactor: 700,
+    };
+    const pricing = (copies: Map<string, number>): StepPricing => ({
+      copies,
+      build: (id, n) => BASE[id] * 2 ** n,
+      refund: (id, n) => (n > 0 ? BASE[id] * 2 ** n * 0.5 : 0),
+    });
+    /** What MoveStepsBar prints: the net, and the most needed at once. */
+    const money = (plan: MovePlan, p: StepPricing) => {
+      let running = 0;
+      let peak = 0;
+      for (const s of priceSteps(plan, p.copies, p.build, p.refund)) {
+        running += s.spend - s.refund;
+        peak = Math.max(peak, running);
+      }
+      return { net: running, peak };
+    };
+
+    it("sells before the build the sale pays for, power waiting on cash", async () => {
+      // More buildings is more power, so on power alone the new cooler goes
+      // in first, and 100 is needed at once for a change that pays out 200.
+      const start = [b("generator", 0, 0), b("cooler1", 1, 0)];
+      const target = [b("generator", 0, 0), b("cooler2", 2, 0)];
+      const p = pricing(new Map([["cooler1", 1]]));
+
+      const free = await planMoveSteps(start, target, [], count);
+      expect(free.steps.map((s) => s.kind)).toEqual(["build", "sell"]);
+      expect(money(free, p).peak).toBe(100);
+
+      const plan = await planMoveSteps(start, target, [], count, { cash: p });
+      expect(plan.steps.map((s) => s.kind)).toEqual(["sell", "build"]);
+      expect(money(plan, p)).toEqual({ net: -200, peak: 0 });
+      expect(asSet(replay(start, plan))).toEqual(asSet(target));
+    });
+
+    it("never needs more at once than the change costs, on any board", async () => {
+      // A seeded walk over small random boards: sells, builds, replaces,
+      // moves and swaps mixed, with copies on other islands.
+      let seed = 7;
+      const rand = () => {
+        seed = (seed * 1103515245 + 12345) % 2 ** 31;
+        return seed / 2 ** 31;
+      };
+      const ids = Object.keys(BASE);
+      const board = () => {
+        const tiles = new Map<string, BoardBuilding>();
+        for (let k = 0; k < 7; k++) {
+          const x = Math.floor(rand() * 4);
+          const y = Math.floor(rand() * 3);
+          tiles.set(`${x},${y}`, b(ids[Math.floor(rand() * ids.length)], x, y));
+        }
+        return [...tiles.values()];
+      };
+      for (let trial = 0; trial < 60; trial++) {
+        const start = board();
+        const target = board();
+        const copies = new Map<string, number>();
+        for (const id of ids) copies.set(id, Math.floor(rand() * 3));
+        for (const s of start)
+          copies.set(s.buildingId, copies.get(s.buildingId)! + 1);
+        const p = pricing(copies);
+
+        const plan = await planMoveSteps(start, target, [], count, {
+          cash: p,
+        });
+        const { net, peak } = money(plan, p);
+        expect(peak, `trial ${trial}`).toBeLessThanOrEqual(
+          Math.max(0, net) * (1 + 1e-9),
+        );
+        expect(asSet(replay(start, plan))).toEqual(asSet(target));
+      }
     });
   });
 });

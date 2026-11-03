@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { editorState, configState } from "../../state";
+  import { editorState, configState, timelineState } from "../../state";
+  import { buildingPricing } from "../../simulation/islandStats";
   import {
     BUILDINGS,
     buildingCategory,
@@ -42,6 +43,14 @@
         headlineValue(a, configState.buildingUpgrades[a.id] ?? 0),
     ),
   );
+
+  /*
+   * Every copy on every island raises the next one's price, so the figure a
+   * player plans around is the next copy's, not the catalogue's. Read once
+   * here rather than per item: `copies` walks every island.
+   */
+  let copies = $derived(timelineState.copies);
+  let rules = $derived(timelineState.priceRules);
 </script>
 
 <div
@@ -55,6 +64,7 @@
       <BuildingPaletteItem
         building={bld}
         upgradeLevel={configState.buildingUpgrades[bld.id] ?? 0}
+        pricing={buildingPricing(bld.id, copies[bld.id] ?? 0, rules)}
         isActive={editorState.selectedBuildingId === bld.id}
         onSelect={() => editorState.selectBuilding(bld.id)}
       />

@@ -15,6 +15,7 @@ import { solve } from "../src/solver/solver";
 import type {
   AnomalyDefinition,
   AnomalyId,
+  CashBudget,
   EffectiveBuilding,
   IslandSubGrid,
   PrestigeScales,
@@ -30,6 +31,7 @@ type Task =
       seed?: number;
       anomaly?: AnomalyDefinition;
       upgradeSteps?: EffectiveBuilding[][];
+      cashBudget?: CashBudget;
     }
   | {
       kind: "attempt";
@@ -40,6 +42,7 @@ type Task =
       anomalyId?: AnomalyId;
       prestige?: PrestigeScales;
       upgradePlan?: Record<string, number>[];
+      cashBudget?: CashBudget;
     };
 
 parentPort?.on(
@@ -56,6 +59,7 @@ parentPort?.on(
               payload.seed,
               payload.anomaly,
               payload.upgradeSteps,
+              payload.cashBudget,
             )
           : await solve(
               payload.grid,
@@ -66,6 +70,7 @@ parentPort?.on(
                 anomalyId: payload.anomalyId,
                 prestige: payload.prestige,
                 upgradePlan: payload.upgradePlan,
+                cashBudget: payload.cashBudget,
               },
               payload.seed,
             );

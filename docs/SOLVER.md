@@ -697,7 +697,7 @@ the reactor comes first. Holding a layout to every order of three +1 upgrades (7
 31–59% of the best target power; a fixed order kept 59–99%. So the plan is ordered and the
 player states the order.
 
-**How the search honours it.** `planHolds` simulates the layout at each plan roster, re-reading
+**How the search honours it.** `layoutHolds` simulates the layout at each plan roster, re-reading
 every placement by building id, and every gate that admits a layout asks it beside the ordinary
 stability test: the best record, repair, the composition swaps, pruning, right-sizing, the tie
 shortlist and `stabilize`. Power is still measured at the target alone. Without a plan the call
@@ -711,6 +711,45 @@ cooler plans that took the result from 49% to 63–68% of the best target power;
 both and keeping whichever runs better across the plan costs one extra seed construction.
 Splitting the budget between a target-scored and a today-scored search was measured too: a few
 points better on cooler plans, a few worse on reactor ones, so it was not kept.
+
+### Cash limits — the most power a sum buys
+
+`SolveOptions.cashBudget` maximises power within a sum of cash instead of at any price. The sum is
+what turning the board as it stands into the layout costs, **net of what the sales pay back**:
+the player may sell everything and rebuild, or build on what they have, and both are one figure.
+
+**The spend is a sum over building types of a function of each type's count alone.** Moves are
+free, so a type is never sold and rebuilt — its count rises, each copy bought at the next copy's
+price, or falls, each sale refunding a share of the current one — and the order between types
+changes nothing. Selling first is always possible, so the net is also all the cash the change needs
+on hand. That makes three things cheap: `search/cashLimit.ts` tabulates each type's spend by count
+once per island, a composition's spend is known before it is arranged, and a building removed
+always lowers it. `netSpend` in `data/buildingPrices.ts` is the same figure computed directly, and
+`cashLimit.test.ts` holds the tables to it.
+
+How the search honours it, by the same route as an upgrade plan:
+
+- **`layoutHolds` asks it** beside the plan, so every gate that admits a layout keeps only
+  affordable ones, and **`stabilize` steps a layout down until it fits** (`trimToBudget`: the type
+  whose last copy costs most gives one up, stepped to the next cheaper building of its role where
+  that saves money, removed where not) — so nothing `stabilize` hands back is over.
+- **The walk never leaves the budget**: a replacement that would overspend is refused before it is
+  simulated. A swap cannot change the spend.
+- **The board as it stands competes as a seed**, repaired on the same terms as the built seed: it
+  costs nothing, so it is always an answer the budget allows.
+- **Repair tries three tiers of every role**, not only the top generator and cooler: the top tier
+  is exactly what a budget runs out on.
+- **`planSolve` hands the board over whole** (`splitGridIntoIslands`' `wholeBoard`), as under a
+  cooling pool — one budget pays for every landmass and every copy raises the next price — and
+  first drops every building that the cash plus every refund cannot buy one of
+  (`affordableRoster`), which is sound and keeps the seed and the bound off unreachable tiers.
+
+Measured on Magma Rift at full unlocks, where the unlimited layout costs 9.6e34 from empty and
+makes 4.72AD: 1e20 buys 170T, 1e24 124AA, 1e27 20.3AB, 1e30 2.35–2.80AC at 8s and 2.78–2.85AC at
+30s, 1e33 282AC — about a hundredfold power per thousandfold cash, with mixed tiers throughout.
+The spread is wider than the unlimited search's (7.6% at 8s, 2.3% at 30s), and **the bound does
+not know the budget**, so layout efficiency under one reads far below 100%. Starting from the 1e30
+board with 0 cash keeps its 2.35AC; with another 1e30 it reaches 4.13AC.
 
 ---
 
@@ -883,6 +922,9 @@ could not see would restart numbering at 1 and overwrite an untagged run.
 `--attempts` runs a batch session: N whole solves through a worker pool, with a leaderboard of
 distinct layouts at the end and the worst, median and best of every attempt — the spread is what
 tells two settings apart when both reach the same best. Ctrl-C stops it and still prints the report.
+
+`--cash AMOUNT` solves within a cash limit; a `--code` board's placements are what stands, a
+shipped map starts empty, and the run prints what the best layout spends.
 
 Three flags reproduce a player's setup rather than a shipped one. `--code BLUEPRINT` solves a
 pasted board, taking its anomaly (unless `--anomaly` is given) and its Time Lab research from the

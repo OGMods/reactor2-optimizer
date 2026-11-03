@@ -3,7 +3,7 @@ import { wasteIsCovered } from "../physics";
 import { type SimPlacedBuilding, simulateIsland } from "../simulate";
 import type { EffectiveBuilding, Placement } from "../types";
 import { emptyPlacement, isReactor, put } from "./placement";
-import { anyOfflineProducer, planHolds } from "./stability";
+import { anyOfflineProducer, layoutHolds } from "./stability";
 
 /**
  * Right-sizing the finished layout: every building swapped for the smallest
@@ -188,7 +188,7 @@ export function downgradeOversized(
         if (
           covers(trial.totalPower, floor) &&
           !anyOfflineProducer(current, trial.placements) &&
-          planHolds(current, ctx)
+          layoutHolds(current, ctx)
         ) {
           power = trial.totalPower;
           rows = trial.placements;
@@ -223,7 +223,7 @@ export function downgradeOversized(
         if (
           covers(trial.totalPower, floor) &&
           !anyOfflineProducer(current, trial.placements) &&
-          planHolds(current, ctx)
+          layoutHolds(current, ctx)
         ) {
           power = trial.totalPower;
           rows = trial.placements;

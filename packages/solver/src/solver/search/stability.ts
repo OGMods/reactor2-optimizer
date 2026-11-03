@@ -2,11 +2,13 @@ import { EPS } from "../constants";
 import type { IslandContext } from "../context";
 import { type SimPlacedBuilding, simulateIsland } from "../simulate";
 import type { EffectiveBuilding, Placement } from "../types";
+import { trimToBudget, withinBudget } from "./cashLimit";
 import { isDirectProducer } from "./placement";
 
 /**
  * What makes a layout an answer: every producer online, at the target and at
- * every step of an upgrade plan. See the stability rule in `placementSearch.ts`.
+ * every step of an upgrade plan, within the island's cash limit. See the
+ * stability rule in `placementSearch.ts`.
  */
 
 /**
@@ -116,9 +118,13 @@ function planFailure(
   return null;
 }
 
-/** Whether the layout runs at every step of the island's plan. */
-export function planHolds(placement: Placement, ctx: IslandContext): boolean {
-  return planFailure(placement, ctx) === null;
+/**
+ * Whether the layout runs at every step of the island's plan and is within its
+ * cash limit — everything an answer has to be beyond stable at the target.
+ * Free when the island has neither.
+ */
+export function layoutHolds(placement: Placement, ctx: IslandContext): boolean {
+  return withinBudget(placement, ctx) && planFailure(placement, ctx) === null;
 }
 
 interface StableLayout {
@@ -135,6 +141,14 @@ interface StableLayout {
  * can push THEIR waste past what their coolers cover and take them offline in
  * turn. Power can legitimately fall as a result — a layout that only scores
  * well by parking heat in an overheating building is not a layout we want.
+ *
+ * Under a cash limit, once nothing is offline it steps the layout down until
+ * it fits (`trimToBudget`) and goes round again, since a cut can take a
+ * producer offline. Offline producers go first because they are going anyway:
+ * trimming first could cut a productive building to cover an overspend that
+ * stripping a dead one would have covered alone. Removing a building only ever
+ * lowers the spend, so nothing stripped afterwards can put the layout back
+ * over. Without a limit `trimToBudget` is a no-op and this is the plain loop.
  */
 export function stabilize(
   placement: Placement,
@@ -149,13 +163,16 @@ export function stabilize(
     // overheats at any step goes too, and so on until every step runs.
     if (offline.length === 0) offline = planFailure(current, ctx) ?? [];
     if (offline.length === 0) {
-      return {
-        placement: current,
-        power: sim.totalPower,
-        rows: sim.placements,
-      };
+      if (!trimToBudget(current, ctx)) {
+        return {
+          placement: current,
+          power: sim.totalPower,
+          rows: sim.placements,
+        };
+      }
+    } else {
+      for (const tile of offline) current[tile] = null;
     }
-    for (const tile of offline) current[tile] = null;
     sim = simulateIsland(current, ctx);
   }
 }

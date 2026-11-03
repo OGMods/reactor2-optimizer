@@ -49,8 +49,25 @@
     void uiState.readImportCode(uiState.importCode);
   });
 
-  const confirm = createConfirmArm<"replace">();
+  const confirm = createConfirmArm<"replace" | "onto">();
   onDestroy(() => confirm.disarm());
+
+  /*
+   * A share code drawn on one of the shipped maps can also land on that
+   * island, replacing its board — offered beside the new-slot import, never
+   * instead of it, and asked twice like every replace. Not held back by the
+   * custom-island cap, since it claims no slot.
+   */
+  let match = $derived(
+    !isGame && !isTransfer && uiState.importCode.trim()
+      ? uiState.importMatch
+      : null,
+  );
+
+  function importOnto() {
+    if (!match || uiState.isImporting) return;
+    if (confirm.press("onto")) void uiState.importOntoMatch();
+  }
 
   function submit() {
     if (!canSubmit) return;
@@ -247,11 +264,37 @@
       </div>
     {/if}
 
+    {#if match}
+      <div class="notice" role="status">
+        <AlertCircle size={16} />
+        <span>
+          This layout is drawn on {match.name}. Importing onto it replaces that
+          island's board.
+        </span>
+      </div>
+    {/if}
+
     {#if uiState.importError}
       <div class="notice error" role="alert">
         <AlertCircle size={16} />
         <span>{uiState.importError}</span>
       </div>
+    {/if}
+
+    {#if match}
+      <button
+        class="import-btn"
+        class:armed={confirm.armed === "onto"}
+        onclick={importOnto}
+        disabled={uiState.isImporting}
+      >
+        <Download size={16} />
+        <span>
+          {confirm.armed === "onto"
+            ? "Press again to replace"
+            : `Import onto ${match.name}`}
+        </span>
+      </button>
     {/if}
 
     <button

@@ -2,8 +2,11 @@ import type { OptimizationResult, PlacedBuilding, Tile } from "../types";
 import {
   DEFAULT_ANOMALY_ID,
   getAnomaly,
+  fitsBudget,
+  netSpend,
   type AnomalyDefinition,
   type AnomalyId,
+  type CashBudget,
 } from "@reactor2/solver";
 import {
   SolverWorkerClient,
@@ -102,6 +105,7 @@ export function chooseSolveVariants(
   fresh: OptimizationResult[],
   limit: number = MAX_SOLVE_VARIANTS,
   rank: (result: OptimizationResult) => number = (r) => r.totalPower,
+  budget?: CashBudget,
 ): { variants: OptimizationResult[]; selected: number; defended: boolean } {
   if (fresh.length === 0)
     return { variants: held, selected: heldIndex, defended: true };
@@ -132,8 +136,14 @@ export function chooseSolveVariants(
       variants.push(variant);
     }
     const onScreen = variants[selected];
-    // Stable, so equal costs keep held layouts ahead of fresh ones.
-    const ranked = cheapestFirst(variants, (v) => v.placements);
+    // Stable, so equal costs keep held layouts ahead of fresh ones. Under a
+    // cash limit the cost is the spend from the board standing, as the
+    // engine ranked them.
+    const ranked = cheapestFirst(
+      variants,
+      (v) => v.placements,
+      budget && ((placements) => netSpend(placements, budget)),
+    );
     return {
       variants: ranked,
       selected: ranked.indexOf(onScreen),
@@ -679,10 +689,15 @@ class SolverState {
    * have more than one layout at this power — empty otherwise, and the
    * whole-board cycler says everything there is to say. Under a shared
    * cooling pool the board is one island, so there is never more than one.
+   *
+   * None while a cash limit is set: each whole board was bought within it,
+   * but one landmass from each of two boards together may not be — the reason
+   * `#composeIslands` stands aside under a limit too.
    */
   get islandPickers(): IslandChoices[] {
     const result = this.optimizationResult;
-    if (!result || this.variants.length < 2) return [];
+    if (!result || this.variants.length < 2 || configState.cashLimit !== null)
+      return [];
     const { islandOf, tiles } = this.#islandIndex();
     const pickers = islandChoices(
       this.variants,
@@ -706,7 +721,7 @@ class SolverState {
    */
   showIslandLayout(island: number, delta: 1 | -1) {
     const result = this.optimizationResult;
-    if (!result) return;
+    if (!result || configState.cashLimit !== null) return;
     const { islandOf, tiles } = this.#islandIndex();
     const picker = islandChoices(
       this.variants,
@@ -1022,9 +1037,17 @@ class SolverState {
    * roster now give, as `rescoreResult` does for the island on screen. Like it,
    * this searches nothing, so a cleared obstacle shows up as room a re-run can
    * use rather than as a changed layout.
+   *
+   * `only` narrows the pass to the islands an import actually rewrote. A
+   * share code laid onto one island must not touch the others: their solves
+   * would otherwise be judged against the anomaly now in force and cleared,
+   * where `restore()` would have kept them.
    */
-  async carryOverSolves(locked: readonly string[]) {
-    for (const templateId of solverStorage.solveIds()) {
+  async carryOverSolves(
+    locked: readonly string[],
+    only: readonly string[] = solverStorage.solveIds(),
+  ) {
+    for (const templateId of only) {
       const saved = solverStorage.loadSolve(templateId);
       if (!saved) continue;
       const grid = locked.includes(templateId)
@@ -1233,11 +1256,14 @@ class SolverState {
    * genuinely can come back worse — which is the whole reason the choice is
    * put to the user (see `uiState.requestSolve`) rather than assumed.
    */
-  async runOptimizer(options: { keepBest?: boolean } = {}) {
+  async runOptimizer(
+    options: { keepBest?: boolean; cashBudget?: CashBudget } = {},
+  ) {
     if (this.isOptimizing) {
       this.stopOptimizer();
       return;
     }
+    const runBudget = options.cashBudget;
 
     // Captured before the panel starts streaming the new run over it. The
     // whole shortlist is held, not just the layout on screen: a run that comes
@@ -1247,9 +1273,21 @@ class SolverState {
     // A result with no shortlist behind it can only be a streaming snapshot
     // left by a run that failed, and it is not something to defend — falling
     // back to it would hand the next run a bar of nearly zero.
-    const previousVariants =
+    //
+    // Under a cash limit a held layout is a bar only if the player could buy
+    // it: one over the limit is an answer to a question nobody is asking.
+    const heldVariants =
       options.keepBest && this.variants.length > 0 ? this.variants : [];
-    const previousIndex = this.variantIndex;
+    const previousVariants = heldVariants.filter(
+      (v) => !runBudget || fitsBudget(v.placements, runBudget),
+    );
+    // The layout on screen, found again in the filtered list: the filter can
+    // shift it down, and an index into the unfiltered one would then follow a
+    // different layout. One the limit filtered out leaves the first held.
+    const previousIndex = Math.max(
+      0,
+      previousVariants.indexOf(heldVariants[this.variantIndex]),
+    );
 
     /*
      * The upgrade plan, resolved once at launch like the rules beside it.
@@ -1416,6 +1454,7 @@ class SolverState {
           anomalyId: this.#runAnomalyId,
           prestige: configState.prestige,
           upgradePlan: runPlan?.along,
+          cashBudget: runBudget,
         },
       );
       this.activeTask = handle;
@@ -1450,24 +1489,29 @@ class SolverState {
         // each run won some islands, the boards made of every island's winner
         // beat both, and stand in for the fresh run (`composeIslandBests`).
         // Scored against the board on screen, so only while it is this run's.
-        const composed = onScreen()
-          ? this.#composeIslands(
-              previousVariants,
-              finalVariants,
-              runGrid,
-              runPlan
-                ? runPlan.target
-                : $state.snapshot(configState.buildingUpgrades),
-              runAnomaly,
-              islandPower,
-            )
-          : null;
+        //
+        // Not under a cash limit: each board was bought within it, and one
+        // landmass of each together may not be.
+        const composed =
+          onScreen() && !runBudget
+            ? this.#composeIslands(
+                previousVariants,
+                finalVariants,
+                runGrid,
+                runPlan
+                  ? runPlan.target
+                  : $state.snapshot(configState.buildingUpgrades),
+                runAnomaly,
+                islandPower,
+              )
+            : null;
         const { variants, selected, defended } = chooseSolveVariants(
           previousVariants,
           previousIndex,
           composed ?? finalVariants,
           MAX_SOLVE_VARIANTS,
           rank,
+          runBudget,
         );
 
         // A defended layout keeps its own run's clock: it is still that solve,

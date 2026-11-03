@@ -65,6 +65,31 @@ The search side is in `docs/SOLVER.md`; the readout's plan line in
   uses. Null during a run and on a preview, which is someone else's board at
   their tiers.
 
+## The cash limit: the app side
+
+The search side is in `docs/SOLVER.md`.
+
+- **`configState.cashLimit` is a figure the player types**, persisted, null for
+  none. Never read off a game export: its cash is stale by the time anyone
+  solves.
+- **`uiState` builds the `CashBudget` at launch** (`#cashBudget`), because the
+  price research is on the timeline and `solverState` cannot read it. What
+  stands is `layoutState.placements` — the board in Edit is the player's, a
+  shown solve is not — and every other game island's copies come from
+  `timelineState.copiesOnOtherIslands()`, the same count step mode prices with,
+  read through the memo the island figures fill. Reading it makes the launch
+  asynchronous, so `#launching` refuses a second press until the run has
+  started, and a launch whose island was switched away in the meantime is
+  dropped rather than solving the new island within the old one's budget.
+- **A held layout over the limit defends nothing**: `runOptimizer` drops it from
+  `previousVariants`, so "keep the better one" never keeps an unaffordable board.
+  And **landmasses from two boards are not combined** under a limit: each board
+  fit it, and one landmass of each together may not. That covers both runs
+  (`#composeIslands`) and the player's own mixing — `islandPickers` is empty
+  while a limit is set.
+- **Solve all is hidden** while a limit is set (`canSolveAll`): one figure
+  cannot be handed to every island in turn.
+
 ## The stores
 
 **`layoutState` imports nothing from the rest of the state layer.** It is the
@@ -299,6 +324,24 @@ keeping them apart is the point.**
   eight islands through it would evict it each time. Answers are memoised by
   board code and rules, and the board on screen is skipped, since it is re-saved
   after every paint. Custom islands and a previewed layout are not counted.
+- **`islands` and `copies` ride on the same pass.** `refreshIslands` also reads
+  each saved board's building counts and terrain (`simulation/islandStats.ts`),
+  memoised by code alone since neither depends on the rules; the board on
+  screen is derived live, by the same rule as its power. `copies` sums them
+  over every game island, which is what a price climbs with, so the HUD
+  ribbon's and the Buildings card's "next copy" price and `IslandStatsModal`
+  all read one count. `priceRules` comes off the last import's research, the
+  base rules with none — the same fallback the cash limit takes. The same
+  pass scores each board's idle and overheating buildings (`boardHealth`) and
+  keeps each stored solve's counts, so an island's `solveCost` is
+  `changeSpend` from its board to its solve, the other islands' copies
+  counting towards every price.
+- **Obstacle figures read the game's boards when imported.** Cleared counts
+  are the map's obstacles less what stands on the import's board — a board
+  here may be a plan — and `obstacleClearing` prices the next clear by the
+  whole save's count (5 min × 1.025 per clear, less Clearance Crews and Phase
+  Breaker, finished free inside Erased from Time's window). The player
+  confirmed it against the game.
 - **`projection` is the game's, run forward.** It is the last import's timeline
   carried from `exportedAt` to `now` at `record.energyPerTick` — the power the
   game's own boards made, scored at import from the _resolved_ levels rather than
@@ -365,8 +408,9 @@ move steps and their prices — works the same either way.
 
 What to buy with the Chronons a jump leaves. The levels are the game's, read off
 the import (`timelineState.timeLabLevels`); the plan is extra levels on top
-(`timeLabPlan`), kept for the session and cleared by an import, since it is
-priced against the levels the last code reported. **The budget is the target's**
+(`timeLabPlan`), kept for the session and cleared by an import that changes
+what it was priced against — a jump, another anomaly, levels bought, less power
+(`continuesRun`); a later code from the same run keeps it, and the target too. **The budget is the target's**
 — `targetEta.held`, what the panel says a jump would leave — plus the +88 when
 `planWithBonus` is set and an anomaly is left to earn it, so moving the target
 re-prices the plan.
@@ -392,27 +436,35 @@ they say they are. The clears come from the game's board as imported
 game. Prices count each building's copies on the boards here, this island from
 Edit. The kinds are what the game
 allows: a building can be **moved** (paired with one of its kind wanted
-elsewhere, nearest first) and put down **on top of another** (a tile whose
-building changes is one **replace**); the rest are sells and builds, and clears
-lead. When the island changes almost entirely, one **sell everything** and the
-builds is the shorter route, and whichever route is shorter is planned.
+elsewhere, nearest first), two can trade tiles in one **swap** (so moves never
+block each other and nothing is sold to be rebuilt, even with no free tile), and
+one can be put down **on top of another** (a tile whose building changes is one
+**replace**); the rest are sells and builds, and clears
+lead. When **nothing** on the island survives into the target, one **sell
+everything** and the builds may be the shorter route, and is then planned; one
+building kept or moved rules it out, since selling it at a share of its price and
+buying it back at the next copy's loses cash a step saved is not worth — under a
+cash limit, enough to put the steps over a budget the layout itself fits.
 
 **As few steps as it takes.** Of a solve's tied layouts, the one nearest the
 island (`stepCount`) is put on screen and aimed at. The order is greedy on power
 — each step takes the available action that leaves the most — so the gains come
 first, and the plan **stops at the solve's power** (`stopAtPower`, scored by the
 same scorer): what would be left only rearranges buildings, and the last step
-says so. An island already at the solve's power gets no plan, just a toast.
+says so. **Under a cash limit cash comes first** (`PlanOptions.cash`): no step
+may take the cash needed at once past what the whole change costs net, so a
+sale that pays for a build comes before it and a layout that fits the limit
+never has a step that does not; power orders the steps that fit. An island already at the solve's power gets no plan, just a toast.
 Every candidate is scored by `createBoardScorer` — one island context, each
 building's rating per tile cached — ~0.2ms a board; the planner yields every 30ms
 and reports progress.
 
 **Step mode shows the one building a step is about.** The canvas fades every
 other building, pad and badge to 40% (`GridRenderer.setFocus`) and draws the
-step's own a little larger, drops the state and anomaly icons and the pulse,
-outlines the step's tiles on the ground beneath their buildings and draws a
-move as an arrow over everything. The fill gauges stay: how hard each building works after a step is half
-of what the step is for, and with them gone players read the board as broken.
+step's own a little larger, drops the fill gauges, the state and anomaly icons
+and the pulse, outlines the step's tiles on the ground beneath their buildings
+and draws a move as an arrow over everything — a swap as two, side by side. The
+step bar carries the power.
 
 **Step mode is a sub-mode of the solver view.** While `stepsActive`,
 `visiblePlacements` is the scored board after the step on screen, so the canvas,
@@ -692,6 +744,16 @@ because `renderTileVisuals` clears those whenever a tile's state changes.
 deliberately does not overwrite the current custom island, since that would be a
 destructive act with no undo behind a button marked "Import". At
 `MAX_CUSTOM_ISLANDS` it refuses and says so.
+
+**A code drawn on a shipped map may also land there, beside that default.**
+`layoutState.matchingTemplate` recognises a board that is a shipped map with
+nothing changed but obstacles cleared (`sameMap`) — exactly what a saved layout
+on that island can be, so writing it there keeps the fixed-map rule.
+`importOntoTemplate` writes it through `importGameIslands`, and Import offers it
+as a second button behind two presses, since it replaces that island's board.
+The island's solve goes through `carryOverSolves`, as after a game import —
+narrowed to that island, so no other island's solve is judged by it.
+`state/importOnto.test.ts` pins the match and the refusals.
 
 **A game code is the one exception, and it keeps the rule.** The game's Export to
 Optimizer button writes an `R2X1.` code (`encoding/gameExport.ts`; the spec the

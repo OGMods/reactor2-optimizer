@@ -138,6 +138,13 @@ describe("carrying stored solves through a game import", () => {
     expect(solverStorage.loadSolve(ISLAND)).toBeNull();
   });
 
+  it("leaves islands outside `only` alone", async () => {
+    // A share code laid onto another island must not judge this one's solve.
+    stage([layout(0)], 0, "cryo_nexus");
+    await solverState.carryOverSolves([], ["island2"]);
+    expect(solverStorage.loadSolve(ISLAND)?.anomalyId).toBe("cryo_nexus");
+  });
+
   it("drops only the layouts an imported obstacle now covers", async () => {
     stage([layout(0), layout(1), layout(2)], 1);
     await rockOn(0);

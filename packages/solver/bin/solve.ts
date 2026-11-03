@@ -43,6 +43,7 @@ import {
   resolveUpgradePlan,
   type UpgradeStep,
 } from "../src/data/upgradePlan";
+import { netSpend, priceRules } from "../src/data/buildingPrices";
 import { prestigeScales } from "../src/data/prestige";
 import {
   blueprintKey,
@@ -60,11 +61,16 @@ import {
 } from "../src/solver/solver";
 import type {
   AnomalyId,
+  CashBudget,
   IslandLayout,
   OptimizationResult,
   Tile,
 } from "../src/solver/types";
-import { formatNumberForFilename } from "../src/utils/formatters";
+import {
+  formatNumber,
+  formatNumberForFilename,
+  parseHugeNumber,
+} from "../src/utils/formatters";
 import { Leaderboard } from "./leaderboard";
 import { DEFAULT_MAP_NUM, MAPS, MAPS_BY_NUM, type CliMap } from "./maps";
 import { WorkerPool } from "./pool";
@@ -158,6 +164,31 @@ interface Progress {
   research: Record<string, number>;
   /** The plan's rosters before its target, today's first — `resolveUpgradePlan`'s `along`. */
   upgradePlan: Record<string, number>[];
+  /** `--cash`, when given. */
+  cash?: number;
+  /** The cash limit on the board being solved — `withBudget` fills it per board. */
+  cashBudget?: CashBudget;
+}
+
+/**
+ * `progress` with the cash limit for one board, whose own placements are what
+ * stands: a `--code` board's buildings are kept for free, a shipped map's
+ * none. There are no other islands here, so nothing is counted elsewhere.
+ */
+function withBudget(
+  progress: Progress,
+  standing: CashBudget["standing"],
+): Progress {
+  if (progress.cash === undefined) return progress;
+  return {
+    ...progress,
+    cashBudget: {
+      cash: progress.cash,
+      standing: standing.map(({ x, y, buildingId }) => ({ x, y, buildingId })),
+      elsewhere: {},
+      prices: priceRules(progress.research),
+    },
+  };
 }
 
 // --- Solving -------------------------------------------------------------
@@ -190,6 +221,7 @@ async function solveWithPool(
     anomalyId,
     prestigeScales(progress.research),
     progress.upgradePlan,
+    progress.cashBudget,
   );
   if (!plan || plan.islands.length < 2 || !pool || pool.size < 2)
     return solve(
@@ -201,6 +233,7 @@ async function solveWithPool(
         anomalyId,
         prestige: prestigeScales(progress.research),
         upgradePlan: progress.upgradePlan,
+        cashBudget: progress.cashBudget,
       },
       seed,
     );
@@ -228,6 +261,7 @@ async function solveWithPool(
         // the same string.
         anomaly: plan.anomaly,
         upgradeSteps: plan.upgradeSteps,
+        cashBudget: plan.cashBudget,
       },
     })),
     (i, result) => {
@@ -295,10 +329,11 @@ async function solveMap(
   filenameFor: (run: SolveRun, bestPower: number) => string,
   seed: number | undefined,
   anomalyId: AnomalyId | undefined,
-  progress: Progress,
+  boardProgress: Progress,
   pool: WorkerPool | null,
 ): Promise<SolveRun[]> {
-  const { grid } = await decodeBlueprint(gameMap.code);
+  const { grid, placements } = await decodeBlueprint(gameMap.code);
+  const progress = withBudget(boardProgress, placements);
   const roster = getEffectiveBuildings(
     BUILDINGS,
     unlockedUpgrades,
@@ -335,6 +370,10 @@ async function solveMap(
     b.result.totalPower > a.result.totalPower ? b : a,
   );
   verify(grid, roster, best.result);
+  if (progress.cashBudget !== undefined)
+    console.log(
+      `Spend: ${formatNumber(netSpend(best.result.placements, progress.cashBudget))} of ${formatNumber(progress.cashBudget.cash)}`,
+    );
   return results;
 }
 
@@ -423,10 +462,11 @@ function workerCount(attempts: number, requested?: number): number {
 async function runSession(
   gameMap: CliMap,
   unlockedUpgrades: Record<string, number>,
-  progress: Progress,
+  boardProgress: Progress,
   args: Args,
 ): Promise<SessionReport> {
-  const { grid } = await decodeBlueprint(gameMap.code);
+  const { grid, placements } = await decodeBlueprint(gameMap.code);
+  const progress = withBudget(boardProgress, placements);
   const roster = getEffectiveBuildings(
     BUILDINGS,
     unlockedUpgrades,
@@ -477,6 +517,7 @@ async function runSession(
         anomalyId: args.anomalyId,
         prestige: prestigeScales(progress.research),
         upgradePlan: progress.upgradePlan,
+        cashBudget: progress.cashBudget,
       },
     })),
     (attempt, raw) => {
@@ -551,12 +592,14 @@ interface Args {
   plan: UpgradeStep[];
   /** A pasted board to solve instead of a shipped map. */
   code: string | undefined;
+  /** A cash limit on what the run may spend. */
+  cash: number | undefined;
 }
 
 const USAGE = `usage: solve [-h] [--map NUM] [--all] [--runs RUNS] [--time TIME_LIMIT_S]
              [--attempts N] [--top K] [--workers N] [--seed SEED]
              [--anomaly ID] [--tier ID=LEVEL] [--plan ID=LEVEL]
-             [--code BLUEPRINT]
+             [--code BLUEPRINT] [--cash AMOUNT]
 
 Decode a map, solve it, and report on the result.
 
@@ -591,7 +634,13 @@ options:
                  solve a pasted board instead of a shipped map. Its rules
                  section, when it has one, supplies the anomaly (unless
                  --anomaly is given) and the Time Lab research; placements
-                 on it are ignored
+                 on it are ignored, unless --cash is given
+  --cash AMOUNT  maximise power within a cash limit: what changing the board
+                 into the layout may cost, net of sale refunds, at the base
+                 prices less the code's research. AMOUNT is a number, e-notation
+                 or the game's ladder (15AC). A --code board's buildings stand
+                 already and cost nothing to keep or move; a shipped map starts
+                 empty
 
 This renders no picture. Each run writes its blueprint code to solves/, named
 after what it found and after the anomaly it found it under; paste one into the
@@ -612,6 +661,7 @@ function parseArgs(argv: string[]): Args | null {
     tiers: {},
     plan: [],
     code: undefined,
+    cash: undefined,
   };
 
   const takeValue = (
@@ -718,6 +768,12 @@ function parseArgs(argv: string[]): Args | null {
         [raw, i] = takeValue(flag, inline, i);
         args.code = raw;
         break;
+      case "--cash":
+        [raw, i] = takeValue(flag, inline, i);
+        args.cash = parseHugeNumber(raw);
+        if (!Number.isFinite(args.cash) || args.cash < 0)
+          throw new Error(`argument ${flag}: invalid amount: '${raw}'`);
+        break;
       case "--tier":
       case "--plan": {
         [raw, i] = takeValue(flag, inline, i);
@@ -787,7 +843,9 @@ export async function main(argv: string[]): Promise<number> {
     console.error("--plan raises nothing: no step is above its --tier");
     return 1;
   }
-  const progress: Progress = { research, upgradePlan };
+  const progress: Progress = { research, upgradePlan, cash: args.cash };
+  if (args.cash !== undefined)
+    console.log(`Cash limit: ${formatNumber(args.cash)}`);
   if (Object.keys(research).length)
     console.log(
       `Research: ${Object.entries(research)

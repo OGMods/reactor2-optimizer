@@ -1,3 +1,4 @@
+import type { CashBudget } from "../solver/types";
 import { findBuilding } from "./buildings";
 import { TIME_LAB } from "./timeLab";
 
@@ -108,15 +109,116 @@ export function layoutCost(
   layout: readonly { buildingId: string }[],
   rules: PriceRules = BASE_RULES,
 ): number {
-  const copies = new Map<string, number>();
-  for (const p of layout)
-    copies.set(p.buildingId, (copies.get(p.buildingId) ?? 0) + 1);
   let cost = 0;
-  for (const [id, n] of copies) {
+  for (const [id, n] of Object.entries(countBuildings(layout))) {
     const base = findBuilding(id)?.price ?? 0;
     for (let k = 0; k < n; k++) cost += buildPrice(base, k, rules);
   }
   return cost;
+}
+
+/** Building id to how many stand. */
+export type BuildingCounts = Record<string, number>;
+
+/** How many of each building a list holds. */
+export function countBuildings(
+  list: readonly { buildingId: string }[],
+): BuildingCounts {
+  const counts: BuildingCounts = {};
+  for (const p of list) counts[p.buildingId] = (counts[p.buildingId] ?? 0) + 1;
+  return counts;
+}
+
+/**
+ * The one statement of the rule: what changing a board holding `before` into
+ * one holding `after` costs, net of what the sales pay back.
+ *
+ * Moves are free, so no type is sold and rebuilt: a type whose count rises
+ * buys each new copy at the next copy's price, one whose count falls refunds
+ * each sale at the current one, and the order between types changes nothing.
+ * Copies on the player's other islands (`elsewhere`) count towards every
+ * price. `scale` is the sum of each type's net taken unsigned — the size of
+ * the terms, which "within budget" is judged against.
+ */
+function changeTerms(
+  after: Readonly<BuildingCounts>,
+  before: Readonly<BuildingCounts>,
+  elsewhere: Readonly<BuildingCounts>,
+  rules: PriceRules,
+): { spend: number; scale: number } {
+  let spend = 0;
+  let scale = 0;
+  for (const id of new Set([...Object.keys(after), ...Object.keys(before)])) {
+    const base = findBuilding(id)?.price ?? 0;
+    const others = elsewhere[id] ?? 0;
+    const c = before[id] ?? 0;
+    const t = after[id] ?? 0;
+    let term = 0;
+    for (let k = c; k < t; k++) {
+      const p = buildPrice(base, others + k, rules);
+      spend += p;
+      term += p;
+    }
+    for (let k = c; k > t; k--) {
+      const r = sellRefund(base, others + k, rules);
+      spend -= r;
+      term -= r;
+    }
+    scale += Math.abs(term);
+  }
+  return { spend, scale };
+}
+
+/** `changeTerms`' net spend, read off counts rather than placements. */
+export function countsSpend(
+  after: Readonly<BuildingCounts>,
+  before: Readonly<BuildingCounts>,
+  elsewhere: Readonly<BuildingCounts>,
+  rules: PriceRules,
+): number {
+  return changeTerms(after, before, elsewhere, rules).spend;
+}
+
+/**
+ * What turning the board `budget.standing` holds into `layout` costs, net of
+ * what the sales pay back — the figure a cash limit is on. See `changeTerms`.
+ */
+export function netSpend(
+  layout: readonly { buildingId: string }[],
+  budget: CashBudget,
+): number {
+  return countsSpend(
+    countBuildings(layout),
+    countBuildings(budget.standing),
+    budget.elsewhere,
+    budget.prices,
+  );
+}
+
+/**
+ * Relative slack for "within budget": a net spend sums buys and refunds
+ * across thirty orders of magnitude, so it is compared against the size of
+ * its own terms rather than exactly. The engine's `countsFit`
+ * (`solver/search/cashLimit.ts`) applies the same rule to the same terms.
+ */
+const SPEND_RELATIVE_TOLERANCE = 1e-9;
+
+/** Whether `layout` is within `budget`'s cash, by the engine's own test. */
+export function fitsBudget(
+  layout: readonly { buildingId: string }[],
+  budget: CashBudget,
+): boolean {
+  const { spend, scale } = changeTerms(
+    countBuildings(layout),
+    countBuildings(budget.standing),
+    budget.elsewhere,
+    budget.prices,
+  );
+  return (
+    spend <=
+    budget.cash +
+      SPEND_RELATIVE_TOLERANCE * Math.max(scale, Math.abs(budget.cash))
+  );
 }
 
 /**
@@ -132,20 +234,23 @@ const COST_TIE_RELATIVE_TOLERANCE = 1e-9;
  * layout leaving more of the land empty wins. Stable, so layouts neither
  * figure separates keep the order they came in.
  *
- * Each layout is costed once, not once per comparison.
+ * Each layout is costed once, not once per comparison. `costOf` replaces
+ * `layoutCost` where cost means something else — under a cash limit, what the
+ * layout spends from the board standing.
  */
-export function cheapestFirst<T>(
+export function cheapestFirst<T, P extends { buildingId: string }>(
   items: readonly T[],
-  placementsOf: (item: T) => readonly { buildingId: string }[],
+  placementsOf: (item: T) => readonly P[],
+  costOf: (placements: readonly P[]) => number = layoutCost,
 ): T[] {
   return items
     .map((item) => {
       const placements = placementsOf(item);
-      return { item, cost: layoutCost(placements), count: placements.length };
+      return { item, cost: costOf(placements), count: placements.length };
     })
     .sort((a, b) =>
       Math.abs(a.cost - b.cost) >
-      COST_TIE_RELATIVE_TOLERANCE * Math.max(a.cost, b.cost)
+      COST_TIE_RELATIVE_TOLERANCE * Math.max(Math.abs(a.cost), Math.abs(b.cost))
         ? a.cost - b.cost
         : a.count - b.count,
     )

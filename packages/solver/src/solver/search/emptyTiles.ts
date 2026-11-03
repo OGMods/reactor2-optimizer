@@ -3,7 +3,7 @@ import { type SimPlacedBuilding, simulateIsland } from "../simulate";
 import type { EffectiveBuilding, Placement } from "../types";
 import { chebyshev, emptyPlacement, put } from "./placement";
 import { covers } from "./rightSize";
-import { anyOfflineProducer, planHolds } from "./stability";
+import { anyOfflineProducer, layoutHolds } from "./stability";
 
 /**
  * Pushing the tiles a finished layout leaves empty out to the edge of the land
@@ -156,7 +156,7 @@ export function gatherEmptyTiles(
           covers(trial.totalPower, floor) &&
           !anyOfflineProducer(current, trial.placements) &&
           idleCount(current, trial.placements) <= idleFloor &&
-          planHolds(current, ctx)
+          layoutHolds(current, ctx)
         ) {
           changed = true;
           moved = true;

@@ -105,6 +105,7 @@ export class SolverCoordinator {
       options?.anomalyId,
       options?.prestige,
       options?.upgradePlan,
+      options?.cashBudget,
     );
     if (!plan)
       return [createEmptyResult(grid?.[0]?.length ? countGrassTiles(grid) : 0)];
@@ -152,7 +153,9 @@ export class SolverCoordinator {
     }
 
     /** The answer per island: finished attempts only. */
-    const finals = plan.islands.map(() => new IslandBest());
+    const finals = plan.islands.map(
+      () => new IslandBest(undefined, plan.cashBudget),
+    );
 
     /*
      * What the screen shows while the run is in flight — the best anything has
@@ -333,6 +336,9 @@ export class SolverCoordinator {
           upgradeSteps: plan.upgradeSteps?.length
             ? plan.upgradeSteps
             : undefined,
+          // Absent without a limit; with one the board is a single island, so
+          // its standing board's coordinates are already that island's.
+          cashBudget: plan.cashBudget,
           // Every attempt needs its own random stream — running the same walk
           // ten times over would only cost ten times as much. An unseeded run
           // gets a fresh stream per task already; a seeded one is offset so it

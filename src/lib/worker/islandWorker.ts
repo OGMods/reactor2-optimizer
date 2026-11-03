@@ -45,6 +45,7 @@ self.addEventListener(
         req.rngSeed,
         getAnomaly(req.anomalyId),
         req.upgradeSteps,
+        req.cashBudget,
       );
       post({
         id: req.id,

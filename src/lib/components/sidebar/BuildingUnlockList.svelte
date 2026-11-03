@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { configState, uiState } from "../../state";
+  import { configState, timelineState, uiState } from "../../state";
   import { BUILDINGS, buildingCategory } from "@reactor2/solver";
+  import { buildingPricing } from "../../simulation/islandStats";
   import { Cpu, Zap, Snowflake, Lock, Unlock } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import BuildingUnlockCard from "./BuildingUnlockCard.svelte";
   import UpgradePlanSummary from "./UpgradePlanSummary.svelte";
+  import CashLimitRow from "./CashLimitRow.svelte";
   import { createConfirmArm } from "../confirmArm.svelte";
 
   /**
@@ -33,6 +35,10 @@
   let filteredBuildings = $derived(
     BUILDINGS.filter((b) => buildingCategory(b.type) === uiState.catalogTab),
   );
+
+  // Read once for the list: `copies` walks every island.
+  let copies = $derived(timelineState.copies);
+  let rules = $derived(timelineState.priceRules);
 </script>
 
 <div class="section-box">
@@ -87,6 +93,7 @@
     every screen of it.
   -->
   <UpgradePlanSummary />
+  <CashLimitRow />
 
   <div class="utility-row">
     <button class="action-btn" onclick={() => configState.unlockAll()}>
@@ -115,6 +122,7 @@
         enabled={configState.isBuildingEnabled(bld.id)}
         selectedUpgrade={configState.buildingUpgrades[bld.id] ?? 0}
         plannedUpgrade={configState.plannedLevel(bld.id)}
+        pricing={buildingPricing(bld.id, copies[bld.id] ?? 0, rules)}
         onToggle={() => configState.toggleBuilding(bld.id)}
         onUpgradeChange={(level) => configState.setUpgradeLevel(bld.id, level)}
       />

@@ -9,7 +9,7 @@ import {
   type EffectiveBuilding,
   type PrestigeScales,
 } from "@reactor2/solver";
-import { unscoredPlacement } from "../data/placements";
+import { placementStatus, unscoredPlacement } from "../data/placements";
 import type { BuildingDefinition, PlacedBuilding, Tile } from "../types";
 
 /**
@@ -196,6 +196,43 @@ export function boardPower(
   if (ctx.n === 0) return 0;
   const { placement } = layoutFor(ctx, buildings, placedBuildings, prestige);
   return simulateIsland(placement, ctx).totalPower;
+}
+
+/** A board's power, and how many of its buildings are not working. */
+export interface BoardHealth {
+  power: number;
+  /** Buildings doing nothing: no neighbour to work with. */
+  idle: number;
+  /** Buildings overheating: their waste heat is not cooled. */
+  starved: number;
+}
+
+/**
+ * `boardPower` with the buildings' states counted as well, by the readout's
+ * own rule (`placementStatus`). Its own context for the same reason.
+ */
+export function boardHealth(
+  grid: Tile[][],
+  buildings: readonly BuildingDefinition[],
+  placedBuildings: readonly PlacedBuilding[],
+  prestige?: PrestigeScales,
+  anomaly: AnomalyDefinition = getAnomaly(undefined),
+): BoardHealth {
+  const health: BoardHealth = { power: 0, idle: 0, starved: 0 };
+  if (!grid?.length || !grid[0]?.length || placedBuildings.length === 0) {
+    return health;
+  }
+  const ctx = buildIslandContext(grid, undefined, anomaly);
+  if (ctx.n === 0) return health;
+  const { placement } = layoutFor(ctx, buildings, placedBuildings, prestige);
+  const scored = simulateIsland(placement, ctx, true);
+  health.power = scored.totalPower;
+  for (const row of scored.placements) {
+    const status = placementStatus(row);
+    if (status === "idle") health.idle++;
+    else if (status === "starved") health.starved++;
+  }
+  return health;
 }
 
 /**

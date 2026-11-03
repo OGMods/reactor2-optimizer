@@ -1,22 +1,37 @@
 <script lang="ts">
+  import { formatNumber } from "@reactor2/solver";
+  import type { BuildingPricing } from "../../simulation/islandStats";
   import type { BuildingDefinition } from "../../types";
   import { asset } from "../../utils";
 
   interface Props {
     building: BuildingDefinition;
     upgradeLevel: number;
+    /** Its price and copies across every island — see `buildingPricing`. */
+    pricing: BuildingPricing;
     isActive: boolean;
     onSelect: () => void;
   }
 
-  let { building, upgradeLevel, isActive, onSelect }: Props = $props();
+  let { building, upgradeLevel, pricing, isActive, onSelect }: Props = $props();
+
+  /*
+   * The chip has room for the next copy's price and the count, which are what
+   * a player buying one needs; the base price is in the tooltip and on the
+   * Buildings tab's card.
+   */
+  let title = $derived(
+    `${building.name}\nNext copy: ${formatNumber(pricing.next)}\n` +
+      `Base price: ${formatNumber(pricing.base)}\n` +
+      `Built on all islands: ${pricing.built}`,
+  );
 </script>
 
 <button
   class="bld-item-btn"
   class:active={isActive}
   onclick={onSelect}
-  title={building.name}
+  {title}
   aria-pressed={isActive}
 >
   <div class="icon-wrapper">
@@ -24,7 +39,19 @@
     <img src={asset(`icons/${building.id}.webp`)} alt="" class="bld-icon" />
   </div>
   <span class="bld-name">{building.name}</span>
-  <span class="bld-level">Lvl {upgradeLevel + 1}</span>
+  <span class="bld-level"
+    >Lvl {upgradeLevel + 1}{#if pricing.built > 0}<span class="bld-built"
+        >&nbsp;×{pricing.built}</span
+      >{/if}</span
+  >
+  <span class="bld-price">
+    <img
+      src={asset("icons/icon_cash.webp")}
+      alt="Next copy"
+      class="cash-icon"
+    />
+    {formatNumber(pricing.next)}
+  </span>
 </button>
 
 <style>
@@ -90,5 +117,26 @@
     font-size: var(--fs-2xs);
     color: var(--text-dim);
     font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .bld-built {
+    font-weight: 600;
+  }
+
+  .bld-price {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    font-size: var(--fs-2xs);
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .cash-icon {
+    width: 11px;
+    height: 11px;
+    object-fit: contain;
   }
 </style>

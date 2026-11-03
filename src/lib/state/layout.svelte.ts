@@ -939,6 +939,57 @@ class LayoutState {
   }
 
   /**
+   * The shipped island a share code is drawn on, or null. A match is a board
+   * a shipped island could become: the same size, and every tile its map's —
+   * or grass where the map has an obstacle, cleared. Those are the only
+   * changes a fixed map allows, so a matching code can land on that island
+   * without breaking the rule; anything else still needs a custom slot.
+   */
+  async matchingTemplate(code: string): Promise<IslandTemplate | null> {
+    let decoded: DecodedBlueprint;
+    try {
+      decoded = await decodeBlueprint(code.trim());
+    } catch {
+      return null;
+    }
+    for (const template of ISLAND_TEMPLATES) {
+      const map = await this.#decodeTemplate(template);
+      if (map && sameMap(map, decoded)) return template;
+    }
+    return null;
+  }
+
+  /**
+   * Puts a share code on the shipped island it matches (`matchingTemplate`),
+   * replacing that island's board, and opens it. The caller asks twice: the
+   * board it replaces has no undo once another board is on screen.
+   *
+   * Written as a game import writes its islands — the code's own grid is the
+   * map with some obstacles cleared, which is exactly a saved layout.
+   *
+   * Throws with a message meant to be shown as-is.
+   */
+  async importOntoTemplate(
+    code: string,
+    templateId: string,
+    unlockedUpgrades: Record<string, number>,
+  ) {
+    const template = ISLAND_TEMPLATES.find((t) => t.id === templateId);
+    const decoded = await decodeBlueprint(code.trim()).catch(() => null);
+    const map = template ? await this.#decodeTemplate(template) : null;
+    if (!template || !decoded || !map || !sameMap(map, decoded)) {
+      throw new Error("That code is not drawn on that island.");
+    }
+    await this.importGameIslands(
+      [{ templateId, grid: decoded.grid, placements: decoded.placements }],
+      unlockedUpgrades,
+    );
+    if (this.activeTemplateId !== templateId) {
+      await this.loadTemplate(template, unlockedUpgrades);
+    }
+  }
+
+  /**
    * Every board as storage holds it, with the one on screen encoded now
    * rather than whenever its queued save lands — what a transfer code sends.
    */
@@ -1378,6 +1429,23 @@ class LayoutState {
     this.#anomaly = anomaly;
     this.recalculate();
   }
+}
+
+/**
+ * Whether `board` is `map` with nothing changed but obstacles cleared: the
+ * same size, and every tile the map's own or grass where the map has an
+ * obstacle. See `LayoutState.matchingTemplate`.
+ */
+function sameMap(map: DecodedBlueprint, board: DecodedBlueprint): boolean {
+  if (map.width !== board.width || map.height !== board.height) return false;
+  return map.grid.every((row, y) =>
+    row.every((tile, x) => {
+      const type = board.grid[y]?.[x]?.type;
+      return (
+        type === tile.type || (type === "grass" && isObstacleType(tile.type))
+      );
+    }),
+  );
 }
 
 export const layoutState = new LayoutState();

@@ -37,12 +37,21 @@
   /** The plan in one line: how many of each kind of step. */
   let summary = $derived.by(() => {
     if (!m) return "";
-    const n = { move: 0, replace: 0, build: 0, sell: 0, clear: 0, sellAll: 0 };
+    const n = {
+      move: 0,
+      swap: 0,
+      replace: 0,
+      build: 0,
+      sell: 0,
+      clear: 0,
+      sellAll: 0,
+    };
     for (const s of m.plan.steps) n[s.kind]++;
     return [
       n.clear && `${n.clear} to clear`,
       n.sellAll && "sell everything",
       n.move && `${n.move} to move`,
+      n.swap && `${n.swap} to swap`,
       n.replace && `${n.replace} to replace`,
       n.build && `${n.build} to build`,
       n.sell && `${n.sell} to sell`,
@@ -91,6 +100,8 @@
     switch (s.kind) {
       case "move":
         return `Move ${nameOf(s.buildingId)} from ${at(s.from.x, s.from.y)} to ${at(s.to.x, s.to.y)}`;
+      case "swap":
+        return `Swap ${nameOf(s.a.buildingId)} at ${at(s.a.x, s.a.y)} with ${nameOf(s.b.buildingId)} at ${at(s.b.x, s.b.y)}`;
       case "build":
         return `Build ${nameOf(s.buildingId)} at ${at(s.x, s.y)}`;
       case "replace":
@@ -115,6 +126,8 @@
         return null;
       case "replace":
         return asset(`icons/${s.to}.webp`);
+      case "swap":
+        return asset(`icons/${s.a.buildingId}.webp`);
       default:
         return asset(`icons/${s.buildingId}.webp`);
     }

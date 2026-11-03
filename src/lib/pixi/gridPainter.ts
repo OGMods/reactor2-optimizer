@@ -953,15 +953,28 @@ export class GridRenderer {
     }
     // A move is also an arrow from the tile it leaves to the one it takes,
     // stopping short of the target's centre so the head sits on its edge.
+    // A swap is two arrows over the same line, so each is drawn off to its
+    // own right: opposite arrows land side by side, each head on show.
+    const paired = (from: { x: number; y: number }, to: typeof from) =>
+      arrows.some(
+        (o) =>
+          o.from.x === to.x &&
+          o.from.y === to.y &&
+          o.to.x === from.x &&
+          o.to.y === from.y,
+      );
     for (const { from, to } of arrows) {
-      const a = gridToIso(from.x, from.y);
-      const b = gridToIso(to.x, to.y);
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
+      const a0 = gridToIso(from.x, from.y);
+      const b0 = gridToIso(to.x, to.y);
+      const dx = b0.x - a0.x;
+      const dy = b0.y - a0.y;
       const len = Math.hypot(dx, dy);
       if (len < 1) continue;
       const ux = dx / len;
       const uy = dy / len;
+      const side = paired(from, to) ? 9 : 0;
+      const a = { x: a0.x - uy * side, y: a0.y + ux * side };
+      const b = { x: b0.x - uy * side, y: b0.y + ux * side };
       const tip = {
         x: b.x - ux * (TILE_HEIGHT / 3),
         y: b.y - uy * (TILE_HEIGHT / 3),

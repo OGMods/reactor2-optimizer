@@ -7,13 +7,14 @@ import type {
   Tile,
 } from "../types";
 import { isObstacleType } from "../types/grid";
-import type { BuildingCategory } from "@reactor2/solver";
+import type { BuildingCategory, CashBudget } from "@reactor2/solver";
 import { buildShareUrl, clearSharedCode } from "../encoding/shareLink";
 import {
   buildTransferUrl,
   clearTransferLink,
   decodeTransfer,
   encodeTransfer,
+  isTransferCode,
   readTransferLink,
   type TransferBundle,
   type TransferSolve,
@@ -28,7 +29,6 @@ import {
   encodeBlueprint,
   findBuilding,
   getAnomaly,
-  priceRules,
   sellRefund,
   decodeGameExport,
   formatNumberForFilename,
@@ -90,6 +90,7 @@ type ActiveModal =
   | "timeLab"
   | "transfer"
   | "transferIn"
+  | "islandStats"
   | null;
 
 /**
@@ -522,6 +523,12 @@ class UIState {
    */
   gameImport = $state<ResolvedGameImport | null>(null);
   /**
+   * The shipped island a pasted share code is drawn on, when it is one
+   * (`layoutState.matchingTemplate`) — which lets the dialog offer to put it
+   * on that island as well as in a new custom slot.
+   */
+  importMatch = $state<IslandTemplate | null>(null);
+  /**
    * The same code as the game wrote it. The resolver translates what a board
    * needs and drops the rest — the economy research, the timeline — which
    * `timelineState.recordImport` keeps.
@@ -852,7 +859,51 @@ class UIState {
    */
   #beginSolve(options: { keepBest?: boolean } = {}) {
     this.setSheetDetent("closed");
-    void solverState.runOptimizer(options);
+    if (configState.cashLimit === null) {
+      void solverState.runOptimizer(options);
+      return;
+    }
+    // The budget needs the other islands' boards decoded first, and the run
+    // has not started while that happens, so a second press would start a
+    // second run beside it.
+    if (this.#launching) return;
+    this.#launching = true;
+    // The budget is read off this island's board, and the run starts from
+    // whichever board is on screen once it is built: an island switched to
+    // in between would be solved within the one left behind. Such a launch is
+    // dropped — the player has moved on from it.
+    const templateId = layoutState.activeTemplateId;
+    void this.#cashBudget(configState.cashLimit)
+      .then((cashBudget) => {
+        if (layoutState.activeTemplateId !== templateId || this.isPreview)
+          return;
+        return solverState.runOptimizer({ ...options, cashBudget });
+      })
+      .finally(() => (this.#launching = false));
+  }
+
+  /** Set while a budgeted run's inputs are being gathered — see `#beginSolve`. */
+  #launching = false;
+
+  /**
+   * The cash limit as a run takes it: the board in Edit is what stands — it
+   * is the player's — every other island's copies make its prices dearer,
+   * and the price research comes off the last game import.
+   *
+   * Built here rather than in `solverState`, which cannot read the timeline.
+   */
+  async #cashBudget(cash: number): Promise<CashBudget> {
+    const standing = layoutState.placements.map(({ x, y, buildingId }) => ({
+      x,
+      y,
+      buildingId,
+    }));
+    return {
+      cash,
+      standing,
+      elsewhere: Object.fromEntries(await timelineState.copiesOnOtherIslands()),
+      prices: timelineState.priceRules,
+    };
   }
 
   /**
@@ -936,7 +987,10 @@ class UIState {
       !solverState.isOptimizing &&
       this.solveAll === null &&
       configState.canProducePower &&
-      this.solveAllTargets.length > 0
+      this.solveAllTargets.length > 0 &&
+      // One cash figure cannot be spent on every island in turn: each run
+      // would be handed all of it. Hidden while a limit is set.
+      configState.cashLimit === null
     );
   }
 
@@ -1078,10 +1132,6 @@ class UIState {
     }
     const result = solverState.optimizationResult!;
     const target = shapeOf(result);
-    const free = grid
-      .flat()
-      .filter((t) => t.type === "grass")
-      .map(({ x, y }) => ({ x, y }));
     const score = createBoardScorer(
       grid,
       BUILDINGS,
@@ -1097,7 +1147,15 @@ class UIState {
 
     this.moveStepsPlanning = { done: 0, total: 0 };
     try {
-      const plan = await planMoveSteps(start, target, obstacles, free, score, {
+      const rules = timelineState.priceRules;
+      const baseOf = (id: string) => findBuilding(id)?.price ?? 0;
+      const pricing = {
+        copies: await this.#copiesAcrossIslands(),
+        build: (id: string, n: number) => buildPrice(baseOf(id), n, rules),
+        refund: (id: string, n: number) => sellRefund(baseOf(id), n, rules),
+      };
+      if (stale()) return;
+      const plan = await planMoveSteps(start, target, obstacles, score, {
         onProgress: (done, total) => {
           if (!stale()) this.moveStepsPlanning = { done, total };
         },
@@ -1107,21 +1165,22 @@ class UIState {
         stopAtPower: score(
           new Map(target.map((b) => [`${b.x},${b.y}`, b.buildingId])),
         ),
+        // Under a cash limit the steps must never need more at once than the
+        // layout, which fits it, costs in all: sales that pay for a build
+        // come before it. Without one, power alone orders them.
+        cash: configState.cashLimit !== null ? pricing : undefined,
       });
       if (stale()) return;
       if (plan.steps.every((step) => step.kind === "clear")) {
         this.showToast("Your island already makes as much as this layout");
         return;
       }
-      const rules = priceRules(timelineState.record?.research ?? {});
-      const baseOf = (id: string) => findBuilding(id)?.price ?? 0;
       const prices = priceSteps(
         plan,
-        await this.#copiesAcrossIslands(),
-        (id, n) => buildPrice(baseOf(id), n, rules),
-        (id, n) => sellRefund(baseOf(id), n, rules),
+        pricing.copies,
+        pricing.build,
+        pricing.refund,
       );
-      if (stale()) return;
       this.moveSteps = {
         templateId,
         result,
@@ -1143,21 +1202,9 @@ class UIState {
    * from its board in Edit, every other from its saved layout.
    */
   async #copiesAcrossIslands(): Promise<Map<string, number>> {
-    const counts = new Map<string, number>();
-    const active = layoutState.activeTemplateId;
+    const counts = await timelineState.copiesOnOtherIslands();
     for (const p of layoutState.placements)
       counts.set(p.buildingId, (counts.get(p.buildingId) ?? 0) + 1);
-    const codes = ISLAND_TEMPLATES.filter((t) => t.game && t.id !== active).map(
-      (t) => layoutState.savedGrids[t.id]?.code ?? t.code,
-    );
-    for (const code of codes) {
-      try {
-        for (const p of (await decodeBlueprint(code)).placements)
-          counts.set(p.buildingId, (counts.get(p.buildingId) ?? 0) + 1);
-      } catch {
-        // An unreadable board counts for nothing rather than failing the plan.
-      }
-    }
     return counts;
   }
 
@@ -1502,6 +1549,12 @@ class UIState {
     this.activeModal = "settings";
   }
 
+  /** Opens the island and building figures across the whole save. */
+  openIslandStats() {
+    this.overflowOpen = false;
+    this.activeModal = "islandStats";
+  }
+
   /** Opens the import dialog on a clean slate — a stale error is confusing. */
   openImport() {
     this.overflowOpen = false;
@@ -1520,9 +1573,13 @@ class UIState {
    */
   async readImportCode(code: string) {
     const seq = ++this.#gameReadSeq;
+    this.importMatch = null;
     if (!isGameExportCode(code)) {
       this.gameImport = null;
       this.#gameExport = null;
+      if (!code.trim() || isTransferCode(code)) return;
+      const match = await layoutState.matchingTemplate(code);
+      if (seq === this.#gameReadSeq) this.importMatch = match;
       return;
     }
     try {
@@ -1586,6 +1643,43 @@ class UIState {
     } catch (err) {
       this.importError =
         err instanceof Error ? err.message : "That code could not be imported.";
+    } finally {
+      this.isImporting = false;
+    }
+  }
+
+  /**
+   * Puts the pasted code on the shipped island it matches, replacing that
+   * island's board, and closes on success. The dialog asks twice first.
+   *
+   * The island's stored solve is kept if the new board still lets it be
+   * built — the same carry-over a game import runs, since this changes the
+   * island's terrain too.
+   */
+  async importOntoMatch() {
+    const match = this.importMatch;
+    if (!match || this.isImporting) return;
+    this.isImporting = true;
+    this.importError = null;
+    try {
+      await solverState.settleOptimizer();
+      await layoutState.importOntoTemplate(
+        this.importCode,
+        match.id,
+        configState.buildingUpgrades,
+      );
+      // Only the island this rewrote: the others' solves are untouched.
+      await solverState.carryOverSolves([], [match.id]);
+      this.activeModal = null;
+      this.importCode = "";
+      this.importMatch = null;
+      solverState.restore();
+      this.closeInspector();
+      this.recenterCanvas();
+      this.showToast(`Imported onto ${match.name}`);
+    } catch (err) {
+      this.importError =
+        err instanceof Error ? err.message : "That import could not be read.";
     } finally {
       this.isImporting = false;
     }

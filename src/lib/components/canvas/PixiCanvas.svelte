@@ -880,6 +880,11 @@
           { ...step.from, kind: "leave" },
           { ...step.to, kind: "arrive" },
         ];
+      case "swap":
+        return [
+          { x: step.a.x, y: step.a.y, kind: "arrive" },
+          { x: step.b.x, y: step.b.y, kind: "arrive" },
+        ];
       case "build":
       case "replace":
         return [{ x: step.x, y: step.y, kind: "arrive" }];
@@ -905,7 +910,14 @@
     const marks = step ? marksFor(step) : [];
     gridRenderer?.setStepMarks(
       marks,
-      step?.kind === "move" ? [{ from: step.from, to: step.to }] : [],
+      step?.kind === "move"
+        ? [{ from: step.from, to: step.to }]
+        : step?.kind === "swap"
+          ? [
+              { from: step.a, to: step.b },
+              { from: step.b, to: step.a },
+            ]
+          : [],
     );
     gridRenderer?.setFocus(
       step && step.kind !== "sellAll"
@@ -973,9 +985,9 @@
    */
   let buildingOverlays = $derived.by((): BuildingOverlay[] => {
     const placements = uiState.visiblePlacements;
-    // Step mode keeps the gauges — how hard each building works after a step
-    // is half of what the step is for — but drops the state and anomaly
-    // icons, which over every building drown the one a step is about.
+    // Step mode drops the gauges and the state and anomaly icons: over every
+    // building they drown the one a step is about, and the step bar already
+    // says what the step does to the island's power.
     const steps = uiState.stepsActive;
     const grid = layoutState.grid;
     const prestige = layoutState.placementPrestige;
@@ -1003,7 +1015,7 @@
       const r = rated[i];
       const role = findBuilding(p.buildingId)?.type;
       return {
-        fill: showFill && r ? placementFillPercent(p, r) : null,
+        fill: !steps && showFill && r ? placementFillPercent(p, r) : null,
         stateIcon: steps ? null : STATE_ICON[states[i]],
         anomalyIcon:
           !steps && shifts && role

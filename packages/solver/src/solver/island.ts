@@ -176,17 +176,23 @@ function wholeBoardIsland(grid: Tile[][]): IslandSubGrid {
  * rather than of the grid — see `minIslandTiles`. Under a shared cooling pool
  * the islands this produces are no longer independent either, which is the
  * board-level problem and not this function's.
+ *
+ * `wholeBoard` asks for the board as one island regardless of the rules: a
+ * cash limit couples every landmass on it the way a pool does, since one
+ * budget pays for all of them and every copy anywhere raises the next price.
  */
 export function splitGridIntoIslands(
   grid: Tile[][],
   canCoolDp = true,
   anomaly?: AnomalyDefinition,
+  wholeBoard = false,
 ): IslandSubGrid[] {
   if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) return [];
 
   // A shared cooling pool is the one rule that reaches across the whole board,
   // so under it the board is one island and the decomposition does not apply.
-  if (anomaly?.rule === "shared_cooling") return [wholeBoardIsland(grid)];
+  if (wholeBoard || anomaly?.rule === "shared_cooling")
+    return [wholeBoardIsland(grid)];
 
   const originalHeight = grid.length;
   const originalWidth = grid[0].length;

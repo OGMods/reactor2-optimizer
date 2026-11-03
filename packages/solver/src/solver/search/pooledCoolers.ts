@@ -11,7 +11,7 @@ import {
   SWAP_RADIUS,
 } from "./placement";
 import { covers } from "./rightSize";
-import { anyOfflineProducer, planHolds } from "./stability";
+import { anyOfflineProducer, layoutHolds } from "./stability";
 
 /**
  * Under a shared cooling pool only: gathering the coolers the search scattered,
@@ -251,7 +251,7 @@ function relocateHub(
   return (
     covers(final.totalPower, floor) &&
     !anyOfflineProducer(trial, final.placements) &&
-    planHolds(trial, ctx)
+    layoutHolds(trial, ctx)
   );
 }
 
@@ -385,7 +385,7 @@ export function gatherPooledCoolers(
         if (
           covers(trial.totalPower, floor) &&
           !anyOfflineProducer(current, trial.placements) &&
-          planHolds(current, ctx)
+          layoutHolds(current, ctx)
         ) {
           changed = true;
           break;
