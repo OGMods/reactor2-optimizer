@@ -4,12 +4,18 @@
     editorState,
     layoutState,
     solverState,
+    timelineState,
     uiState,
     viewportState,
   } from "../../state";
-  import { ISLAND_TEMPLATES, MAX_CUSTOM_ISLANDS } from "@reactor2/solver";
+  import {
+    formatNumber,
+    ISLAND_TEMPLATES,
+    MAX_CUSTOM_ISLANDS,
+  } from "@reactor2/solver";
+  import { STAT_ICON } from "../statIcons";
   import type { IslandTemplate } from "../../types/building";
-  import { Plus, RotateCcw, Trash2 } from "lucide-svelte";
+  import { LandPlot, Plus, RotateCcw, Trash2 } from "lucide-svelte";
   import SolveAllButton from "./SolveAllButton.svelte";
   import { onDestroy } from "svelte";
   import { createConfirmArm } from "../confirmArm.svelte";
@@ -21,6 +27,14 @@
    * arming a different row replaces it.
    */
   const confirm = createConfirmArm<string>();
+
+  /*
+   * Each shipped island's power, from the pass the header already runs — the
+   * board on screen live, the rest from their saved layouts.
+   */
+  let islandPower = $derived(
+    Object.fromEntries(timelineState.islands.map((i) => [i.id, i.power])),
+  );
 
   // The sidebar unmounts when collapsed; don't leave a timer poking at state.
   onDestroy(confirm.disarm);
@@ -99,13 +113,18 @@
   <div class="template-list">
     {#each ISLAND_TEMPLATES as template (template.id)}
       {@const isModified = layoutState.isTemplateModified(template)}
+      {@const power = islandPower[template.id] ?? 0}
       <div
         class="template-row"
         class:active={layoutState.activeTemplateId === template.id}
       >
         <button class="template-item" onclick={() => selectTemplate(template)}>
           <span class="name">{template.name}</span>
-          {#if isModified}
+          {#if power > 0}
+            <span class="badge-power">
+              <img src={STAT_ICON.energy} alt="Power" />{formatNumber(power)}
+            </span>
+          {:else if isModified}
             <span class="badge-modified">Modified</span>
           {/if}
         </button>
@@ -132,6 +151,15 @@
       </div>
     {/each}
   </div>
+
+  <!--
+    The figures over every island above, beside the list they summarise; the
+    overflow menu has the same entry for when Setup is closed.
+  -->
+  <button class="stats-btn" onclick={() => uiState.openIslandStats()}>
+    <LandPlot size={14} />
+    <span>Island stats</span>
+  </button>
 
   <div class="section-title custom-title">
     <span>My Islands</span>
@@ -221,6 +249,33 @@
   .solve-all-slot {
     margin-bottom: 0.6rem;
   }
+  /* Matches SolveAllButton, the other whole-row action in this panel. */
+  .stats-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    height: var(--ctl);
+    margin-top: 0.6rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--dur-fast);
+  }
+  .stats-btn:hover {
+    background: var(--surface-raised);
+    border-color: var(--accent-dim);
+  }
+  @media (pointer: coarse) {
+    .stats-btn {
+      height: var(--tap);
+    }
+  }
   .template-list {
     display: flex;
     flex-direction: column;
@@ -281,6 +336,25 @@
     padding: 0.15rem 0.4rem;
     border-radius: var(--radius-xs);
     letter-spacing: 0.4px;
+  }
+  /*
+   * An island's power says more than "Modified" did — the reset button beside
+   * it already marks a changed island — so it takes the chip's place, in the
+   * same neutral idiom. "Modified" stays for a changed board with nothing on it.
+   */
+  .badge-power {
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+  }
+  .badge-power img {
+    width: 12px;
+    height: 12px;
+    object-fit: contain;
   }
   .icon-btn {
     background: var(--danger-bg);

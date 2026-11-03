@@ -14,6 +14,7 @@ import {
   clearTransferLink,
   decodeTransfer,
   encodeTransfer,
+  isTransferCode,
   readTransferLink,
   type TransferBundle,
   type TransferSolve,
@@ -90,6 +91,7 @@ type ActiveModal =
   | "timeLab"
   | "transfer"
   | "transferIn"
+  | "islandStats"
   | null;
 
 /**
@@ -521,6 +523,12 @@ class UIState {
    * asking to replace anything. Null for anything else in the box.
    */
   gameImport = $state<ResolvedGameImport | null>(null);
+  /**
+   * The shipped island a pasted share code is drawn on, when it is one
+   * (`layoutState.matchingTemplate`) — which lets the dialog offer to put it
+   * on that island as well as in a new custom slot.
+   */
+  importMatch = $state<IslandTemplate | null>(null);
   /**
    * The same code as the game wrote it. The resolver translates what a board
    * needs and drops the rest — the economy research, the timeline — which
@@ -1526,6 +1534,12 @@ class UIState {
     this.activeModal = "settings";
   }
 
+  /** Opens the island and building figures across the whole save. */
+  openIslandStats() {
+    this.overflowOpen = false;
+    this.activeModal = "islandStats";
+  }
+
   /** Opens the import dialog on a clean slate — a stale error is confusing. */
   openImport() {
     this.overflowOpen = false;
@@ -1544,9 +1558,13 @@ class UIState {
    */
   async readImportCode(code: string) {
     const seq = ++this.#gameReadSeq;
+    this.importMatch = null;
     if (!isGameExportCode(code)) {
       this.gameImport = null;
       this.#gameExport = null;
+      if (!code.trim() || isTransferCode(code)) return;
+      const match = await layoutState.matchingTemplate(code);
+      if (seq === this.#gameReadSeq) this.importMatch = match;
       return;
     }
     try {
@@ -1610,6 +1628,42 @@ class UIState {
     } catch (err) {
       this.importError =
         err instanceof Error ? err.message : "That code could not be imported.";
+    } finally {
+      this.isImporting = false;
+    }
+  }
+
+  /**
+   * Puts the pasted code on the shipped island it matches, replacing that
+   * island's board, and closes on success. The dialog asks twice first.
+   *
+   * The island's stored solve is kept if the new board still lets it be
+   * built — the same carry-over a game import runs, since this changes the
+   * island's terrain too.
+   */
+  async importOntoMatch() {
+    const match = this.importMatch;
+    if (!match || this.isImporting) return;
+    this.isImporting = true;
+    this.importError = null;
+    try {
+      await solverState.settleOptimizer();
+      await layoutState.importOntoTemplate(
+        this.importCode,
+        match.id,
+        configState.buildingUpgrades,
+      );
+      await solverState.carryOverSolves([]);
+      this.activeModal = null;
+      this.importCode = "";
+      this.importMatch = null;
+      solverState.restore();
+      this.closeInspector();
+      this.recenterCanvas();
+      this.showToast(`Imported onto ${match.name}`);
+    } catch (err) {
+      this.importError =
+        err instanceof Error ? err.message : "That import could not be read.";
     } finally {
       this.isImporting = false;
     }

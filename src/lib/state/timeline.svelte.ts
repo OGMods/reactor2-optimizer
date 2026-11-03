@@ -13,6 +13,7 @@ import {
   getAnomaly,
   ISLAND_TEMPLATES,
   PRESTIGE_UPGRADES,
+  priceRules,
   prestigeScales,
   projectTimeline,
   secondsUntilAward,
@@ -24,12 +25,30 @@ import {
   type GameExport,
   type PlacedBuilding,
   type PrestigeScales,
+  type PriceRules,
   type ResolvedGameImport,
   type Tile,
   type TimelineProjection,
 } from "@reactor2/solver";
-import { createPlacement } from "../data/placements";
-import { boardPower, boardPowers } from "../simulation/simulator";
+import { createPlacement, placementStatus } from "../data/placements";
+import {
+  addCounts,
+  changeSpend,
+  countBuildings,
+  islandPrice,
+  nextRemoval,
+  obstacleCount,
+  terrainStats,
+  type BuildingCounts,
+  type ObstacleClearing,
+  type TerrainStats,
+} from "../simulation/islandStats";
+import {
+  boardHealth,
+  boardPower,
+  boardPowers,
+  type BoardHealth,
+} from "../simulation/simulator";
 import {
   gameImportStorage,
   solverStorage,
@@ -120,8 +139,23 @@ class TimelineState {
    */
   #solvePower = $state<Record<string, number>>({});
 
-  /** Power by board and rules, so an unchanged island is not re-scored. */
+  /** Solve power by solve, terrain and rules, so an unchanged one is not re-scored. */
   #memo = new Map<string, number>();
+
+  /** A saved board's power and building states by board and rules. */
+  #boardMemo = new Map<string, BoardHealth>();
+
+  /** Each island's saved board's idle and overheating buildings. */
+  #savedHealth = $state<Record<string, BoardHealth>>({});
+
+  /** Each stored solve's buildings, for pricing the change to it. */
+  #solveCounts = $state<Record<string, BuildingCounts>>({});
+
+  /** Each island's buildings and terrain from its saved board, keyed by template id. */
+  #facts = $state<Record<string, BoardFacts>>({});
+
+  /** Buildings and terrain by board code: neither depends on the rules. */
+  #factsMemo = new Map<string, BoardFacts>();
   #refreshSeq = 0;
 
   /**
@@ -173,16 +207,27 @@ class TimelineState {
       code: layoutState.savedGrids[t.id]?.code ?? t.code,
     }));
 
+    // The game's own boards, for counting the obstacles cleared in the game
+    // rather than on boards here, which may be plans.
+    const gameCodes = this.record?.islands ?? null;
+
     const next: Record<string, number> = {};
+    const nextHealth: Record<string, BoardHealth> = {};
+    const nextFacts: Record<string, BoardFacts> = {};
     for (const { id, code } of boards) {
+      const facts = await this.#factsOf(code);
+      if (seq !== this.#refreshSeq) return;
+      nextFacts[id] = facts;
+
       const key = `${anomaly.id}|${rules}|${code}`;
-      let power = this.#memo.get(key);
-      if (power === undefined) {
-        power = await scoreBoard(code, upgrades, prestige, anomaly);
+      let health = this.#boardMemo.get(key);
+      if (health === undefined) {
+        health = await scoreBoard(code, upgrades, prestige, anomaly);
         if (seq !== this.#refreshSeq) return;
-        this.#memo.set(key, power);
+        this.#boardMemo.set(key, health);
       }
-      next[id] = power;
+      next[id] = health.power;
+      nextHealth[id] = health;
     }
     // A memo keyed on whole boards grows with every edit; past a few rounds
     // of islands it is cheaper to start again than to track which are live.
@@ -197,7 +242,9 @@ class TimelineState {
       return [{ id: t.id, saved, grid, code }];
     });
     const solved: Record<string, number> = {};
+    const solvedCounts: Record<string, BuildingCounts> = {};
     for (const { id, saved, grid, code } of solves) {
+      solvedCounts[id] = countBuildings(saved.result.placements);
       const terrain = grid ? blueprintKey(grid) : code;
       const key = [
         "solve",
@@ -228,9 +275,168 @@ class TimelineState {
     }
 
     if (this.#memo.size > GAME_ISLANDS.length * 8) this.#memo.clear();
+    if (this.#boardMemo.size > GAME_ISLANDS.length * 8) this.#boardMemo.clear();
+    if (this.#factsMemo.size > GAME_ISLANDS.length * 4) this.#factsMemo.clear();
+    // Obstacles per island on the map as shipped, and on the game's own board
+    // when there is an import — see `#clearedOn`.
+    const nextMapObstacles: Record<string, number> = {};
+    const nextGameObstacles: Record<string, number> = {};
+    for (const t of GAME_ISLANDS) {
+      const map = await this.#factsOf(t.code);
+      const code = gameCodes?.[t.id];
+      const inGame = code ? await this.#factsOf(code) : null;
+      if (seq !== this.#refreshSeq) return;
+      nextMapObstacles[t.id] = obstacleCount(map.terrain);
+      if (inGame) nextGameObstacles[t.id] = obstacleCount(inGame.terrain);
+    }
+
     this.#savedPower = next;
+    this.#savedHealth = nextHealth;
     this.#solvePower = solved;
+    this.#solveCounts = solvedCounts;
+    this.#facts = nextFacts;
+    this.#mapObstacles = nextMapObstacles;
+    this.#gameObstacles = nextGameObstacles;
   }
+
+  /** A board's buildings and terrain, memoised by code. */
+  async #factsOf(code: string): Promise<BoardFacts> {
+    let facts = this.#factsMemo.get(code);
+    if (facts === undefined) {
+      facts = await readFacts(code);
+      this.#factsMemo.set(code, facts);
+    }
+    return facts;
+  }
+
+  #mapObstacles = $state<Record<string, number>>({});
+  #gameObstacles = $state<Record<string, number>>({});
+
+  /**
+   * Obstacles cleared on an island: the map's less what still stands. What
+   * stands is read off the game's board when the last import has it — a
+   * board here may be a plan that clears more than the game has — and off
+   * the board here otherwise.
+   */
+  #clearedOn(id: string, here: TerrainStats): number {
+    const map = this.#mapObstacles[id];
+    if (map === undefined) return 0;
+    return Math.max(0, map - (this.#gameObstacles[id] ?? obstacleCount(here)));
+  }
+
+  /**
+   * Obstacles cleared on every game island, and how long the next clear takes
+   * under the last import's research — the game prices each clear by how many
+   * came before it. Null before the islands have been read.
+   */
+  get obstacleClearing(): ObstacleClearing | null {
+    const islands = this.islands;
+    if (islands.length === 0) return null;
+    const removed = islands.reduce((s, i) => s + i.cleared, 0);
+    // What is left to clear, on the islands the player has: in the game when
+    // imported, on the boards here otherwise.
+    const left = islands
+      .filter((i) => !i.locked)
+      .reduce(
+        (s, i) => s + (this.#gameObstacles[i.id] ?? obstacleCount(i.terrain)),
+        0,
+      );
+    return nextRemoval(removed, this.record?.research ?? {}, left);
+  }
+
+  /**
+   * The next island still locked in the game and what it costs to buy, or
+   * null when the last import has every island open (or there is none).
+   */
+  get nextIsland(): { name: string; price: number } | null {
+    const locked = new Set(this.record?.lockedTemplateIds ?? []);
+    const next = GAME_ISLANDS.find((t) => locked.has(t.id));
+    const price = next?.game ? islandPrice(next.game.areaId) : null;
+    return next && price !== null ? { name: next.name, price } : null;
+  }
+
+  /**
+   * The price rules the player's research gives, off the last game import —
+   * the base rules with nothing imported, which is a player with none of the
+   * price research.
+   */
+  get priceRules(): PriceRules {
+    return priceRules(this.record?.research ?? {});
+  }
+
+  /**
+   * The board on screen's buildings and terrain, live — or null when it is not
+   * one the totals count (see `#livePower`).
+   */
+  #liveFacts: BoardFacts | null = $derived.by(() => {
+    if (layoutState.isPreview) return null;
+    if (!GAME_ISLANDS.some((t) => t.id === layoutState.activeTemplateId))
+      return null;
+    return {
+      counts: countBuildings(layoutState.placements),
+      terrain: terrainStats(layoutState.grid),
+    };
+  });
+
+  /**
+   * Every game island's buildings and terrain, the board on screen live and
+   * the rest from their saved boards — the figures `IslandStatsModal` prints.
+   * An island whose board is still being read is absent.
+   */
+  get islands(): IslandFacts[] {
+    return this.#islands.list;
+  }
+
+  /**
+   * Each building's copies across every game island — what its price climbs
+   * with, since the game counts copies everywhere.
+   */
+  get copies(): BuildingCounts {
+    return this.#islands.copies;
+  }
+
+  /** Derived once per change rather than per read: several panels read it. */
+  #islands = $derived.by(() => {
+    const live = this.#liveFacts;
+    const locked = new Set(this.record?.lockedTemplateIds ?? []);
+    const list = GAME_ISLANDS.flatMap((t) => {
+      const isLive = live !== null && t.id === layoutState.activeTemplateId;
+      const facts = isLive ? live : this.#facts[t.id];
+      if (!facts) return [];
+      const health = isLive ? liveHealth() : this.#savedHealth[t.id];
+      return [
+        {
+          id: t.id,
+          name: t.name,
+          ...facts,
+          power: isLive
+            ? (this.#livePower ?? 0)
+            : (this.#savedPower[t.id] ?? 0),
+          idle: health?.idle ?? 0,
+          starved: health?.starved ?? 0,
+          solvePower: this.#solvePower[t.id] ?? null,
+          solveCost: null as number | null,
+          locked: locked.has(t.id),
+          cleared: this.#clearedOn(t.id, facts.terrain),
+        },
+      ];
+    });
+
+    const copies: BuildingCounts = {};
+    for (const island of list) addCounts(copies, island.counts);
+
+    // What building each stored solve in place of the board costs: the
+    // board's buildings are what stands, every other island's are elsewhere.
+    const rules = this.priceRules;
+    for (const island of list) {
+      const solve = this.#solveCounts[island.id];
+      if (!solve || island.solvePower === null) continue;
+      const elsewhere: BuildingCounts = { ...copies };
+      for (const [id, n] of Object.entries(island.counts)) elsewhere[id] -= n;
+      island.solveCost = changeSpend(solve, island.counts, elsewhere, rules);
+    }
+    return { list: list as IslandFacts[], copies };
+  });
 
   /** How many game islands have a stored solve — what "With solves" covers. */
   get solvedIslands(): number {
@@ -684,6 +890,55 @@ async function decodeBoard(
   }
 }
 
+/** What a board holds, apart from how much power it makes. */
+interface BoardFacts {
+  counts: BuildingCounts;
+  terrain: TerrainStats;
+}
+
+/** One game island's figures, as `TimelineState.islands` lists them. */
+interface IslandFacts extends BoardFacts {
+  id: string;
+  name: string;
+  /** The board's power per tick, under today's rules. */
+  power: number;
+  /** Its stored solve's, re-scored under today's rules; null with none. */
+  solvePower: number | null;
+  /** Still locked in the game, by the last import. */
+  locked: boolean;
+  /** Obstacles cleared, in the game when imported — see `#clearedOn`. */
+  cleared: number;
+  /** Buildings on the board doing nothing, and overheating. */
+  idle: number;
+  starved: number;
+  /**
+   * What building the stored solve in place of the board costs, net of sales
+   * (`changeSpend`); null with no solve.
+   */
+  solveCost: number | null;
+}
+
+/** The board on screen's idle and overheating buildings, from its live scores. */
+function liveHealth(): BoardHealth {
+  const health: BoardHealth = { power: 0, idle: 0, starved: 0 };
+  for (const p of layoutState.placements) {
+    const status = placementStatus(p);
+    if (status === "idle") health.idle++;
+    else if (status === "starved") health.starved++;
+  }
+  return health;
+}
+
+/** A saved board's buildings and terrain; empty if it cannot be read. */
+async function readFacts(code: string): Promise<BoardFacts> {
+  try {
+    const { grid, placements } = await decodeBlueprint(code);
+    return { counts: countBuildings(placements), terrain: terrainStats(grid) };
+  } catch {
+    return { counts: {}, terrain: terrainStats([]) };
+  }
+}
+
 /** A saved board's terrain, or null if it cannot be read. */
 async function decodeTerrain(code: string): Promise<Tile[][] | null> {
   try {
@@ -693,16 +948,19 @@ async function decodeTerrain(code: string): Promise<Tile[][] | null> {
   }
 }
 
-/** One saved board's power under the given rules; 0 if it cannot be read. */
+/**
+ * One saved board's power and building states under the given rules; nothing
+ * if it cannot be read.
+ */
 async function scoreBoard(
   code: string,
   upgrades: Record<string, number>,
   prestige: PrestigeScales,
   anomaly: AnomalyDefinition,
-): Promise<number> {
+): Promise<BoardHealth> {
   try {
     const { grid, placements } = await decodeBlueprint(code);
-    return boardPower(
+    return boardHealth(
       grid,
       BUILDINGS,
       placements.map((p) => createPlacement(p.buildingId, p.x, p.y, upgrades)),
@@ -710,7 +968,7 @@ async function scoreBoard(
       anomaly,
     );
   } catch {
-    return 0;
+    return { power: 0, idle: 0, starved: 0 };
   }
 }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { formatNumber } from "@reactor2/solver";
+  import type { BuildingPricing } from "../../simulation/islandStats";
   import { asset } from "../../utils/assetUrl";
   import type { BuildingDefinition } from "../../types";
   import { headlineValue, statForType } from "../statIcons";
@@ -14,6 +15,8 @@
      * tiers are chosen; it is edited in the plan's own dialog.
      */
     plannedUpgrade?: number | null;
+    /** Its price and copies across every island — see `buildingPricing`. */
+    pricing: BuildingPricing;
     onToggle: () => void;
     onUpgradeChange: (level: number) => void;
   }
@@ -23,6 +26,7 @@
     enabled = true,
     selectedUpgrade = 0,
     plannedUpgrade = null,
+    pricing,
     onToggle,
     onUpgradeChange,
   }: Props = $props();
@@ -106,6 +110,31 @@
             </div>
           </div>
         {/if}
+
+        <!--
+          Copies are counted across every island, as the game prices them, so
+          "Built" is the whole save's and "Next" the price after all of them.
+        -->
+        <dl class="price-row">
+          <div>
+            <dt>Base</dt>
+            <dd>{formatNumber(pricing.base)}</dd>
+          </div>
+          <div>
+            <dt>Built</dt>
+            <dd>{pricing.built}</dd>
+          </div>
+          <div>
+            <dt>Next</dt>
+            <dd class="next">
+              <img
+                src={asset("icons/icon_cash.webp")}
+                alt=""
+                class="cash-icon"
+              />{formatNumber(pricing.next)}
+            </dd>
+          </div>
+        </dl>
       </div>
     </div>
 
@@ -308,6 +337,46 @@
     font-size: 12px;
     font-weight: 600;
     color: #b8d8ff;
+  }
+
+  /* Price row: part of the stat rows' px sub-layout above. */
+  .price-row {
+    display: flex;
+    gap: 10px;
+    margin: 0 0 2px 4px;
+    font-size: 11px;
+  }
+
+  .price-row div {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .price-row dt {
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  .price-row dd {
+    margin: 0;
+    color: var(--text-muted);
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .price-row .next {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    color: var(--text);
+  }
+
+  .cash-icon {
+    width: 12px;
+    height: 12px;
+    object-fit: contain;
   }
 
   /* Upgrades Row */

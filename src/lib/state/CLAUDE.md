@@ -320,6 +320,24 @@ keeping them apart is the point.**
   eight islands through it would evict it each time. Answers are memoised by
   board code and rules, and the board on screen is skipped, since it is re-saved
   after every paint. Custom islands and a previewed layout are not counted.
+- **`islands` and `copies` ride on the same pass.** `refreshIslands` also reads
+  each saved board's building counts and terrain (`simulation/islandStats.ts`),
+  memoised by code alone since neither depends on the rules; the board on
+  screen is derived live, by the same rule as its power. `copies` sums them
+  over every game island, which is what a price climbs with, so the HUD
+  ribbon's and the Buildings card's "next copy" price and `IslandStatsModal`
+  all read one count. `priceRules` comes off the last import's research, the
+  base rules with none — the same fallback the cash limit takes. The same
+  pass scores each board's idle and overheating buildings (`boardHealth`) and
+  keeps each stored solve's counts, so an island's `solveCost` is
+  `changeSpend` from its board to its solve, the other islands' copies
+  counting towards every price.
+- **Obstacle figures read the game's boards when imported.** Cleared counts
+  are the map's obstacles less what stands on the import's board — a board
+  here may be a plan — and `obstacleClearing` prices the next clear by the
+  whole save's count (5 min × 1.025 per clear, less Clearance Crews and Phase
+  Breaker, finished free inside Erased from Time's window). The player
+  confirmed it against the game.
 - **`projection` is the game's, run forward.** It is the last import's timeline
   carried from `exportedAt` to `now` at `record.energyPerTick` — the power the
   game's own boards made, scored at import from the _resolved_ levels rather than
@@ -719,6 +737,15 @@ because `renderTileVisuals` clears those whenever a tile's state changes.
 deliberately does not overwrite the current custom island, since that would be a
 destructive act with no undo behind a button marked "Import". At
 `MAX_CUSTOM_ISLANDS` it refuses and says so.
+
+**A code drawn on a shipped map may also land there, beside that default.**
+`layoutState.matchingTemplate` recognises a board that is a shipped map with
+nothing changed but obstacles cleared (`sameMap`) — exactly what a saved layout
+on that island can be, so writing it there keeps the fixed-map rule.
+`importOntoTemplate` writes it through `importGameIslands`, and Import offers it
+as a second button behind two presses, since it replaces that island's board.
+The island's solve goes through `carryOverSolves`, as after a game import.
+`state/importOnto.test.ts` pins the match and the refusals.
 
 **A game code is the one exception, and it keeps the rule.** The game's Export to
 Optimizer button writes an `R2X1.` code (`encoding/gameExport.ts`; the spec the
