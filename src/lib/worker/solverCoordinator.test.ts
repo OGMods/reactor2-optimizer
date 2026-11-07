@@ -52,12 +52,24 @@ function installFakeWorker(
     progress: [],
     doneAfterMs: 0,
   },
+  /**
+   * Which workers, by construction order, die instead of answering — the way
+   * one whose script 404s does: an `error` event, and never a message.
+   */
+  dies: (workerIndex: number) => boolean = () => false,
 ) {
   const listeners = new Map<object, Set<(e: MessageEvent) => void>>();
+  let constructed = 0;
 
   class FakeWorker {
     #self = {};
-    addEventListener(_type: string, fn: (e: MessageEvent) => void) {
+    #index = constructed++;
+    #onError: ((e: Event) => void) | null = null;
+    addEventListener(type: string, fn: (e: MessageEvent) => void) {
+      if (type === "error") {
+        this.#onError = fn as (e: Event) => void;
+        return;
+      }
       if (!listeners.has(this.#self)) listeners.set(this.#self, new Set());
       listeners.get(this.#self)!.add(fn);
     }
@@ -67,6 +79,10 @@ function installFakeWorker(
     postMessage(req: IslandWorkerRequest) {
       if (req.type !== "SOLVE_ISLAND") return;
       dispatched.push(req);
+      if (dies(this.#index)) {
+        setTimeout(() => this.#onError?.(new Event("error")), 0);
+        return;
+      }
       const placements: PlacedBuilding[] = [];
       setTimeout(() => {
         for (const powerOutput of stream.progress) {
@@ -105,6 +121,7 @@ function installFakeWorker(
 afterEach(() => {
   dispatched.length = 0;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("SolverCoordinator", () => {
@@ -247,4 +264,41 @@ describe("SolverCoordinator", () => {
     expect(dispatched.length).toBeGreaterThan(0);
     expect(dispatched.length).toBeLessThan(30);
   }, 5_000);
+
+  it("fails the run, rather than waiting forever, when no worker can start", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    installFakeWorker(
+      () => 1,
+      undefined,
+      () => true,
+    );
+    const coordinator = new SolverCoordinator(2);
+
+    await expect(
+      coordinator.solve(board(3), [...BUILDINGS], UPGRADES, 30),
+    ).rejects.toThrow(/reload the page/);
+    coordinator.destroy();
+  });
+
+  it("runs the rest of the queue on the workers still alive", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    installFakeWorker(
+      () => 1,
+      undefined,
+      (i) => i === 0,
+    );
+    const coordinator = new SolverCoordinator(2);
+
+    const [result] = await coordinator.solve(
+      board(3),
+      [...BUILDINGS],
+      UPGRADES,
+      30,
+    );
+    coordinator.destroy();
+
+    // The dead worker's island is lost; the other two are solved.
+    expect(dispatched).toHaveLength(3);
+    expect(result).toBeDefined();
+  });
 });

@@ -3,6 +3,74 @@
   <head>
     <meta charset="UTF-8" />
     <!--
+      The boot watchdog, first in the head and inline on purpose: what it
+      guards against is the bundle itself not arriving, so it cannot be part
+      of it.
+
+      Every build's files are content-hashed and a deploy replaces them all.
+      A cached copy of this page from before a deploy names a bundle that is
+      gone, the splash spins forever, and only a reload helps. So:
+
+      - a script or stylesheet of our own failing to load, or a lazily
+        imported chunk (`vite:preloadError`), reloads the page once, at once
+        (a reload revalidates this document, which is the fix); the session
+        flag stops a real outage from becoming a reload loop;
+      - a splash still up after 20 s, for any reason, offers a Reload button
+        rather than leaving the user to guess.
+
+      `bootLoader.ts` removes the splash, which is what ends both.
+    -->
+    <script>
+      (function () {
+        var FLAG = "r2o-boot-reloaded";
+        var reloaded = false;
+        try {
+          reloaded = sessionStorage.getItem(FLAG) === "1";
+          sessionStorage.removeItem(FLAG);
+        } catch (e) {}
+        function reloadOnce() {
+          if (reloaded) return false;
+          try {
+            sessionStorage.setItem(FLAG, "1");
+          } catch (e) {
+            return false;
+          }
+          reloaded = true;
+          location.reload();
+          return true;
+        }
+        window.addEventListener(
+          "error",
+          function (e) {
+            var el = e.target;
+            if (!el || (el.tagName !== "SCRIPT" && el.tagName !== "LINK")) {
+              return;
+            }
+            var url = el.src || el.href || "";
+            if (url.indexOf(location.origin) === 0) reloadOnce();
+          },
+          true,
+        );
+        // A lazily imported chunk (the renderer's) that is gone.
+        window.addEventListener("vite:preloadError", function (e) {
+          if (reloadOnce()) e.preventDefault();
+        });
+        setTimeout(function () {
+          var box = document.getElementById("boot-loader");
+          if (!box || box.classList.contains("is-done")) return;
+          var label = box.querySelector(".boot-label");
+          if (label) label.textContent = "Still loading…";
+          var btn = document.createElement("button");
+          btn.className = "boot-reload";
+          btn.textContent = "Reload";
+          btn.onclick = function () {
+            location.reload();
+          };
+          box.appendChild(btn);
+        }, 20000);
+      })();
+    </script>
+    <!--
       The game's launcher icon. SVG first for crispness; the 32px PNG is
       the fallback for browsers that will not take an SVG favicon, and the
       apple-touch icon is what iOS uses for Add to Home Screen.
@@ -94,6 +162,17 @@
         #boot-loader .boot-ring {
           animation: boot-spin 800ms linear infinite;
         }
+      }
+      #boot-loader .boot-reload {
+        min-height: 44px;
+        padding: 0 1.4rem;
+        border: 1px solid #00f3ff;
+        border-radius: 999px;
+        background: transparent;
+        color: #00f3ff;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
       }
       @keyframes boot-spin {
         to {

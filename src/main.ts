@@ -5,6 +5,7 @@ import { hydrateState, uiState } from "./lib/state";
 import { preloadAtlas } from "./lib/pixi/atlas";
 import { analyticsOptedOut, setAnalyticsEnabled } from "./lib/utils/analytics";
 import { uiStorage } from "./lib/storage/storage";
+import { watchForAppUpdate } from "./lib/utils/appUpdate";
 
 /*
  * The sprite atlas is ~1MB and nothing below can start it any earlier.
@@ -47,6 +48,11 @@ const app = mount(App, {
 
 // A transfer link from another device: offered, never applied unasked.
 void uiState.receiveTransferLink();
+
+// A deploy since this page loaded leaves it pointing at files that are gone.
+watchForAppUpdate(() => {
+  uiState.updateAvailable = true;
+});
 
 /*
  * Analytics goes last, and then waits for the browser to be idle: everything

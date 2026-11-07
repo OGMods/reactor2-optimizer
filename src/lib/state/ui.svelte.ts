@@ -491,6 +491,15 @@ class UIState {
   #toastTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
+   * A newer deploy is live than the one this page was loaded from — see
+   * `utils/appUpdate.ts`. Set once by the watcher `main.ts` starts; the shell
+   * then offers a reload that stays until it is taken, since a stale page
+   * fails the next time it asks for a file and a toast that has faded by then
+   * would not explain it.
+   */
+  updateAvailable = $state(false);
+
+  /**
    * Says one thing, briefly. A second call replaces the first rather than
    * queueing: this is the bottom line of a phone screen, and a backlog of
    * messages there is a backlog nobody reads.

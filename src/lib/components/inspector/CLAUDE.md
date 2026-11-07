@@ -12,8 +12,8 @@ card full of zeroes. A run in flight outranks both, because it must show its mod
 countdown before it has a first result. Stopping it is the HUD's job — Run turns
 into Stop there — so the card carries no Stop of its own.
 
-It carries three figures — power, the bound it is measured against, and how long
-the solve took — and the inspected tile at its foot: bare ground is one line, name
+It carries two figures — power and the bound it is measured against — and the
+inspected tile at its foot: bare ground is one line, name
 left and position right, while a building adds its sprite, a `Lv. n` chip and its
 figures as labelled rows in `BuildingUnlockCard`'s idiom, so a building reads the
 same wherever it appears.
@@ -80,6 +80,13 @@ construction" holds only for a layout the solver has _just_ returned, and
 behind a standing solve can leave it unstable, and the card has to say so rather
 than printing a power figure whose buildings have quietly shut down.
 
+**No solve-time row and, normally, no anomaly row.** The run's clock is in the
+head's live pill while it runs and is noise afterwards; the theme already says
+an anomaly is in force. The Anomaly row appears only when the selection differs
+from the one the solve was searched under (`solverState.resultAnomalyId`) —
+`rescoreResult` re-rates the figures but not the layout — in `--warn`, naming
+both.
+
 **Under an upgrade plan the card adds an "After upgrades" line**
 (`uiState.planReport`): the power once the plan is bought, and — when a step
 would overheat something — how many buildings and at which step, named by
@@ -116,7 +123,20 @@ as shown; the board that makes is scored and appended to the shortlist
 (`showIslandLayout`), so it previews, applies and is stored like any other
 entry. Never under a cooling pool, where the board is one island.
 
-**Reset asks twice** and acts on whichever board is showing: the solve, or every
+**The solver panel counts what the solve builds**: a Buildings total, then one
+row per UI group present (reactors — direct producers included, via
+`buildingCategory` — then generators, coolers: the order heat flows), each with a chip per building (sprite and count, named on hover) and the
+role's total. Buildings within a role keep catalogue order so a solve always
+lists the same way. Not on the player's own panel, whose board is in front of
+them; a solve is a shopping list they have yet to buy.
+
+**The actions (Steps, Copy, and the bin: "Discard solve" or "Remove all buildings") are one snippet in three dresses**
+(`boardActions`): icons in the head on a desktop, Steps keeping its word; icons
+only in the head of a folded phone card; and on an open phone card a labelled row
+of their own under the title (`.action-row`), where there is a line to spare and
+a word beats a glyph. An armed confirmation always says so in words.
+
+**Reset (the bin button) asks twice** and acts on whichever board is showing: the solve, or every
 hand-placed building. Switching panels disarms it, otherwise a press aimed at one
 board would land on the other.
 

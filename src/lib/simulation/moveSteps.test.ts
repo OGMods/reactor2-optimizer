@@ -186,6 +186,32 @@ describe("planMoveSteps", () => {
     expect(plan.steps).toHaveLength(2);
   });
 
+  it("never swaps two buildings of the same kind", async () => {
+    // Full board. Swapping the Y home lands the X from (5,0) on (0,0), where
+    // the other X was paired to go — so that X is home, and the one from
+    // (0,3) takes over its trip to (6,0) rather than trading places with it.
+    const start = [
+      b("generator", 0, 0),
+      b("cooler1", 5, 0),
+      b("cooler2", 6, 0),
+      b("cooler1", 0, 3),
+    ];
+    const target = [
+      b("cooler1", 0, 0),
+      b("generator", 5, 0),
+      b("cooler1", 6, 0),
+      b("cooler2", 0, 3),
+    ];
+    const plan = await planMoveSteps(start, target, [], count);
+
+    expect(asSet(replay(start, plan))).toEqual(asSet(target));
+    for (const s of plan.steps) {
+      if (s.kind === "swap") expect(s.a.buildingId).not.toBe(s.b.buildingId);
+      if (s.kind === "move") expect(s.from).not.toEqual(s.to);
+    }
+    expect(plan.steps).toHaveLength(2);
+  });
+
   it("replaces a building in place rather than selling and building", async () => {
     const start = [b("cooler1", 0, 0), b("generator", 1, 0)];
     const target = [b("cooler2", 0, 0), b("generator", 1, 0)];

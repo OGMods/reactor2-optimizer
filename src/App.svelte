@@ -348,6 +348,17 @@
   <TransferModal />
   <IslandStatsModal />
 
+  {#if uiState.updateAvailable}
+    <!--
+      Persistent, and at the top rather than the toast's line: it stays until
+      taken, and it must not sit on top of whatever the toast is saying.
+    -->
+    <div class="update-notice" role="status">
+      <span>A new version is available</span>
+      <button onclick={() => location.reload()}>Reload</button>
+    </div>
+  {/if}
+
   <!--
     The app's one-line message, wherever it comes from — see
     `uiState.showToast`. It is the last thing in the shell so it paints over
@@ -524,6 +535,41 @@
   .show-ui:focus-visible {
     opacity: 1;
     color: var(--text);
+  }
+
+  /*
+   * `--warn`: this page is past a limit — the deploy it was loaded from is
+   * gone. Nothing is destroyed, so not `--danger`.
+   */
+  .update-notice {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: calc(var(--header-clearance, 4rem) + 0.5rem);
+    max-width: calc(100vw - var(--safe-left) - var(--safe-right) - 2rem);
+    z-index: var(--z-toast);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: var(--surface-panel-solid);
+    border: 1px solid var(--warn);
+    color: var(--warn);
+    font-size: var(--fs-sm);
+    font-weight: 700;
+    padding: 0.3rem 0.35rem 0.3rem 0.9rem;
+    border-radius: var(--radius-pill);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  }
+  .update-notice button {
+    min-height: var(--ctl-sm);
+    padding: 0 0.8rem;
+    border: none;
+    border-radius: var(--radius-pill);
+    background: var(--warn);
+    color: var(--surface-void);
+    font-size: var(--fs-sm);
+    font-weight: 700;
+    cursor: pointer;
   }
 
   /*

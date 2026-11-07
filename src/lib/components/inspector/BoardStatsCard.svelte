@@ -11,21 +11,18 @@
   } from "../../state";
   import {
     BUILDINGS,
+    buildingCategory,
     findBuilding,
     formatNumber,
     getAnomaly,
     levelIndexForValue,
     PRESTIGE_UPGRADES,
+    type BuildingCategory,
   } from "@reactor2/solver";
   import { placementStatus } from "../../data/placements";
   import { ratedPlacementAt } from "../../simulation/simulator";
   import FullNumber from "./FullNumber.svelte";
-  import {
-    asset,
-    formatDuration,
-    formatTileCoords,
-    formatTimeAgo,
-  } from "../../utils";
+  import { asset, formatDuration, formatTileCoords } from "../../utils";
   import {
     AlertCircle,
     AlertTriangle,
@@ -39,7 +36,7 @@
     ListOrdered,
     Hammer,
     Loader2,
-    RotateCcw,
+    Trash2,
     X,
     Zap,
   } from "lucide-svelte";
@@ -51,9 +48,11 @@
    * One rather than two — a hover card stacked above a solve readout puts two
    * panels on a phone screen the map also needs.
    *
-   * The figures are deliberately three: power, the bound it is measured
-   * against, and how long the solve took. `uiState.statsPanel` picks which
-   * layout they describe; this file only renders it.
+   * The figures are deliberately two: power and the bound it is measured
+   * against. No solve time — the head's pill carries the clock while a run is
+   * in flight — and no anomaly row unless the selection has moved off the one
+   * the solve was searched under. `uiState.statsPanel` picks which layout
+   * they describe; this file only renders it.
    */
   let panel = $derived(uiState.statsPanel);
   let tile = $derived(uiState.inspectedTile);
@@ -159,6 +158,15 @@
   let inspecting = $derived(collapsible && tile !== null);
   let collapsed = $derived(
     collapsible && (uiState.statsCardCollapsed || inspecting),
+  );
+
+  /** On a phone with the card open, the actions get a labelled row of their own. */
+  let actionRow = $derived(
+    collapsible &&
+      !!panel &&
+      !collapsed &&
+      !solverState.isOptimizing &&
+      ((panel === "solver" && !layoutState.isPreview) || resettable),
   );
 
   /*
@@ -275,18 +283,9 @@
       : null,
   );
   let anomalyStale = $derived(
-    resultAnomaly !== null && resultAnomaly.id !== selectedAnomaly.id,
-  );
-  /*
-   * Worth a line whenever an anomaly is in play on either side — including
-   * the stale case where the player has switched back to "no anomaly" while
-   * a solve made under one is still on screen, which `configState.hasAnomaly`
-   * alone would miss.
-   */
-  let showAnomalyRow = $derived(
     panel === "solver" &&
       resultAnomaly !== null &&
-      (configState.hasAnomaly || resultAnomaly.rule !== "baseline"),
+      resultAnomaly.id !== selectedAnomaly.id,
   );
 
   /*
@@ -326,6 +325,44 @@
       ];
     });
   });
+
+  /*
+   * What the solve builds, counted: one row per UI group (`buildingCategory`,
+   * so direct producers count with the reactors, as on the HUD's tab), each
+   * carrying a chip per building in it — sprite and count, named on hover.
+   * Groups in the order heat flows (made, turned into power, cooled away), and
+   * buildings within one in catalogue order, so a solve always lists the same
+   * way.
+   *
+   * Solver panel only: the player's own board is in front of them, while a
+   * solve is forty buildings they have yet to buy and need a shopping list for.
+   */
+  const ROLE_ROWS: { type: BuildingCategory; label: string }[] = [
+    { type: "heat_producer", label: "Reactors" },
+    { type: "generator", label: "Generators" },
+    { type: "cooler", label: "Coolers" },
+  ];
+  let buildingCounts = $derived.by(() => {
+    if (panel !== "solver") return [];
+    const counts = new Map<string, number>();
+    for (const p of boardPlacements)
+      counts.set(p.buildingId, (counts.get(p.buildingId) ?? 0) + 1);
+    return ROLE_ROWS.flatMap(({ type, label }) => {
+      const items = BUILDINGS.filter(
+        (def) => buildingCategory(def.type) === type && counts.has(def.id),
+      ).map((def) => ({
+        id: def.id,
+        name: def.name,
+        count: counts.get(def.id)!,
+      }));
+      if (items.length === 0) return [];
+      const total = items.reduce((sum, item) => sum + item.count, 0);
+      return [{ type, label, total, items }];
+    });
+  });
+  let buildingTotal = $derived(
+    buildingCounts.reduce((sum, row) => sum + row.total, 0),
+  );
 
   const plural = (n: number) => (n === 1 ? "building" : "buildings");
 
@@ -512,6 +549,15 @@
    */
   const confirm = createConfirmArm<"reset" | "copy">();
 
+  /*
+   * What the bin button says. On the solve it throws that answer away; on the
+   * player's own board it takes away every building they placed, and a bare
+   * "Delete" there reads as deleting the one building they last tapped.
+   */
+  let resetLabel = $derived(
+    panel === "solver" ? "Discard solve" : "Remove all buildings",
+  );
+
   function resetBoard() {
     if (!confirm.press("reset")) return;
     // Whichever board is on screen is the one being thrown away — the solve,
@@ -543,6 +589,69 @@
 
   onDestroy(confirm.disarm);
 </script>
+
+{#snippet boardActions(mode: "head" | "icons" | "row")}
+  <!--
+    The board's actions, in one of three dresses. On a desktop they sit in the
+    head as icons, Steps with its word. On a phone they are icons only while
+    the card is folded, and a labelled row under the title once it is open —
+    there is a line to spare then, and a word beats a glyph on a thumb target.
+    An armed confirmation always says so in words, whichever dress.
+  -->
+  {#if panel === "solver" && !layoutState.isPreview}
+    <!--
+      From the player's board in Edit to this layout, step by step on the
+      board: see `uiState.planMoveSteps`. Hidden in step mode, which the bar
+      at the foot of the screen runs.
+    -->
+    {#if uiState.canPlanMoveSteps && !uiState.stepsActive}
+      <button
+        class="head-btn"
+        class:labelled={mode === "row"}
+        onclick={() => uiState.planMoveSteps()}
+        title="The moves, builds and sells that turn your island into this layout"
+        aria-label="Steps"
+      >
+        <ListOrdered size={13} />
+        {#if mode !== "icons"}<span class="sure">Steps</span>{/if}
+      </button>
+    {/if}
+    <!--
+      The way off a read-only board. A solve is as often a starting point as
+      an answer, and rebuilding forty buildings by hand to move one cooler is
+      not a way to offer that.
+    -->
+    <button
+      class="head-btn copy"
+      class:labelled={mode === "row"}
+      class:armed={confirm.armed === "copy"}
+      onclick={copySolve}
+      title="Copy this layout into your own so you can edit it"
+      aria-label={confirm.armed === "copy" ? "Replace your layout?" : "Copy"}
+    >
+      <Copy size={13} />
+      {#if confirm.armed === "copy"}<span class="sure">Replace?</span
+        >{:else if mode === "row"}<span class="sure">Copy</span>{/if}
+    </button>
+  {/if}
+
+  {#if resettable}
+    <button
+      class="head-btn reset"
+      class:labelled={mode === "row"}
+      class:armed={confirm.armed === "reset"}
+      onclick={resetBoard}
+      title={panel === "solver"
+        ? "Discard this solve"
+        : "Remove every building you placed"}
+      aria-label={confirm.armed === "reset" ? "Sure?" : resetLabel}
+    >
+      <Trash2 size={13} />
+      {#if confirm.armed === "reset"}<span class="sure">Sure?</span
+        >{:else if mode === "row"}<span class="sure">{resetLabel}</span>{/if}
+    </button>
+  {/if}
+{/snippet}
 
 <!--
   Outside the card, because it must survive the card being folded away or
@@ -615,52 +724,8 @@
                 >{solverState.isStopping ? "stopping" : countdown}</span
               >
             </span>
-          {:else if panel === "solver" && !layoutState.isPreview}
-            <!--
-              From the player's board in Edit to this layout, step by step
-              on the board: see `uiState.planMoveSteps`. Hidden in step mode,
-              which the bar at the foot of the screen runs.
-            -->
-            {#if uiState.canPlanMoveSteps && !uiState.stepsActive}
-              <button
-                class="head-btn"
-                onclick={() => uiState.planMoveSteps()}
-                title="The moves, builds and sells that turn your island into this layout"
-              >
-                <ListOrdered size={13} />
-                <span class="sure">Steps</span>
-              </button>
-            {/if}
-            <!--
-              The way off a read-only board. A solve is as often a starting
-              point as an answer, and rebuilding forty buildings by hand to
-              move one cooler is not a way to offer that.
-            -->
-            <button
-              class="head-btn copy"
-              class:armed={confirm.armed === "copy"}
-              onclick={copySolve}
-              title="Copy this layout into your own so you can edit it"
-            >
-              <Copy size={13} />
-              {#if confirm.armed === "copy"}<span class="sure">Replace?</span
-                >{/if}
-            </button>
-          {/if}
-
-          {#if !solverState.isOptimizing && resettable}
-            <button
-              class="head-btn reset"
-              class:armed={confirm.armed === "reset"}
-              onclick={resetBoard}
-              title={panel === "solver"
-                ? "Discard this solve"
-                : "Remove every building you placed"}
-            >
-              <RotateCcw size={13} />
-              {#if confirm.armed === "reset"}<span class="sure">Sure?</span
-                >{/if}
-            </button>
+          {:else if !actionRow}
+            {@render boardActions(collapsible ? "icons" : "head")}
           {/if}
 
           <!--
@@ -685,6 +750,10 @@
           {/if}
         </span>
       </div>
+
+      {#if actionRow}
+        <div class="action-row">{@render boardActions("row")}</div>
+      {/if}
     {/if}
 
     {#if (panel && !collapsed) || tile}
@@ -764,29 +833,8 @@
             {/if}
 
             {#if panel === "solver"}
-              <div class="row">
-                <span class="row-label">
-                  {solverState.isOptimizing ? "Running for" : "Solve time"}
-                </span>
-                <span class="row-value">
-                  {elapsed}
-                  {#if solverState.isOptimizing && solverState.runEstimateMs > 0}
-                    <span class="ago"
-                      >of ~{formatDuration(solverState.runEstimateMs)}</span
-                    >
-                  {/if}
-                  {#if !solverState.isOptimizing && solverState.finishedAt !== null}
-                    <!--
-                  A restored solve is the one case where the duration alone
-                  misleads: the run it describes may have been days ago.
-                -->
-                    <span class="ago"
-                      >· {formatTimeAgo(solverState.finishedAt)}</span
-                    >
-                  {/if}
-                </span>
-              </div>
-
+              <!-- No solve-time row: the head's live pill carries the clock
+                   while a run is in flight, and after it the figure is noise. -->
               {#if solverState.isOptimizing && runMode}
                 <div class="row">
                   <span class="row-label">Mode</span>
@@ -797,25 +845,23 @@
                 </div>
               {/if}
 
-              {#if showAnomalyRow}
+              {#if anomalyStale}
                 <!--
-                  The row names the rules the figures beside it were computed
-                  under — the current selection. The note is the other half:
-                  which rules the *layout* was searched under, on the one
-                  reading where that is a different answer.
+                  The rules the figures beside it were computed under — the
+                  current selection — and, under it, the ones the *layout* was
+                  searched under. Only when the two differ: otherwise the theme
+                  already says an anomaly is in force.
                 -->
-                <div class="row" class:rule-warn={anomalyStale}>
+                <div class="row rule-warn">
                   <span class="row-label">
-                    {#if anomalyStale}<AlertTriangle size={11} />{/if}
+                    <AlertTriangle size={11} />
                     Anomaly
                   </span>
                   <span class="row-value">
                     {selectedAnomaly.name}
-                    {#if anomalyStale}
-                      <span class="stale"
-                        >(solved under {resultAnomaly?.name})</span
-                      >
-                    {/if}
+                    <span class="stale"
+                      >(solved under {resultAnomaly?.name})</span
+                    >
                   </span>
                 </div>
               {/if}
@@ -901,6 +947,35 @@
                     </span>
                   </div>
                 {/each}
+              {/if}
+
+              {#if buildingCounts.length > 0}
+                <div class="counts">
+                  <div class="row">
+                    <span class="row-label">Buildings</span>
+                    <span class="row-value">{buildingTotal}</span>
+                  </div>
+                  {#each buildingCounts as role (role.type)}
+                    <div class="row count-row">
+                      <span class="row-label">{role.label}</span>
+                      <span class="count-chips">
+                        {#each role.items as item (item.id)}
+                          <span
+                            class="count-chip"
+                            title={`${item.count} × ${item.name}`}
+                          >
+                            <img
+                              src={asset(`icons/${item.id}.webp`)}
+                              alt={item.name}
+                            />
+                            {item.count}
+                          </span>
+                        {/each}
+                        <span class="count-total">{role.total}</span>
+                      </span>
+                    </div>
+                  {/each}
+                </div>
               {/if}
             {/if}
 
@@ -1219,6 +1294,29 @@
     border: 1px solid var(--danger-line);
   }
 
+  /*
+   * The phone's open card: the actions as a labelled row under the title,
+   * each a real thumb target.
+   */
+  .action-row {
+    flex-shrink: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+  .head-btn.labelled {
+    flex: 1 1 0;
+    gap: 0.3rem;
+    padding: 0 0.5rem;
+  }
+  /* Resting only: hover and the armed red keep their own rules above. */
+  .head-btn.labelled:not(.armed) {
+    border: 1px solid var(--border);
+  }
+  .head-btn.labelled:not(.armed):not(:hover) {
+    background: var(--surface-raised);
+  }
+
   .sure {
     font-size: var(--fs-2xs);
     font-weight: 700;
@@ -1397,6 +1495,57 @@
     display: flex;
     align-items: center;
     gap: 0.2rem;
+  }
+
+  /* ── What the solve builds ─────────────────────────────────────── */
+  .counts {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 0.3rem;
+  }
+
+  /* The label holds its line; the chips wrap under each other. */
+  .count-row {
+    align-items: flex-start;
+  }
+  .count-row .row-label {
+    white-space: nowrap;
+  }
+
+  .count-chips {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.2rem;
+  }
+
+  .count-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.1rem;
+    padding: 0 0.25rem 0 0.1rem;
+    border-radius: var(--radius-xs);
+    background: var(--surface-raised);
+    color: #cbd5e1;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .count-chip img {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+  }
+
+  .count-total {
+    min-width: 1.4rem;
+    text-align: right;
+    color: #cbd5e1;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
   }
 
   /* ── The shortlist of tied layouts ─────────────────────────────── */

@@ -45,7 +45,9 @@ import type { TileType } from "../types";
  * never block each other — not in a ring where A wants B's tile while B wants
  * A's, nor on a board with no free tile — and nothing is ever sold to be built
  * again. A swap finishes the one move, and the other building moves on from
- * where it landed, if it is not already home.
+ * where it landed, if it is not already home. If it landed on a tile another
+ * of its kind was headed for, it is home: that one takes over its trip, so no
+ * swap ever trades two identical buildings.
  */
 
 export interface Pos {
@@ -440,10 +442,27 @@ export async function planMoveSteps(
             b: { buildingId: other.buildingId, ...m.to },
           });
           other.from = { ...m.from };
-          // Drop both if the other is now home, the later index first.
-          const done = [i];
-          if (key(other.from) === key(other.to)) done.push(j);
-          for (const k of done.sort((x, y) => y - x)) moves.splice(k, 1);
+          /*
+           * The other may have landed where one of its own kind is still
+           * headed. Then it is that one's building already: it stays, and
+           * the one headed here takes over its trip instead. Left as two
+           * moves, the next would trade two identical buildings' places.
+           */
+          const twin = moves.find(
+            (o, k) =>
+              k !== i &&
+              k !== j &&
+              o.buildingId === other.buildingId &&
+              key(o.to) === key(other.from),
+          );
+          if (twin) {
+            twin.to = other.to;
+            other.to = { ...other.from };
+          }
+          // Drop whichever moves are now home, the later index first.
+          for (let k = moves.length - 1; k >= 0; k--)
+            if (k === i || key(moves[k].from) === key(moves[k].to))
+              moves.splice(k, 1);
         });
         return;
       }

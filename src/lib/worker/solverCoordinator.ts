@@ -24,7 +24,17 @@ interface WorkerSlot {
   worker: Worker;
   busy: boolean;
   currentTaskId: string | null;
+  /** Set while the slot holds a task: what to do if the worker dies. */
+  onDeath: (() => void) | null;
 }
+
+/**
+ * Why a run ended with no worker left to run it. Almost always a worker script
+ * that failed to load — a page older than the last deploy points at one that
+ * has been replaced — so the message says what fixes it.
+ */
+const WORKERS_DIED_MESSAGE =
+  "The solver could not start. The app has probably been updated since this page was loaded: reload the page.";
 
 /** One island, searched once. The unit of work the pool schedules. */
 interface IslandTask {
@@ -130,7 +140,29 @@ export class SolverCoordinator {
       const worker = new Worker(new URL("./islandWorker.ts", import.meta.url), {
         type: "module",
       });
-      this.pool.push({ worker, busy: false, currentTaskId: null });
+      const slot: WorkerSlot = {
+        worker,
+        busy: false,
+        currentTaskId: null,
+        onDeath: null,
+      };
+      /*
+       * A worker whose script fails to load, or that throws outside the task
+       * handler's own catch, says so only here — it never posts a reply. Left
+       * unheard, its task is one the run waits on for good: Run spins and
+       * nothing ever starts. So it leaves the pool (the next run builds a
+       * fresh one) and its task is written off.
+       */
+      worker.addEventListener("error", (e) => {
+        e.preventDefault();
+        console.error("Solver worker failed", e.message || e);
+        worker.terminate();
+        this.pool = this.pool.filter((s) => s !== slot);
+        const onDeath = slot.onDeath;
+        slot.onDeath = null;
+        onDeath?.();
+      });
+      this.pool.push(slot);
     }
   }
 
@@ -224,7 +256,7 @@ export class SolverCoordinator {
       display[index] = { placements, powerOutput: power };
     };
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const settle = () => {
         settled = true;
         if (progressTimer !== null) {
@@ -251,6 +283,26 @@ export class SolverCoordinator {
           if (stopTimer) clearInterval(stopTimer);
           settle();
         }
+      };
+
+      /*
+       * A worker died holding a task. The task is lost; the queue goes on
+       * over the workers still alive. With none left, nothing will ever run
+       * what is queued, so the run fails rather than waiting — with whatever
+       * did finish thrown away, since a board missing islands is not an
+       * answer to the run that was asked for.
+       */
+      const workerDied = () => {
+        if (settled) return;
+        remaining--;
+        if (this.pool.length === 0) {
+          settled = true;
+          if (stopTimer) clearInterval(stopTimer);
+          if (progressTimer !== null) clearTimeout(progressTimer);
+          reject(new Error(WORKERS_DIED_MESSAGE));
+          return;
+        }
+        finishIfDone();
       };
 
       // Poll shouldStop on the same cadence as reportIntervalMs (default 1s),
@@ -313,6 +365,7 @@ export class SolverCoordinator {
           slot.worker.removeEventListener("message", onMessage);
           slot.busy = false;
           slot.currentTaskId = null;
+          slot.onDeath = null;
           remaining--;
           emitProgress();
           finishIfDone();
@@ -320,6 +373,10 @@ export class SolverCoordinator {
         };
 
         slot.worker.addEventListener("message", onMessage);
+        slot.onDeath = () => {
+          slot.worker.removeEventListener("message", onMessage);
+          workerDied();
+        };
         const baseSeed = plan.seeds[index];
         const req: IslandWorkerRequest = {
           id: taskId,
@@ -351,7 +408,7 @@ export class SolverCoordinator {
         slot.worker.postMessage(req);
       };
 
-      for (const slot of this.pool) dispatchNext(slot);
+      for (const slot of [...this.pool]) dispatchNext(slot);
     });
   }
 

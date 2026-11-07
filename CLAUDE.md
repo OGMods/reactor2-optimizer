@@ -265,6 +265,16 @@ The trap is that this class of bug is invisible in development and invisible in
 the test suite, so it surfaces only on the deployed site. Grep for `"/` in `src/`
 if a deploy comes back with missing art.
 
+**A deploy strands every page loaded before it.** Assets are content-hashed and
+a deploy replaces them all, so an open tab (or a cached `index.html`) points at a
+bundle, a Pixi chunk or a solver worker that is gone. Three guards, all needed:
+the inline watchdog at the top of `index.html` (reload once on a failed script,
+stylesheet or `vite:preloadError`; a Reload button on a splash still up at 20 s),
+`SolverCoordinator` listening for a worker's `error` (a worker that never loads
+never replies, and the run used to wait on it forever), and
+`utils/appUpdate.ts` comparing the bundle's build id against `version.json`,
+which `vite.config.ts` writes, to offer a reload.
+
 ## Where the rest lives
 
 Subsystem guidance is in folder-level `CLAUDE.md` files, which load when you

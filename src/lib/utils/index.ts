@@ -1,3 +1,4 @@
+export * from "./appUpdate";
 export * from "./analytics";
 export * from "./assetUrl";
 export * from "./bootLoader";
