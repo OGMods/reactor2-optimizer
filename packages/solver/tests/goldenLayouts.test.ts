@@ -88,6 +88,10 @@ const EXCLUDED_BUILDINGS = new Set([
   "cooler8",
   "precursor_pyramid",
   "ecto_compressor",
+  // 1.1.16
+  "generator8",
+  "kaiju_bio_reactor",
+  "pixel_core",
 ]);
 
 /**

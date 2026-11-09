@@ -1,6 +1,7 @@
 /**
  * Known-best-layout regression tests for a player holding EVERY building at its
- * top tier.
+ * top tier — every building of the 1.1.14 roster, which these were brute-forced
+ * on. See `ROSTER` for why it is pinned rather than following the game.
  *
  * `goldenLayouts.test.ts` pins the same ladder of islands against a mid-game
  * roster, where cooling is the binding constraint. At full tier it is not: one
@@ -24,7 +25,7 @@
  * not by running the solver and writing down what it said: over {empty, gen7,
  * cooler8, ecto, precursor_pyramid, doomStar} on every shape; over that set plus
  * generator6, cooler7 and flux_reactor up to eight tiles; over the entire
- * 42-building roster on the 3- and 4-tile boards; and each optimum against every
+ * 41-building roster on the 3- and 4-tile boards; and each optimum against every
  * 1- and 2-tile substitution from the entire roster. No lower tier appears in any
  * of them.
  *
@@ -70,7 +71,23 @@ const LEGEND: Record<string, string> = {
   X: "ecto_compressor",
 };
 
-const ROSTER = getEffectiveBuildings(BUILDINGS, allUpgradesUnlocked());
+/**
+ * Everything unlocked as of 1.1.14. 1.1.16 added Generator #8, Kaiju Bio
+ * Reactor and Pixel Core and took Heat Sink #8 from two tiers to six; let in,
+ * they change every optimum below, and an optimum is only worth pinning once
+ * it has been brute-forced. Pinned, the ladder keeps guarding the search on
+ * the roster it was proved on. The 1.1.16 ladder is
+ * `goldenLayoutsFullTier1116.test.ts`.
+ */
+function rosterAsOf1114(): EffectiveBuilding[] {
+  const all = allUpgradesUnlocked();
+  const unlocks: Record<string, number> = { ...all, cooler8: all.cooler8 - 4 };
+  for (const id of ["generator8", "kaiju_bio_reactor", "pixel_core"])
+    delete unlocks[id];
+  return getEffectiveBuildings(BUILDINGS, unlocks);
+}
+
+const ROSTER = rosterAsOf1114();
 const BY_ID = new Map(ROSTER.map((b) => [b.id, b]));
 
 function building(id: string): EffectiveBuilding {

@@ -22,7 +22,7 @@
     "cooler5": 8,
     "cooler6": 10,
     "cooler7": 8,
-    "cooler8": 1,
+    "cooler8": 5,
     "divine_reactor": 5,
     "doomStar_reactor": 5,
     "ecto_compressor": 5,
@@ -36,13 +36,16 @@
     "generator5": 8,
     "generator6": 8,
     "generator7": 7,
+    "generator8": 3,
     "geothermal_plant": 5,
     "gravitron_plant": 5,
     "heliothermal_plant": 5,
     "hydro_plant": 5,
     "hyper_space_core": 5,
+    "kaiju_bio_reactor": 5,
     "neuro_grid_reactor": 5,
     "nuclear_reactor": 5,
+    "pixel_core": 5,
     "precursor_pyramid": 5,
     "psionic_tower": 5,
     "quantum_reactor": 5,
@@ -57,47 +60,52 @@
       {
         "x": 0,
         "y": 0,
-        "building_id": "ecto_compressor"
+        "building_id": "pixel_core"
       },
       {
         "x": 3,
         "y": 0,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 4,
         "y": 0,
-        "building_id": "ecto_compressor"
+        "building_id": "generator8"
       },
       {
         "x": 5,
         "y": 0,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       },
       {
         "x": 8,
         "y": 0,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 9,
         "y": 0,
-        "building_id": "cooler8"
+        "building_id": "pixel_core"
       },
       {
         "x": 10,
         "y": 0,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 11,
+        "y": 0,
+        "building_id": "pixel_core"
+      },
+      {
+        "x": 12,
         "y": 0,
         "building_id": "cooler8"
       },
       {
         "x": 0,
         "y": 1,
-        "building_id": "generator7"
+        "building_id": "generator8"
       },
       {
         "x": 1,
@@ -107,7 +115,7 @@
       {
         "x": 3,
         "y": 1,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 4,
@@ -117,62 +125,57 @@
       {
         "x": 5,
         "y": 1,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 6,
         "y": 1,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       },
       {
         "x": 8,
         "y": 1,
-        "building_id": "precursor_pyramid"
+        "building_id": "pixel_core"
       },
       {
         "x": 9,
         "y": 1,
-        "building_id": "ecto_compressor"
+        "building_id": "generator8"
       },
       {
         "x": 10,
         "y": 1,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       },
       {
         "x": 11,
         "y": 1,
-        "building_id": "generator7"
-      },
-      {
-        "x": 12,
-        "y": 1,
-        "building_id": "generator7"
+        "building_id": "generator8"
       },
       {
         "x": 3,
         "y": 2,
-        "building_id": "ecto_compressor"
+        "building_id": "generator8"
       },
       {
         "x": 4,
         "y": 2,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       },
       {
         "x": 5,
         "y": 2,
-        "building_id": "cooler8"
+        "building_id": "generator8"
       },
       {
         "x": 6,
         "y": 2,
-        "building_id": "ecto_compressor"
+        "building_id": "cooler8"
       },
       {
         "x": 8,
         "y": 2,
-        "building_id": "generator7"
+        "building_id": "generator8"
       },
       {
         "x": 9,
@@ -182,50 +185,55 @@
       {
         "x": 10,
         "y": 2,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       },
       {
         "x": 11,
         "y": 2,
-        "building_id": "ecto_compressor"
+        "building_id": "pixel_core"
       },
       {
         "x": 12,
         "y": 2,
         "building_id": "cooler8"
+      },
+      {
+        "x": 4,
+        "y": 3,
+        "building_id": "pixel_core"
       },
       {
         "x": 5,
         "y": 3,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 8,
         "y": 3,
-        "building_id": "precursor_pyramid"
+        "building_id": "pixel_core"
       },
       {
         "x": 9,
         "y": 3,
-        "building_id": "ecto_compressor"
+        "building_id": "cooler8"
       },
       {
         "x": 10,
         "y": 3,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 11,
         "y": 3,
-        "building_id": "precursor_pyramid"
+        "building_id": "generator8"
       },
       {
         "x": 12,
         "y": 3,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       }
     ],
-    "power_output": 1.4735492957746475e+24,
+    "power_output": 1.9152396694214876e+26,
     "island_count": 3
   },
   "annealed": {
@@ -233,7 +241,7 @@
       {
         "x": 0,
         "y": 0,
-        "building_id": "ecto_compressor"
+        "building_id": "kaiju_bio_reactor"
       },
       {
         "x": 1,
@@ -243,137 +251,137 @@
       {
         "x": 3,
         "y": 0,
-        "building_id": "ecto_compressor"
+        "building_id": "cooler8"
       },
       {
         "x": 4,
         "y": 0,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 5,
         "y": 0,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       },
       {
         "x": 6,
         "y": 0,
-        "building_id": "generator7"
+        "building_id": "precursor_pyramid"
       },
       {
         "x": 8,
         "y": 0,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       },
       {
         "x": 9,
         "y": 0,
-        "building_id": "ecto_compressor"
+        "building_id": "pixel_core"
       },
       {
         "x": 10,
         "y": 0,
-        "building_id": "ecto_compressor"
+        "building_id": "cooler8"
       },
       {
         "x": 11,
         "y": 0,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       },
       {
         "x": 12,
         "y": 0,
-        "building_id": "cooler8"
+        "building_id": "generator8"
       },
       {
         "x": 0,
         "y": 1,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 1,
         "y": 1,
-        "building_id": "generator7"
+        "building_id": "generator8"
       },
       {
         "x": 3,
         "y": 1,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 4,
         "y": 1,
-        "building_id": "ecto_compressor"
+        "building_id": "generator8"
       },
       {
         "x": 5,
         "y": 1,
-        "building_id": "cooler8"
+        "building_id": "generator8"
       },
       {
         "x": 6,
         "y": 1,
-        "building_id": "ecto_compressor"
+        "building_id": "pixel_core"
       },
       {
         "x": 8,
         "y": 1,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       },
       {
         "x": 9,
         "y": 1,
-        "building_id": "cooler8"
+        "building_id": "generator8"
       },
       {
         "x": 10,
         "y": 1,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 11,
         "y": 1,
-        "building_id": "generator7"
+        "building_id": "generator8"
       },
       {
         "x": 12,
         "y": 1,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 3,
         "y": 2,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       },
       {
         "x": 4,
         "y": 2,
-        "building_id": "cooler8"
+        "building_id": "pixel_core"
       },
       {
         "x": 5,
         "y": 2,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 6,
         "y": 2,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       },
       {
         "x": 8,
         "y": 2,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 9,
         "y": 2,
-        "building_id": "generator7"
+        "building_id": "generator8"
       },
       {
         "x": 10,
         "y": 2,
-        "building_id": "ecto_compressor"
+        "building_id": "pixel_core"
       },
       {
         "x": 11,
@@ -383,45 +391,45 @@
       {
         "x": 12,
         "y": 2,
-        "building_id": "ecto_compressor"
+        "building_id": "cooler8"
       },
       {
         "x": 4,
         "y": 3,
-        "building_id": "ecto_compressor"
+        "building_id": "generator8"
       },
       {
         "x": 5,
         "y": 3,
-        "building_id": "generator7"
+        "building_id": "cooler8"
       },
       {
         "x": 8,
         "y": 3,
-        "building_id": "ecto_compressor"
+        "building_id": "cooler8"
       },
       {
         "x": 9,
         "y": 3,
-        "building_id": "ecto_compressor"
+        "building_id": "pixel_core"
       },
       {
         "x": 10,
         "y": 3,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       },
       {
         "x": 11,
         "y": 3,
-        "building_id": "generator7"
+        "building_id": "generator8"
       },
       {
         "x": 12,
         "y": 3,
-        "building_id": "generator7"
+        "building_id": "pixel_core"
       }
     ],
-    "power_output": 2.2260000000000003e+24,
+    "power_output": 1.947804738292011e+26,
     "island_count": 3
   }
 }
