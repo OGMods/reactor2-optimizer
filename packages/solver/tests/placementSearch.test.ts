@@ -341,7 +341,8 @@ describe("seed construction", () => {
     /*
      * On the roster this floor was calibrated against: everything unlocked as
      * of the game before 1.1.10, which added two tiers to Heat Sink #7, three to
-     * Generator #7 and three late-game buildings. Pinned, because what it
+     * Generator #7 and three late-game buildings (1.1.16's three are left out
+     * the same way). Pinned, because what it
      * guards is the heuristic, and a roster that changes shape moves the figure
      * without the heuristic doing anything. Measured 83.0%.
      */
@@ -351,7 +352,14 @@ describe("seed construction", () => {
       cooler7: all.cooler7 - 2,
       generator7: all.generator7 - 3,
     };
-    for (const id of ["cooler8", "precursor_pyramid", "ecto_compressor"])
+    for (const id of [
+      "cooler8",
+      "precursor_pyramid",
+      "ecto_compressor",
+      "generator8",
+      "kaiju_bio_reactor",
+      "pixel_core",
+    ])
       delete before[id];
     const { power, bound } = await seedShareOfBound(before);
 
@@ -364,14 +372,13 @@ describe("seed construction", () => {
 
   it("holds its floor on the current roster too", async () => {
     /*
-     * The game as it ships. Since 1.1.10 one Ecto Compressor outputs about two
-     * top generators' worth of heat, where a top generator used to take about
-     * four of the best reactors, so the best hub is a reactor between
-     * generators rather than a generator ringed by reactors. The seed is built
-     * around the old shape and lands lower: measured 66.1%, against 83.0% on the
-     * roster before. This floor is the new figure less a margin, so a drop from
-     * here still fails, and lifting the seed for the new shape is the fix that
-     * would let it rise.
+     * The game as it ships. From 1.1.10 to 1.1.14 one Ecto Compressor made
+     * about two top generators' worth of heat, a shape the seed was not built
+     * for, and it measured 66.1%. 1.1.16's Pixel Core fills about half a
+     * Generator #8, back to a generator fed by reactors, and the seed measures
+     * 83.7% again. This floor is that figure less a margin, so a drop from here
+     * still fails; a game update that moves it is a reason to re-measure, not
+     * to lower it unread.
      */
     const { power, bound } = await seedShareOfBound(allUpgradesUnlocked());
 
@@ -379,7 +386,7 @@ describe("seed construction", () => {
       power,
       `seed power ${power.toExponential(3)} is far below the ` +
         `${bound.toExponential(3)} bound`,
-    ).toBeGreaterThan(0.6 * bound);
+    ).toBeGreaterThan(0.78 * bound);
   }, 20_000);
 });
 

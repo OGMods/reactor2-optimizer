@@ -750,8 +750,11 @@ Start with `npm test`. Four parts of it are what actually catch a regression:
   the walk permanently.
 - **`tests/goldenLayouts.test.ts`** pins the proven optima for islands of 3–9
   tiles on a mid-game roster, and **`tests/goldenLayoutsFullTier.test.ts`** the
-  same islands with every building at its top tier. **These numbers must never
-  go down.**
+  same islands with every building at its top tier as of 1.1.14, and
+  **`tests/goldenLayoutsFullTier1116.test.ts`** as of 1.1.16. Each is pinned to
+  the roster it was brute-forced on; a game update that adds buildings gets a
+  new ladder rather than a re-pinned old one. **These numbers must never go
+  down.**
 - **`tests/distribution.test.ts`** pins the flow rules against measurements from
   the live game and against an independent max-flow oracle.
 - **The anomaly suite** — `tests/anomalies.test.ts`, `tests/scaling.test.ts`,

@@ -870,8 +870,12 @@ about before changing anything in the search:
   numbers must never go down.** Each size is checked twice: once against the simulator, pinning
   the exact layout deterministically, and once against the search, which must reproduce it.
   That ladder is a mid-game roster, where cooling binds; **`goldenLayoutsFullTier.test.ts`** is
-  the same seven islands with every building at its top tier, where cooler8 makes cooling
-  plentiful and generator capacity binds instead, so the optima are a different ladder.
+  the same seven islands with every building at its top tier as of 1.1.14, where cooler8 makes
+  cooling plentiful and generator capacity binds instead, so the optima are a different ladder.
+  **`goldenLayoutsFullTier1116.test.ts`** is the 1.1.16 top tier, where Heat Sink #8 no longer
+  covers a full Generator #8 and cooling binds again — the Kaiju Bio Reactor fills what the
+  coolers have left after the Pixel Cores. Each full-tier ladder is pinned to the roster it was
+  brute-forced on, so a game update adds a ladder rather than breaking one.
 - **`anomalies.test.ts`**, **`scaling.test.ts`** and **`placementSearch.rating.test.ts`** — the
   rules, which the fixtures cannot reach at all because every fixture is solved under the base
   ones. Between them they pin each rule reaching the layout the search reports, the search running
