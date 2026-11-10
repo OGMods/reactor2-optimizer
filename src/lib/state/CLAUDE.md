@@ -459,12 +459,35 @@ Every candidate is scored by `createBoardScorer` — one island context, each
 building's rating per tile cached — ~0.2ms a board; the planner yields every 30ms
 and reports progress.
 
+**Or one kind at a time** (`uiState.stepOrder`, persisted, offered at the
+bar's Start): `kind` hands the planner `PlanOptions.group`, so every generator
+goes down, then every cooler, then every reactor — or whatever order the
+player sets (`uiState.stepKinds`, persisted, set in `StepOrderModal`, which "By kind" opens) — each
+swept in reading order, sales ahead of all of them. Asked for by a player who
+builds that way: a solve of a hundred buildings is easier to carry out with
+one building in hand. It gives up the power line — on a live island it can
+fall to nothing until the reactors land — but **not the cash rule**, which
+still filters before the groups order. Changing it re-plans.
+
+**The kind filter picks one kind out of the solver's board**
+(`uiState.kindFilter`, `hud/KindFilter`, not persisted): that kind stays at
+full strength and the rest fade through the same `GridRenderer.setFocus`, so
+the free tiles still read apart from the taken ones. It works in step mode
+too, where the step's own building is still the one drawn large.
+
 **Step mode shows the one building a step is about.** The canvas fades every
 other building, pad and badge to 40% (`GridRenderer.setFocus`) and draws the
 step's own a little larger, drops the fill gauges, the state and anomaly icons
 and the pulse, outlines the step's tiles on the ground beneath their buildings
 and draws a move as an arrow over everything — a swap as two, side by side. The
 step bar carries the power.
+
+**The last step offers to update the board in Edit** (`uiState.applyMoveSteps`):
+the island after the last step is what the player has just built in the game,
+and their board in Edit — still the start of the steps — is what Island stats
+and the timeline count. It goes through `copySolveToBoard`, so it is one undo
+entry and leaves the steps; asked rather than done, since the player may only
+have been reading the plan, and "Not now" holds for that plan.
 
 **Step mode is a sub-mode of the solver view.** While `stepsActive`,
 `visiblePlacements` is the scored board after the step on screen, so the canvas,

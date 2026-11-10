@@ -10,6 +10,7 @@
   } from "lucide-svelte";
   import BoardActions from "./BoardActions.svelte";
   import BuildingPalette from "./BuildingPalette.svelte";
+  import KindFilter from "./KindFilter.svelte";
   import ObstaclePalette, { OBSTACLE_TYPES } from "./ObstaclePalette.svelte";
   import PlacementViewToggle from "./PlacementViewToggle.svelte";
   import TerrainPalette from "./TerrainPalette.svelte";
@@ -178,7 +179,16 @@
       is pinned to the band's right edge either way, so nothing moves by
       taking the line away.
     -->
-    <div class="view-row"><PlacementViewToggle /></div>
+    <!--
+      On the solver's board the kind filter shares this line, left of the
+      toggle: under Setup and Run it was a third pill on a third line,
+      centred beneath two that hug the edges. It wraps to a line of its own
+      only on a phone too narrow for both.
+    -->
+    <div class="view-row">
+      {#if uiState.showingSolver}<KindFilter />{/if}
+      <PlacementViewToggle />
+    </div>
   {/if}
 
   <div class="hud-top">
@@ -281,6 +291,13 @@
         </button>
       {/if}
     </div>
+  {:else if uiState.canSwitchBoards && !viewportState.isCompact}
+    <!--
+      On the solver's board the tool row's place goes to picking out one kind
+      of building, which is how a player copies a solve into the game. Not
+      during a run: the board is a search still moving, nothing to copy yet.
+    -->
+    <KindFilter />
   {/if}
 </div>
 
@@ -363,9 +380,17 @@
 
   .view-row {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
     width: 100%;
     justify-content: flex-end;
     pointer-events: none;
+  }
+
+  /* The filter takes the left edge, on the toggle's line or one of its own. */
+  .view-row > :global(.kind-filter) {
+    margin-right: auto;
   }
 
   .view-row > :global(*) {

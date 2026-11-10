@@ -172,6 +172,12 @@ whose tile was just tapped. It is **derived, never written** — dismissing the 
 puts the card back exactly as the player left it, where folding _by_ setting
 `statsCardCollapsed` would have rewritten their preference on the way past.
 
+**Step mode folds it on every screen**, derived the same way and with the fold
+button gone: the step bar carries the power, the cost and the place, the
+figures would describe a board halfway through being built, and on a phone
+they covered the island the steps are drawn on. Planning counts as step mode,
+so a re-plan does not open and shut the card.
+
 Player-facing coordinates are flipped: `formatTileCoords` prints
 `[x, height - y]`, because the grid indexes rows downward and the game counts them
 upward from the bottom. That flip lives in the formatter and nowhere else, so the

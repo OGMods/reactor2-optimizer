@@ -4,6 +4,8 @@
   import { layoutState, uiState } from "../../state";
   import type { MoveStep } from "../../simulation/moveSteps";
   import { asset, formatTileCoords } from "../../utils";
+  import KindFilter from "./KindFilter.svelte";
+  import { KIND_META } from "./buildingKinds";
 
   /*
    * Step mode's controls, in the HUD's place: which step the board is showing,
@@ -28,6 +30,12 @@
   });
 
   let index = $derived(m?.index ?? 0);
+
+  /*
+   * "Not now" on the last step's offer, for this plan: asked once, not again
+   * every time the player steps back and forward past the end.
+   */
+  let applyDeclined = $state<object | null>(null);
   let total = $derived(m?.plan.steps.length ?? 0);
   let step = $derived(m && index > 0 ? m.plan.steps[index - 1] : null);
   let power = $derived(m ? m.plan.powers[index] : 0);
@@ -174,7 +182,9 @@
   $effect(() => stopHold);
 
   function onKey(e: KeyboardEvent) {
+    // A dialog over the bar has the keys: the arrows must not step behind it.
     if (!m || e.target instanceof HTMLInputElement) return;
+    if (uiState.activeModal !== null) return;
     if (e.key === "ArrowRight") uiState.showMoveStep(index + 1);
     else if (e.key === "ArrowLeft") uiState.showMoveStep(index - 1);
     else return;
@@ -190,6 +200,14 @@
 {/snippet}
 
 <div class="steps-dock" bind:clientHeight={measuredHeight}>
+  {#if m && !planning}
+    <!--
+      The kind filter rides above the bar as it does above the solver board's
+      actions: a step's own building stays drawn large, with the rest of the
+      kind picked out beside it for where it goes among them.
+    -->
+    <KindFilter />
+  {/if}
   <div class="bar" role="region" aria-label="Steps to this layout">
     {#if planning || !m}
       <div class="planning">
@@ -211,6 +229,20 @@
         <span class="count">
           {index === 0 ? "Start" : `Step ${index} of ${total}`}
         </span>
+        {#if price && (price.spend > 0 || price.refund > 0)}
+          <!--
+            This step's cash, on the head line rather than a row of its own:
+            what it costs, and what a sale in it pays back.
+          -->
+          <span class="step-cash">
+            {#if price.spend > 0}{@render cash()}{formatNumber(
+                price.spend,
+              )}{/if}
+            {#if price.refund > 0}<span class="back"
+                >+{formatNumber(price.refund)} back</span
+              >{/if}
+          </span>
+        {/if}
         <span class="power">
           <img
             src={asset("icons/icon_energy.webp")}
@@ -240,8 +272,8 @@
               class="sprite"
               src={iconOf(step)}
               alt=""
-              width="28"
-              height="28"
+              width="24"
+              height="24"
             />
           {/if}
           <span>{describe(step)}</span>
@@ -263,18 +295,29 @@
           rearrange buildings.
         </p>
       {/if}
-      {#if price && (price.spend > 0 || price.refund > 0)}
-        <!-- This step's cash: what it costs, what a sale in it pays back. -->
-        <dl class="money">
-          {#if price.spend > 0}
-            <dt>Costs</dt>
-            <dd>{@render cash()}{formatNumber(price.spend)}</dd>
-          {/if}
-          {#if price.refund > 0}
-            <dt>Refunds</dt>
-            <dd>{@render cash()}{formatNumber(price.refund)}</dd>
-          {/if}
-        </dl>
+      {#if index === total && total > 0 && applyDeclined !== m.plan && !layoutState.isPreview}
+        <!--
+          The end of the walk: the player has, presumably, built it in the
+          game. Their board in Edit is still the island as it started, and that
+          is what Island stats and the timeline count — so offer to bring it
+          up to date, as the readout's Copy would. Asked, not done: they may
+          only have been reading the plan.
+        -->
+        <div class="apply">
+          <p>Built it? Put it on your board in Edit for Island stats.</p>
+          <div class="apply-actions">
+            <button
+              type="button"
+              class="apply-btn"
+              onclick={() => (applyDeclined = m.plan)}>Not now</button
+            >
+            <button
+              type="button"
+              class="apply-btn primary"
+              onclick={() => uiState.applyMoveSteps()}>Update my board</button
+            >
+          </div>
+        </div>
       {/if}
       {#if index === 0 && money && (money.spend > 0 || money.refund > 0)}
         <!--
@@ -284,22 +327,74 @@
           in the export: that is a snapshot, stale as soon as the game earns on,
           and doubled by a rush hour.
         -->
-        <dl class="money">
-          <dt>Cash needed</dt>
-          <dd>{@render cash()}{formatNumber(money.spend)}</dd>
-          <dt>Refunded</dt>
-          <dd>{@render cash()}{formatNumber(money.refund)}</dd>
-          {#if money.peak > 0 && money.peak < money.spend}
-            <dt>Cash on hand needed</dt>
-            <dd>{@render cash()}{formatNumber(money.peak)}</dd>
+        <p class="money">
+          <span
+            ><span class="money-label">Costs</span>
+            {@render cash()}{formatNumber(money.spend)}</span
+          >
+          {#if money.refund > 0}
+            <span
+              ><span class="money-label">Refunds</span>
+              {@render cash()}{formatNumber(money.refund)}</span
+            >
           {/if}
-        </dl>
+          {#if money.peak > 0 && money.peak < money.spend}
+            <span
+              ><span class="money-label">Hold at once</span>
+              {@render cash()}{formatNumber(money.peak)}</span
+            >
+          {/if}
+        </p>
       {/if}
       {#if index === 0 && lowest < power}
         <p class="note">
           Lowest on the way: {formatNumber(lowest)}, {delta(lowest, power)}
           from now.
         </p>
+      {/if}
+      {#if index === 0}
+        <!--
+          The order, offered at the start where the plan is summed up: the most
+          power first keeps the island earning, one kind at a time is simpler
+          to carry out. Changing it plans again.
+        -->
+        <div class="order" role="group" aria-label="Order of the steps">
+          <span class="order-label">Order</span>
+          <button
+            type="button"
+            class="order-btn"
+            class:active={uiState.stepOrder === "power"}
+            aria-pressed={uiState.stepOrder === "power"}
+            title="Each step the one that leaves the most power"
+            onclick={() => uiState.setStepOrder("power")}>Most power</button
+          >
+          <button
+            type="button"
+            class="order-btn"
+            class:active={uiState.stepOrder === "kind"}
+            aria-pressed={uiState.stepOrder === "kind"}
+            title="One kind at a time, in an order you choose"
+            aria-haspopup="dialog"
+            onclick={() => uiState.openStepOrder()}>By kind</button
+          >
+        </div>
+        {#if uiState.stepOrder === "kind"}
+          <!--
+            The order in one line; it is set in its own dialog
+            (`StepOrderModal`), which "By kind" opens too.
+          -->
+          <p class="note kinds-line">
+            <span
+              >{uiState.stepKinds.map((k) => KIND_META[k].label).join(" → ")},
+              row by row.</span
+            >
+            <button
+              type="button"
+              class="link-btn"
+              onclick={() => uiState.openStepOrder()}>Change</button
+            >
+          </p>
+        {/if}
       {/if}
 
       <div class="nav">
@@ -355,8 +450,10 @@
     bottom: 0;
     z-index: var(--z-hud);
     display: flex;
-    justify-content: center;
-    padding: 0 max(0.5rem, var(--safe-right)) max(0.75rem, var(--safe-bottom))
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0 max(0.5rem, var(--safe-right)) max(0.5rem, var(--safe-bottom))
       calc(max(0.5rem, var(--safe-left)) + var(--sidebar-clearance, 0px));
     transition: padding-left var(--dur) var(--ease);
     pointer-events: none;
@@ -367,8 +464,8 @@
     width: min(30rem, 100%);
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    padding: 0.7rem 0.8rem;
+    gap: 0.35rem;
+    padding: 0.45rem 0.6rem 0.5rem;
     background: rgba(var(--surface-panel-rgb), 0.94);
     backdrop-filter: blur(12px);
     border: 1px solid var(--border-accent);
@@ -380,8 +477,30 @@
   .head {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.5rem;
+    min-height: var(--ctl-sm);
     font-size: var(--fs-sm);
+  }
+
+  .count {
+    white-space: nowrap;
+  }
+
+  .step-cash {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+  }
+
+  .back {
+    color: var(--text-dim);
   }
 
   .planning span {
@@ -438,10 +557,11 @@
   .what {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
-    min-height: 28px;
+    gap: 0.5rem;
+    min-height: 24px;
     font-size: var(--fs-base);
     font-weight: 600;
+    line-height: 1.3;
   }
 
   .sprite {
@@ -449,32 +569,149 @@
     object-fit: contain;
   }
 
+  /* The plan's cash on one line, wrapping only when it must. */
   .money {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0.2rem 0.75rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem 0.85rem;
     margin: 0;
     font-size: var(--fs-sm);
-  }
-
-  .money dt {
-    color: var(--text-muted);
-  }
-
-  .money dd {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0.3rem;
-    margin: 0;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+  }
+
+  .money > span {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .money-label {
+    font-weight: 400;
+    color: var(--text-muted);
   }
 
   .note {
     margin: 0;
     font-size: var(--fs-xs);
     color: var(--text-dim);
+  }
+
+  .order {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: var(--fs-sm);
+  }
+
+  .order-label {
+    margin-right: auto;
+    color: var(--text-muted);
+  }
+
+  .order-btn {
+    min-height: var(--ctl-sm);
+    padding: 0.2rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* Hover only where there is one: on touch it sticks after the tap. */
+  @media (hover: hover) {
+    .order-btn:hover {
+      color: var(--text);
+      background: var(--surface-raised);
+    }
+  }
+
+  /* Selected takes `--accent`, as everywhere: see the colour law in app.css. */
+  .order-btn.active {
+    background: var(--accent-bg);
+    border-color: var(--accent-line);
+    color: var(--accent);
+  }
+
+  .kinds-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .link-btn {
+    flex-shrink: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    /* Not `--accent`: that means selected, and a link is not (colour law). */
+    color: var(--text-muted);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+
+  /*
+   * The question and its answers on one line where they fit, two where not.
+   * Neutral, not accented: a prompt is not a selection (colour law), and
+   * `--action` is RUN's alone.
+   */
+  .apply {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-inset);
+  }
+
+  .apply p {
+    flex: 1 1 12rem;
+    margin: 0;
+    font-size: var(--fs-sm);
+    line-height: 1.35;
+    color: var(--text);
+  }
+
+  .apply-actions {
+    display: flex;
+    flex: 1 1 auto;
+    gap: 0.4rem;
+  }
+
+  .apply-btn {
+    flex: 1;
+    min-height: var(--ctl-sm);
+    padding: 0 0.6rem;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* The answer the prompt is for, set apart by weight rather than hue. */
+  .apply-btn.primary {
+    color: var(--text);
+    background: var(--surface-raised);
+  }
+
+  @media (hover: hover) {
+    .apply-btn:hover {
+      color: var(--text);
+      background: var(--surface-raised);
+    }
   }
 
   .nav {
@@ -530,9 +767,29 @@
       width: var(--tap);
       height: var(--tap);
     }
+    /* A full thumb target that does not make the head line any taller. */
     .icon {
       width: var(--tap);
       height: var(--tap);
+      margin: calc((var(--ctl-sm) - var(--tap)) / 2);
+      margin-left: 0;
+    }
+    /*
+     * Below the tap floor on purpose: a setting chosen once per plan, not a
+     * control walked with the thumb, and at 44px the two of them made the
+     * start of the plan a row taller for it.
+     */
+    .order-btn {
+      min-height: var(--ctl);
+    }
+    .apply-btn {
+      min-height: var(--tap);
+    }
+    /* A full thumb target inside a line of small text, without growing it. */
+    .link-btn {
+      min-height: var(--tap);
+      margin: -0.75rem -0.25rem;
+      padding: 0 0.25rem;
     }
   }
 </style>

@@ -4,6 +4,7 @@ import type {
   OptimizationResult,
   PlacedBuilding,
   PlacementView,
+  StepOrder,
   Tile,
 } from "../types";
 import { isObstacleType } from "../types/grid";
@@ -24,6 +25,7 @@ import {
   applyInProgress,
   blueprintRules,
   BUILDINGS,
+  buildingCategory,
   buildPrice,
   decodeBlueprint,
   encodeBlueprint,
@@ -91,6 +93,7 @@ type ActiveModal =
   | "transfer"
   | "transferIn"
   | "islandStats"
+  | "stepOrder"
   | null;
 
 /**
@@ -163,6 +166,36 @@ type SetupTab = "islands" | "buildings" | "timelab";
  * refuses to guess `hudHeight` for exactly the same reason.
  */
 const SHEET_PEEK_FALLBACK_PX = 148;
+
+/**
+ * The kinds step mode's `kind` order builds, first to last, until a player
+ * sets their own. Generators first, the order a player asked for: they are
+ * the layout's skeleton, and with neither heat nor cooling beside them yet
+ * they change nothing while they go down. Direct producers go with the
+ * reactors, as everywhere in the UI.
+ */
+const DEFAULT_STEP_KINDS: readonly BuildingCategory[] = [
+  "generator",
+  "cooler",
+  "heat_producer",
+];
+
+/** A stored order, if it is the three kinds once each; else the default. */
+function readStepKinds(stored: unknown): BuildingCategory[] {
+  const ok =
+    Array.isArray(stored) &&
+    stored.length === DEFAULT_STEP_KINDS.length &&
+    DEFAULT_STEP_KINDS.every((k) => stored.includes(k));
+  return ok ? (stored as BuildingCategory[]) : [...DEFAULT_STEP_KINDS];
+}
+
+/** Ranks a building by its kind's place in `kinds`; an unknown id goes last. */
+function stepKindRank(kinds: readonly BuildingCategory[]) {
+  return (buildingId: string): number => {
+    const type = findBuilding(buildingId)?.type;
+    return type ? kinds.indexOf(buildingCategory(type)) : kinds.length;
+  };
+}
 
 /**
  * Interface state: what is open, what is being inspected, and the view-model
@@ -353,6 +386,85 @@ class UIState {
     if (this.#fillBadges === on) return;
     this.#fillBadges = on;
     uiStorage.savePrefs({ fillBadges: on });
+  }
+
+  /**
+   * The one kind of building the solver's board picks out, or null for all —
+   * see `hud/KindFilter`. A solve on a large island is a hundred buildings,
+   * too many to copy by eye; a player building one kind at a time wants that
+   * kind standing out and the rest faded to where they go. Faded rather than
+   * hidden, so a free tile still reads differently from one another kind
+   * takes. Not persisted: it is how the board is being read right now.
+   */
+  kindFilter = $state<BuildingCategory | null>(null);
+
+  setKindFilter(kind: BuildingCategory | null) {
+    this.kindFilter = this.kindFilter === kind ? null : kind;
+  }
+
+  /**
+   * How step mode orders its steps. `power` is the planner's own order, the
+   * most power first; `kind` builds one kind at a time in `stepKinds`'
+   * order, each swept in reading order — slower to pay off, simpler to carry
+   * out. Persisted: it is how a player builds.
+   */
+  // A stored value from another build reads as the default, never as an
+  // order neither button would light.
+  #stepOrder = $state<StepOrder>(
+    uiStorage.loadPrefs().stepOrder === "kind" ? "kind" : "power",
+  );
+
+  get stepOrder(): StepOrder {
+    return this.#stepOrder;
+  }
+
+  /** Changes the order, and re-plans the steps on screen in it. */
+  setStepOrder(order: StepOrder) {
+    if (this.#stepOrder === order) return;
+    this.#stepOrder = order;
+    uiStorage.savePrefs({ stepOrder: order });
+    if (this.stepsActive || this.moveStepsPlanning !== null)
+      void this.planMoveSteps(true);
+  }
+
+  /**
+   * The kinds the `kind` order builds, first to last — the player's own,
+   * since players build in different orders (one asked for generators, then
+   * coolers, then reactors). Persisted with the order itself.
+   */
+  #stepKinds = $state<BuildingCategory[]>(
+    readStepKinds(uiStorage.loadPrefs().stepKinds),
+  );
+
+  get stepKinds(): readonly BuildingCategory[] {
+    return this.#stepKinds;
+  }
+
+  /**
+   * Opens the dialog that sets `stepKinds` — what pressing "By kind" does,
+   * since the order is the whole of that choice.
+   */
+  openStepOrder() {
+    this.activeModal = "stepOrder";
+  }
+
+  /**
+   * Takes `kinds` as the build order and switches the steps to it: one
+   * write, one save, one re-plan of the steps on screen, then the dialog
+   * closes. A value that is not the three kinds once each is refused.
+   */
+  useStepKinds(kinds: readonly BuildingCategory[]) {
+    const next = readStepKinds([...kinds]);
+    if (next.some((k, i) => k !== kinds[i])) return;
+    const changed =
+      this.#stepOrder !== "kind" ||
+      next.some((k, i) => k !== this.#stepKinds[i]);
+    this.#stepKinds = next;
+    this.#stepOrder = "kind";
+    uiStorage.savePrefs({ stepKinds: next, stepOrder: "kind" });
+    this.closeModal();
+    if (changed && (this.stepsActive || this.moveStepsPlanning !== null))
+      void this.planMoveSteps(true);
   }
 
   /**
@@ -1062,11 +1174,15 @@ class UIState {
 
   /** Whether "Steps" can be offered for the board on screen now. */
   get canPlanMoveSteps(): boolean {
+    return this.moveStepsPlanning === null && this.#canPlanBut();
+  }
+
+  /** `canPlanMoveSteps` but for a plan already in flight. */
+  #canPlanBut(): boolean {
     return (
       this.showingSolver &&
       !this.isPreview &&
       !solverState.isOptimizing &&
-      this.moveStepsPlanning === null &&
       (solverState.optimizationResult?.placements.length ?? 0) > 0
     );
   }
@@ -1094,8 +1210,13 @@ class UIState {
    * cover starts from their board here instead. Superseded by a later call,
    * and abandoned if the solve or the island changes while it plans.
    */
-  async planMoveSteps() {
-    if (!this.canPlanMoveSteps) return;
+  async planMoveSteps(replan = false) {
+    // A re-plan for a changed order supersedes one still planning (the seq
+    // makes the older stale) rather than being dropped behind it, which
+    // would leave the steps on screen in an order the player has left.
+    const planningOnly =
+      replan && this.moveStepsPlanning !== null && this.#canPlanBut();
+    if (!this.canPlanMoveSteps && !planningOnly) return;
     const seq = ++this.#moveStepsSeq;
     const templateId = layoutState.activeTemplateId;
     const grid = $state.snapshot(layoutState.grid);
@@ -1164,6 +1285,8 @@ class UIState {
         refund: (id: string, n: number) => sellRefund(baseOf(id), n, rules),
       };
       if (stale()) return;
+      const order = this.#stepOrder;
+      const kinds = [...this.#stepKinds];
       const plan = await planMoveSteps(start, target, obstacles, score, {
         onProgress: (done, total) => {
           if (!stale()) this.moveStepsPlanning = { done, total };
@@ -1178,6 +1301,7 @@ class UIState {
         // layout, which fits it, costs in all: sales that pay for a build
         // come before it. Without one, power alone orders them.
         cash: configState.cashLimit !== null ? pricing : undefined,
+        group: order === "kind" ? stepKindRank(kinds) : undefined,
       });
       if (stale()) return;
       if (plan.steps.every((step) => step.kind === "clear")) {
@@ -1222,6 +1346,23 @@ class UIState {
     const m = this.moveSteps;
     if (!m) return;
     m.index = Math.max(0, Math.min(index, m.plan.steps.length));
+  }
+
+  /**
+   * Takes the island after the last step onto the board in Edit — the
+   * readout's Copy, offered by the step bar once the player has walked the
+   * plan. That board is the island they have just built in the game (a plan
+   * that stops at the solve's power is not quite the solve), and as their
+   * board in Edit it is what Island stats and the timeline count. One undo
+   * entry, like Copy; leaving the steps goes with it.
+   */
+  applyMoveSteps(): boolean {
+    const m = this.moveSteps;
+    if (!this.stepsActive || !m || m.index !== m.plan.steps.length)
+      return false;
+    if (!this.copySolveToBoard()) return false;
+    this.showToast("Your board in Edit now matches the island you built");
+    return true;
   }
 
   closeMoveSteps() {

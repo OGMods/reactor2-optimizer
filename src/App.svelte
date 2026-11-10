@@ -23,6 +23,7 @@
     TimeLabPlannerModal,
     TransferModal,
     IslandStatsModal,
+    StepOrderModal,
     UpgradePlanModal,
   } from "./lib/components";
   import { Eye } from "lucide-svelte";
@@ -347,6 +348,7 @@
   <TimeLabPlannerModal />
   <TransferModal />
   <IslandStatsModal />
+  <StepOrderModal />
 
   {#if uiState.updateAvailable}
     <!--

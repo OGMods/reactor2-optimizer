@@ -23,3 +23,4 @@ export { default as UpgradePlanModal } from "./modals/UpgradePlanModal.svelte";
 export { default as TimeLabPlannerModal } from "./modals/TimeLabPlannerModal.svelte";
 export { default as TransferModal } from "./modals/TransferModal.svelte";
 export { default as IslandStatsModal } from "./modals/IslandStatsModal.svelte";
+export { default as StepOrderModal } from "./modals/StepOrderModal.svelte";

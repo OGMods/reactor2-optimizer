@@ -83,6 +83,14 @@ board the _user_ builds, so on the solver's an undo would land silently on the
 other board while the press read as broken. Gone rather than greyed, because this
 is a mode rather than a momentarily empty history.
 
+**The tool row's place goes to `KindFilter`** there (not during a run):
+Generators / Coolers / Reactors, each with its count, picking one kind out of
+the board. It rides above `MoveStepsBar` in step mode as well. On a phone the
+labels go and the icon and count stay, and it moves up onto the view toggle's
+line, left of it, so the stack is two columns — filter over Setup, toggle over
+Run — instead of a third pill centred on a third line. It wraps to its own
+line only when the two cannot share one.
+
 **The way off that board is `uiState.copySolveToBoard()`**, offered as a Copy
 button in the readout's head. A solve is as often a starting point as an answer —
 a player wants what the search found, with one cooler moved, without rebuilding
