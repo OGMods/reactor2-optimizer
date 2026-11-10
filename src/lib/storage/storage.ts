@@ -1,5 +1,5 @@
 import type { CustomIsland } from "../types/building";
-import type { ImageScale, PlacementView } from "../types/ui";
+import type { ImageScale, PlacementView, StepOrder } from "../types/ui";
 import { DEFAULT_SOLVE_MODE, type SolveModeId } from "../worker/solveModes";
 import {
   DEFAULT_ANOMALY_ID,
@@ -102,6 +102,17 @@ export interface UiPrefs {
   /** How far `saveLayoutImage` scales the exported PNG up. */
   imageScale: ImageScale;
   /**
+   * How step mode orders its steps — see `uiState.stepOrder`. A preference,
+   * since it is about how the player builds, not about one island.
+   */
+  stepOrder: StepOrder;
+  /**
+   * The kinds `stepOrder: "kind"` builds, first to last — see
+   * `uiState.stepKinds`. Optional: absent is the default order, and a stored
+   * value that is not the three kinds once each is read as absent.
+   */
+  stepKinds?: string[];
+  /**
    * The jump award the timeline panel counts down to — see
    * `timelineState.chrononTarget`. Optional: absent means the player has not
    * set one, and the panel reads today's award instead.
@@ -118,6 +129,7 @@ const DEFAULT_UI_PREFS: UiPrefs = {
   fillBadges: true,
   chainLinks: true,
   imageScale: 1,
+  stepOrder: "power",
 };
 
 /**

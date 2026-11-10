@@ -278,6 +278,8 @@ export class GridRenderer {
 
   /** See `setFocus`: the tiles left at full strength, or null for all. */
   private focus: ReadonlySet<string> | null = null;
+  /** See `setFocus`: the tiles drawn a little larger as well. */
+  private enlarged: ReadonlySet<string> | null = null;
 
   /** See `setLinks`. Its own layer, so `clear()` never touches it. */
   private linkGraphics: Graphics;
@@ -1000,11 +1002,19 @@ export class GridRenderer {
   /**
    * Fades every building, pad and badge but those on `tiles` — step mode's
    * way of making the one building a step is about stand out on a board of a
-   * hundred. Null puts every tile back at full strength. The terrain is never
-   * faded, so the island still reads as itself.
+   * hundred, and the kind filter's of picking out one kind. Null puts every
+   * tile back at full strength. The terrain is never faded, so the island
+   * still reads as itself.
+   *
+   * `enlarged` are drawn a little larger as well — a step's own building,
+   * and not a whole kind, which would only crowd the board at a larger size.
    */
-  public setFocus(tiles: ReadonlySet<string> | null): void {
+  public setFocus(
+    tiles: ReadonlySet<string> | null,
+    enlarged: ReadonlySet<string> | null = tiles,
+  ): void {
     this.focus = tiles;
+    this.enlarged = enlarged;
     this.applyFocus();
   }
 
@@ -1016,7 +1026,8 @@ export class GridRenderer {
         const focused = focus?.has(`${x},${y}`) ?? false;
         const alpha = !focus || focused ? 1 : FADED_ALPHA;
         // The step's own building is drawn a little larger as well.
-        row[x]?.scale.set(focused ? FOCUS_SCALE : 1);
+        const big = this.enlarged?.has(`${x},${y}`) ?? false;
+        row[x]?.scale.set(big ? FOCUS_SCALE : 1);
         for (const node of [
           row[x],
           this.gridTileNodes[y]?.[x],

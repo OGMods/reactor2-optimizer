@@ -167,6 +167,26 @@ describe("step mode", () => {
     expect(uiState.stepsActive).toBe(false);
   });
 
+  it("puts the island after the last step on the board in Edit, once walked", async () => {
+    const { edit } = await planOnIsland1();
+    const m = uiState.moveSteps!;
+    const last = shape(m.plan.boards.at(-1)!);
+
+    // Not before the last step: the player has not built it yet.
+    uiState.showMoveStep(m.plan.steps.length - 1);
+    expect(uiState.applyMoveSteps()).toBe(false);
+    expect(shape(layoutState.placements)).toEqual(shape(edit));
+
+    uiState.showMoveStep(m.plan.steps.length);
+    expect(uiState.applyMoveSteps()).toBe(true);
+    expect(shape(layoutState.placements)).toEqual(last);
+    // Leaves the steps for the board it just wrote, and undoes in one.
+    expect(uiState.moveSteps).toBeNull();
+    expect(uiState.showingSolver).toBe(false);
+    layoutState.undo();
+    expect(shape(layoutState.placements)).toEqual(shape(edit));
+  });
+
   it("stops applying the moment the solve on screen is another", async () => {
     await planOnIsland1();
     showSolve(layoutState.placements.slice(2));

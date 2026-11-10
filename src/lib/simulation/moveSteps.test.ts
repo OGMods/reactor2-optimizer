@@ -298,6 +298,78 @@ describe("planMoveSteps", () => {
     expect(plan.powers).toEqual([1, 1, 2]);
   });
 
+  it("builds one kind at a time when grouped, each in reading order", async () => {
+    const order = ["generator", "cooler1", "reactor1"];
+    const group = (id: string) => order.indexOf(id);
+    const target = [
+      b("reactor1", 0, 0),
+      b("cooler1", 5, 1),
+      b("generator", 3, 2),
+      b("cooler1", 1, 1),
+      b("generator", 0, 2),
+      b("reactor1", 4, 0),
+    ];
+    // Sales come first, whatever their kind.
+    const start = [b("cooler2", 9, 9)];
+    const plan = await planMoveSteps(start, target, [], count, { group });
+    expect(asSet(replay(start, plan))).toEqual(asSet(target));
+    expect(
+      plan.steps.map((s) =>
+        s.kind === "build" ? `${s.buildingId}@${s.x},${s.y}` : s.kind,
+      ),
+    ).toEqual([
+      "sell",
+      "generator@0,2",
+      "generator@3,2",
+      "cooler1@1,1",
+      "cooler1@5,1",
+      "reactor1@0,0",
+      "reactor1@4,0",
+    ]);
+  });
+
+  it("sweeps a kind once, its moves and builds in one reading order", async () => {
+    // Nothing makes power yet, so only the order decides: the build on the
+    // first row goes before the move onto the last, not after every move.
+    const group = () => 0;
+    const plan = await planMoveSteps(
+      [b("generator", 5, 5)],
+      [b("generator", 0, 0), b("generator", 9, 9)],
+      [],
+      () => 0,
+      { group },
+    );
+    expect(plan.steps.map((s) => s.kind)).toEqual(["build", "move"]);
+    // Ungrouped, a move still goes before a build of equal power.
+    const ungrouped = await planMoveSteps(
+      [b("generator", 5, 5)],
+      [b("generator", 0, 0), b("generator", 9, 9)],
+      [],
+      () => 0,
+    );
+    expect(ungrouped.steps.map((s) => s.kind)).toEqual(["move", "build"]);
+  });
+
+  it("puts the cash ahead of the groups", async () => {
+    // Swapping the reactor for a cooler pays out 9, and the generator costs
+    // 9: the change nets nothing, so the generator — the first group — has to
+    // wait for the cooler's refund.
+    const group = (id: string) => (id === "generator" ? 0 : 1);
+    const cash: StepPricing = {
+      copies: new Map(),
+      build: (id) => (id === "generator" ? 9 : 1),
+      refund: (id) => (id === "reactor1" ? 10 : 0),
+    };
+    const plan = await planMoveSteps(
+      [b("reactor1", 0, 0)],
+      [b("cooler1", 0, 0), b("generator", 1, 0)],
+      [],
+      count,
+      { group, cash },
+    );
+    expect(plan.steps.map((s) => s.kind)).toEqual(["replace", "build"]);
+  });
+
   it("plans a real island from nothing in reasonable time", async () => {
     const code = readFileSync(
       join(

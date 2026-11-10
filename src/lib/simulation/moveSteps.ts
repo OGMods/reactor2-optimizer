@@ -32,6 +32,13 @@ import type { TileType } from "../types";
  * the solve's power well before it *is* the solve; with `stopAtPower` the plan
  * ends there, since the rest would only rearrange it.
  *
+ * Or the player may ask for one kind at a time (`PlanOptions.group`): every
+ * generator, then every cooler, then every reactor, each kind swept in
+ * reading order. That gives up the power line — on a live island it can fall
+ * to nothing until the last kind is down — in exchange for a plan a player
+ * can carry out with one building in hand and their eye moving row by row.
+ * The cash rule below still comes first.
+ *
  * Power is not the only thing a step can run short of: a build put ahead of
  * the sale that pays for it needs cash the finished change does not. Given
  * the prices (`PlanOptions.cash`), no step is taken that would leave more
@@ -96,6 +103,18 @@ export interface PlanOptions {
    * the whole change costs net (or past nothing, for one that pays out).
    */
   cash?: StepPricing;
+  /**
+   * Build one kind at a time: each building's group, lower first. Among the
+   * steps that fit the cash, the lowest group goes first, then the most
+   * power, then the tile first in reading order — so a player puts down every
+   * generator, then every cooler, sweeping the island row by row rather than
+   * hopping across it. A sale goes ahead of every group: it clears ground the
+   * groups build on and pays for them. A swap goes with the building that
+   * set out, so the one it trades with may move a kind early — the price of
+   * never selling a building only to buy it back. Without it, power alone
+   * orders them.
+   */
+  group?: (buildingId: string) => number;
 }
 
 /**
@@ -155,6 +174,10 @@ const REACHED = 1e-9;
 interface Choice {
   power: number;
   rank: number;
+  /** See `PlanOptions.group`; 0 without it. */
+  group: number;
+  /** The tile it lands on (or leaves), for reading order within a group. */
+  at: Pos;
   /** Cash out, net of what it refunds; 0 without prices. */
   cost: number;
   apply: () => void;
@@ -395,6 +418,22 @@ export async function planMoveSteps(
     return power;
   };
 
+  // A sale is grouped ahead of every kind (`id` null); without grouping,
+  // everything is one group and power decides.
+  const groupOf = (id: string | null) =>
+    options.group ? (id === null ? -Infinity : options.group(id)) : 0;
+  const better = (c: Choice, than: Choice) => {
+    if (c.group !== than.group) return c.group < than.group;
+    if (c.power !== than.power) return c.power > than.power;
+    // Grouped, the tile decides before the kind of step: a kind is one sweep
+    // across the island, its moves and builds in one reading order, not a
+    // sweep of moves and then another of builds.
+    if (options.group && (c.at.y !== than.at.y || c.at.x !== than.at.x))
+      return c.at.y !== than.at.y ? c.at.y < than.at.y : c.at.x < than.at.x;
+    // Ungrouped, the first found of equal rank stands, as it always has.
+    return c.rank < than.rank;
+  };
+
   while (pending() > 0 && !reached()) {
     await breathe();
     let best: Choice | null = null;
@@ -406,16 +445,14 @@ export async function planMoveSteps(
       rank: number,
       cost: number,
       apply: () => void,
+      id: string | null,
+      at: Pos,
     ) => {
-      const c: Choice = { power, rank, cost, apply };
+      const g = groupOf(id);
+      const c: Choice = { power, rank, cost, apply, group: g, at };
       if (!cheapest || cost < cheapest.cost) cheapest = c;
       if (!fits(cost)) return;
-      if (
-        !best ||
-        power > best.power ||
-        (power === best.power && rank < best.rank)
-      )
-        best = c;
+      if (!best || better(c, best)) best = c;
     };
     const buyCost = (id: string) => (ledger ? ledger.buyPrice(id) : 0);
     const sellBack = (id: string) => (ledger ? ledger.sellPrice(id) : 0);
@@ -433,37 +470,44 @@ export async function planMoveSteps(
         const power = score(state);
         state.set(toKey, other.buildingId);
         state.set(fromKey, m.buildingId);
-        consider(power, PRIORITY.swap, 0, () => {
-          state.set(toKey, m.buildingId);
-          state.set(fromKey, other.buildingId);
-          steps.push({
-            kind: "swap",
-            a: { buildingId: m.buildingId, ...m.from },
-            b: { buildingId: other.buildingId, ...m.to },
-          });
-          other.from = { ...m.from };
-          /*
-           * The other may have landed where one of its own kind is still
-           * headed. Then it is that one's building already: it stays, and
-           * the one headed here takes over its trip instead. Left as two
-           * moves, the next would trade two identical buildings' places.
-           */
-          const twin = moves.find(
-            (o, k) =>
-              k !== i &&
-              k !== j &&
-              o.buildingId === other.buildingId &&
-              key(o.to) === key(other.from),
-          );
-          if (twin) {
-            twin.to = other.to;
-            other.to = { ...other.from };
-          }
-          // Drop whichever moves are now home, the later index first.
-          for (let k = moves.length - 1; k >= 0; k--)
-            if (k === i || key(moves[k].from) === key(moves[k].to))
-              moves.splice(k, 1);
-        });
+        consider(
+          power,
+          PRIORITY.swap,
+          0,
+          () => {
+            state.set(toKey, m.buildingId);
+            state.set(fromKey, other.buildingId);
+            steps.push({
+              kind: "swap",
+              a: { buildingId: m.buildingId, ...m.from },
+              b: { buildingId: other.buildingId, ...m.to },
+            });
+            other.from = { ...m.from };
+            /*
+             * The other may have landed where one of its own kind is still
+             * headed. Then it is that one's building already: it stays, and
+             * the one headed here takes over its trip instead. Left as two
+             * moves, the next would trade two identical buildings' places.
+             */
+            const twin = moves.find(
+              (o, k) =>
+                k !== i &&
+                k !== j &&
+                o.buildingId === other.buildingId &&
+                key(o.to) === key(other.from),
+            );
+            if (twin) {
+              twin.to = other.to;
+              other.to = { ...other.from };
+            }
+            // Drop whichever moves are now home, the later index first.
+            for (let k = moves.length - 1; k >= 0; k--)
+              if (k === i || key(moves[k].from) === key(moves[k].to))
+                moves.splice(k, 1);
+          },
+          m.buildingId,
+          m.to,
+        );
         return;
       }
       consider(
@@ -476,6 +520,8 @@ export async function planMoveSteps(
           state.set(key(m.to), m.buildingId);
           steps.push({ kind: "move", ...m });
         },
+        m.buildingId,
+        m.to,
       );
     });
     replaces.forEach((r, i) => {
@@ -492,6 +538,8 @@ export async function planMoveSteps(
             spent += ledger.buy(r.to) - back;
           }
         },
+        r.to,
+        r,
       );
     });
     builds.forEach((b, i) => {
@@ -506,15 +554,24 @@ export async function planMoveSteps(
           steps.push({ kind: "build", ...b });
           if (ledger) spent += ledger.buy(b.buildingId);
         },
+        b.buildingId,
+        b,
       );
     });
     sells.forEach((s, i) => {
-      consider(tryOn(s, null), PRIORITY.sell, -sellBack(s.buildingId), () => {
-        sells.splice(i, 1);
-        state.delete(key(s));
-        steps.push({ kind: "sell", ...s });
-        if (ledger) spent -= ledger.sell(s.buildingId);
-      });
+      consider(
+        tryOn(s, null),
+        PRIORITY.sell,
+        -sellBack(s.buildingId),
+        () => {
+          sells.splice(i, 1);
+          state.delete(key(s));
+          steps.push({ kind: "sell", ...s });
+          if (ledger) spent -= ledger.sell(s.buildingId);
+        },
+        null,
+        s,
+      );
     });
 
     // Every pending step is always takeable — a sell or a replace at once, a

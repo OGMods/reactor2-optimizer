@@ -156,8 +156,20 @@
    * would have quietly rewritten it on the way past.
    */
   let inspecting = $derived(collapsible && tile !== null);
+
+  /*
+   * Step mode folds the card on every screen, derived like `inspecting` and
+   * for the same reason. The bar below carries the step's power, cost and
+   * place; the figures here describe a board halfway through being built,
+   * which nobody is reading, and on a phone they cover the island the steps
+   * are drawn on. Planning counts too, so the card does not open and shut
+   * around a re-plan.
+   */
+  let stepping = $derived(
+    uiState.stepsActive || uiState.moveStepsPlanning !== null,
+  );
   let collapsed = $derived(
-    collapsible && (uiState.statsCardCollapsed || inspecting),
+    stepping || (collapsible && (uiState.statsCardCollapsed || inspecting)),
   );
 
   /** On a phone with the card open, the actions get a labelled row of their own. */
@@ -734,9 +746,10 @@
             is worse than no control — the same call `PlacementViewToggle` and
             the variants row make. The way back to the figures is the tile's
             own close button a few rows down, which is where someone finished
-            with a tile is already looking.
+            with a tile is already looking. Absent in step mode for the same
+            reason; leaving the steps is the way back.
           -->
-          {#if collapsible && !inspecting}
+          {#if collapsible && !inspecting && !stepping}
             <button
               class="head-btn"
               onclick={() => uiState.toggleStatsCard()}

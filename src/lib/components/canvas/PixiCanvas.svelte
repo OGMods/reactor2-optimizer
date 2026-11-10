@@ -12,7 +12,7 @@
     gameStatuses,
     placementFillPercent,
   } from "../../data/placements";
-  import { BUILDINGS, findBuilding } from "@reactor2/solver";
+  import { BUILDINGS, buildingCategory, findBuilding } from "@reactor2/solver";
   import {
     linksFrom,
     placementFlows,
@@ -897,15 +897,36 @@
   }
 
   /*
+   * The tiles of the kind `uiState.kindFilter` picks out, on the solver's
+   * board (step mode included), or null for none. The Edit board has no
+   * filter control, so a filter left set there must not fade it.
+   */
+  let kindTiles = $derived.by((): Set<string> | null => {
+    const kind = uiState.kindFilter;
+    if (!kind || !uiState.showingSolver) return null;
+    const tiles = new Set<string>();
+    for (const p of uiState.visiblePlacements) {
+      const type = findBuilding(p.buildingId)?.type;
+      if (type && buildingCategory(type) === kind) tiles.add(`${p.x},${p.y}`);
+    }
+    return tiles;
+  });
+
+  /*
    * In step mode, the step that made the board on screen: its tiles marked, a
    * move drawn as an arrow, and every other building faded so the one the step
    * is about stands out. At the start, before any step, the board is shown
    * whole. `stepsActive` rather than `moveSteps`, so a plan for another board
    * never marks or fades this one.
+   *
+   * A kind picked out joins the step's tiles at full strength, unenlarged: the
+   * step is still the one building drawn large, with the rest of its kind
+   * beside it for where it goes among them.
    */
   $effect(() => {
     const m = uiState.stepsActive ? uiState.moveSteps : null;
     const step = m && m.index > 0 ? m.plan.steps[m.index - 1] : null;
+    const kind = kindTiles;
     if (!isAtlasLoaded) return;
     const marks = step ? marksFor(step) : [];
     gridRenderer?.setStepMarks(
@@ -919,10 +940,15 @@
             ]
           : [],
     );
-    gridRenderer?.setFocus(
+    const stepTiles =
       step && step.kind !== "sellAll"
         ? new Set(marks.map((mk) => `${mk.x},${mk.y}`))
-        : null,
+        : null;
+    gridRenderer?.setFocus(
+      kind && stepTiles
+        ? new Set([...kind, ...stepTiles])
+        : (kind ?? stepTiles),
+      stepTiles,
     );
   });
 
