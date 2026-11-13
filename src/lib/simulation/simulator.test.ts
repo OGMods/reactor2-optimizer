@@ -720,14 +720,9 @@ describe("a flow is drawn only where something moved", () => {
     ).toEqual([]);
   });
 
-  it("feeds every source from every working cooler under Cryo Nexus", () => {
+  it("draws no cooling links under Cryo Nexus, where the pool serves everyone", () => {
     const far: Spec = [...contested, [6, 6, "cooler", VALUES.cooler]];
-    expect(pairsOf(far, getAnomaly("cryo_nexus"))).toEqual([
-      "0,1>1,1",
-      "1,0>1,1",
-      "1,2>1,1",
-      "6,6>1,1",
-    ]);
+    expect(pairsOf(far, getAnomaly("cryo_nexus"))).toEqual(["0,1>1,1"]);
   });
 });
 

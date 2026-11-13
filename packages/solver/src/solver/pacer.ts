@@ -81,4 +81,23 @@ export class Pacer {
 
     if (!this.stopped && this.hooks?.shouldStop?.()) this.stopped = true;
   }
+
+  /**
+   * Reports that the cleanup past the deadline has finished `done` of `total`
+   * layouts, and yields. Unconditionally rather than when `due()`: a layout's
+   * cleanup can take most of a second, and both the report and a STOP should
+   * land between layouts rather than whenever the interval happens to say so.
+   */
+  async finalizing(done: number, total: number): Promise<void> {
+    this.hooksFinalizing(done, total);
+    await this.pump(performance.now());
+  }
+
+  /**
+   * The same report without the yield — for the last one, after which the
+   * solve returns at once and there is nothing left for a STOP to cut.
+   */
+  hooksFinalizing(done: number, total: number): void {
+    this.hooks?.onFinalizing?.(done, total);
+  }
 }

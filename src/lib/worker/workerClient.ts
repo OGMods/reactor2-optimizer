@@ -6,7 +6,7 @@ import type {
   OptimizationResult,
   PrestigeScales,
 } from "@reactor2/solver";
-import { SolverCoordinator } from "./solverCoordinator";
+import { SolverCoordinator, type FinalizingStatus } from "./solverCoordinator";
 
 interface PendingEntry {
   resolve: (value: OptimizationResult[]) => void;
@@ -88,6 +88,11 @@ export interface SolveRunOptions {
    * no layout that would cost more than this to build from the board standing.
    */
   cashBudget?: CashBudget;
+  /**
+   * Called as the run's tasks pass their deadline and tidy their layouts, and
+   * with null once none is — see `CoordinatorSolveOptions.onFinalizing`.
+   */
+  onFinalizing?: (status: FinalizingStatus | null) => void;
 }
 
 export interface SolveTaskHandle {
@@ -159,6 +164,9 @@ export class SolverWorkerClient {
         onProgress: (result) => {
           if (!entry.stopped) entry.onProgress?.(result);
         },
+        // Unlike progress, still delivered after a stop: the tasks go on
+        // finishing their layouts, and the wait is still worth explaining.
+        onFinalizing: run?.onFinalizing,
         shouldStop: () => entry.stopped,
       })
       .finally(() => {

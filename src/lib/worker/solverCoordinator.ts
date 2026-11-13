@@ -52,6 +52,20 @@ export interface CoordinatorSolveOptions extends SolveOptions {
    * wall-clock only once the pool is full.
    */
   attempts?: number;
+  /**
+   * How far the tasks past their deadline have got tidying their layouts —
+   * summed over every task currently finalizing — or null once none is. The
+   * cleanup is not timed against the run, so this is what the page shows
+   * after its countdown runs out. Not throttled: a task sends one report per
+   * layout, a dozen at most.
+   */
+  onFinalizing?: (status: FinalizingStatus | null) => void;
+}
+
+/** Layouts tidied so far, of those the finalizing tasks hold. */
+export interface FinalizingStatus {
+  done: number;
+  total: number;
 }
 
 /**
@@ -245,6 +259,39 @@ export class SolverCoordinator {
       else progressTimer = setTimeout(flushProgress, waitMs);
     };
 
+    /**
+     * Each task that has passed its deadline, by id: how far its cleanup has
+     * got. A task that finishes stays in the sum at `done === total` while any
+     * other is still tidying, so the count never goes backwards; the map
+     * empties once none is left.
+     */
+    const finalizing = new Map<string, FinalizingStatus>();
+    /** The ids in `finalizing` whose task has not yet finished. */
+    const stillFinalizing = new Set<string>();
+    const reportFinalizing = () => {
+      if (!options?.onFinalizing || settled) return;
+      if (stillFinalizing.size === 0) {
+        finalizing.clear();
+        options.onFinalizing(null);
+        return;
+      }
+      let done = 0;
+      let total = 0;
+      for (const s of finalizing.values()) {
+        done += s.done;
+        total += s.total;
+      }
+      options.onFinalizing({ done, total });
+    };
+    /** The task has finished, one way or another. */
+    const finalizingEnded = (taskId: string) => {
+      const s = finalizing.get(taskId);
+      if (!s) return;
+      finalizing.set(taskId, { done: s.total, total: s.total });
+      stillFinalizing.delete(taskId);
+      reportFinalizing();
+    };
+
     /** Monotonic: only a layout that beats what is drawn replaces it. */
     const show = (
       index: number,
@@ -353,7 +400,15 @@ export class SolverCoordinator {
             return;
           }
 
+          if (msg.type === "ISLAND_FINALIZING") {
+            finalizing.set(taskId, { done: msg.done, total: msg.total });
+            stillFinalizing.add(taskId);
+            reportFinalizing();
+            return;
+          }
+
           // ISLAND_DONE or ERROR: the task is finished either way.
+          finalizingEnded(taskId);
           if (msg.type === "ISLAND_DONE") {
             finals[index].offer({
               placements: msg.placements,
@@ -375,6 +430,7 @@ export class SolverCoordinator {
         slot.worker.addEventListener("message", onMessage);
         slot.onDeath = () => {
           slot.worker.removeEventListener("message", onMessage);
+          finalizingEnded(taskId);
           workerDied();
         };
         const baseSeed = plan.seeds[index];

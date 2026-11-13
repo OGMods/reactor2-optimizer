@@ -162,6 +162,14 @@ themselves, and it only fires (with a grace period, via the graceful
 run's **serial** cost, not the parallel estimate: a machine that reports eight
 cores and gives two must not have its run cut short.
 
+The one thing past the budget is the cleanup — pruning, the pooled coolers'
+gathering, the holes moved to the shore — which runs untimed on every layout
+the search kept (`packages/solver/CLAUDE.md`). It reports as it goes, and the
+coordinator's sum lands in `solverState.finalizing`, which the readout's clock
+shows as "finalizing d/t" once its countdown is out. Each report re-arms the
+watchdog `FINALIZING_GRACE_MS` out (`#armWatchdog`, which never shortens it), so
+a slow phone is not stopped mid-shortlist while it is visibly making progress.
+
 **How the budget is spent is the player's choice** — `SOLVE_MODES` in
 `worker/solveModes.ts`, persisted as `solveModeId` (README states what the three
 modes buy). Ties from different attempts are pooled, which is where a deep run's

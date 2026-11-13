@@ -29,7 +29,7 @@ import {
   targetCanBeat,
   targetCompositions,
 } from "./search/composition";
-import { EMPTY_GATHER_BUDGET_MS, gatherEmptyTiles } from "./search/emptyTiles";
+import { gatherEmptyTiles } from "./search/emptyTiles";
 import {
   emptyPlacement,
   isDirectProducer,
@@ -37,11 +37,7 @@ import {
   put,
   toPlacedBuildings,
 } from "./search/placement";
-import {
-  EVACUATE_BUDGET_MS,
-  GATHER_BUDGET_MS,
-  gatherPooledCoolers,
-} from "./search/pooledCoolers";
+import { gatherPooledCoolers } from "./search/pooledCoolers";
 import {
   greedyPolish,
   polishCandidates,
@@ -185,37 +181,38 @@ export interface IslandSolution extends IslandLayout {
  * the last place the layouts change shape.
  */
 async function finalizeAlternates(
-  collector: AlternateCollector,
+  layouts: Placement[],
   primaryRows: PlacedBuilding[],
   primaryPower: number,
   effectiveBuildings: EffectiveBuilding[],
   ctx: IslandContext,
   pacer: Pacer,
+  stoppedBeforeCleanup: boolean,
 ): Promise<IslandLayout[]> {
   const kept: PlacedBuilding[][] = [primaryRows];
   const out: IslandLayout[] = [];
-  // One gathering budget for the whole shortlist rather than one each, so a
-  // long shortlist cannot add a second to the run. An alternate the deadline
-  // cuts short is still valid, only less gathered.
-  const gatherDeadlineMs =
-    performance.now() + EVACUATE_BUDGET_MS + GATHER_BUDGET_MS;
-  // And one for the holes, counted in time actually spent: the coolers' pass
-  // is a no-op under every rule but a pool, and its unused budget is not this
-  // one's to take.
-  let emptyLeftMs = EMPTY_GATHER_BUDGET_MS;
+  const total = 1 + layouts.length;
+  let cut = false;
 
-  for (const layout of collector.layouts()) {
-    // This runs after the search's deadline, and each alternate is a few
-    // hundred simulations — up to a second under a cooling pool — so come up
-    // for air between them: a STOP that arrives here ends the shortlist where
-    // it stands rather than waiting for ten more layouts to be finished.
-    const now = performance.now();
-    if (pacer.due(now)) {
-      await pacer.pump(now);
-      if (pacer.stopRequested) break;
+  // Every alternate is finished as fully as the primary, with no time cap:
+  // the variants are what the player steps through, and a shared budget left
+  // all but the first with their coolers where the walk dropped them. The
+  // primary was layout 1 of `1 + layouts.length`; each pass here is the next.
+  for (let i = 0; i < layouts.length; i++) {
+    // Each alternate is a few hundred simulations — most of a second under a
+    // cooling pool — so come up for air between them: the progress report
+    // goes out, and a STOP pressed during the cleanup ends the shortlist where
+    // it stands rather than waiting for ten more layouts to be finished. A
+    // STOP that arrived during the search does not: it asked for the layouts
+    // found so far, and the shortlist is part of them — cutting here returned
+    // a stopped run with no variants at all.
+    await pacer.finalizing(1 + i, total);
+    if (pacer.stopRequested && !stoppedBeforeCleanup) {
+      cut = true;
+      break;
     }
 
-    const pruned = pruneDeadWeight(layout, ctx);
+    const pruned = pruneDeadWeight(layouts[i], ctx);
     const downsized = downgradeOversized(
       pruned.rows,
       pruned.power,
@@ -227,17 +224,13 @@ async function finalizeAlternates(
       downsized.power,
       effectiveBuildings,
       ctx,
-      gatherDeadlineMs,
     );
-    const emptyStartedMs = performance.now();
     const tidied = gatherEmptyTiles(
       sized.rows,
       sized.power,
       effectiveBuildings,
       ctx,
-      emptyStartedMs + emptyLeftMs,
     );
-    emptyLeftMs -= performance.now() - emptyStartedMs;
     if (!powerTies(tidied.power, primaryPower)) continue;
 
     const rows = toPlacedBuildings(tidied.rows);
@@ -246,6 +239,8 @@ async function finalizeAlternates(
     out.push({ placements: rows, powerOutput: tidied.power });
   }
 
+  // The last layout is done too: say so, so a caller's count reaches its end.
+  if (!cut) pacer.hooksFinalizing(total, total);
   return out;
 }
 
@@ -722,13 +717,16 @@ export async function solveIsland(
     if (annealMs < minRoundMs) break;
   }
 
-  // Everything from here runs past the deadline and none of it yields on its
-  // own, so yield once before it: the walk's last pump may be most of a yield
-  // interval ago, and the cleanup below is a second of work under a pool.
-  {
-    const now = performance.now();
-    if (pacer.due(now)) await pacer.pump(now);
-  }
+  // Everything from here runs past the deadline, untimed — a finished layout
+  // is worth finishing — and none of it yields on its own, so say so and yield
+  // before it: the caller's countdown has run out, and this is what explains
+  // the wait. The STOP that may arrive here does not cut the primary short;
+  // pruning is what makes it an answer.
+  const shortlist = collector.layouts();
+  // A STOP already in hand asked for what the search found, alternates
+  // included; only one that lands during the cleanup cuts the shortlist.
+  const stoppedBeforeCleanup = pacer.stopRequested;
+  await pacer.finalizing(0, 1 + shortlist.length);
 
   // Post-search cleanup pass...
   const pruned = pruneDeadWeight(placement, ctx);
@@ -748,7 +746,6 @@ export async function solveIsland(
     downsized.power,
     effectiveBuildings,
     ctx,
-    performance.now() + EVACUATE_BUDGET_MS + GATHER_BUDGET_MS,
   );
   // Then push the holes the layout leaves out to the shore and the corners.
   const tidied = gatherEmptyTiles(
@@ -756,16 +753,16 @@ export async function solveIsland(
     sized.power,
     effectiveBuildings,
     ctx,
-    performance.now() + EMPTY_GATHER_BUDGET_MS,
   );
   const placements = toPlacedBuildings(tidied.rows);
   const alternates = await finalizeAlternates(
-    collector,
+    shortlist,
     placements,
     tidied.power,
     effectiveBuildings,
     ctx,
     pacer,
+    stoppedBeforeCleanup,
   );
   // Every one of these ties on power, so the cheapest to build goes first and
   // is the one the island shows. Stable, so equal costs keep the walk's order.

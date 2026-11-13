@@ -41,6 +41,9 @@ self.addEventListener(
               powerOutput,
             });
           },
+          onFinalizing: (done, total) => {
+            post({ id: req.id, type: "ISLAND_FINALIZING", done, total });
+          },
         },
         req.rngSeed,
         getAnomaly(req.anomalyId),
