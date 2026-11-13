@@ -861,7 +861,9 @@
   /*
    * Lines from the inspected building — hovered on a mouse, pinned on touch,
    * which `inspectedTile` already decides — to every building it sends heat or
-   * cooling to or takes it from, and on through theirs with `chainLinks`. Only
+   * cooling to or takes it from (no cooling under a shared pool, where no
+   * cooler serves anyone in particular — see `placementFlows`), and on through
+   * theirs with `chainLinks`. Only
    * a building standing on the tile has flows: hovering grass draws nothing.
    */
   $effect(() => {

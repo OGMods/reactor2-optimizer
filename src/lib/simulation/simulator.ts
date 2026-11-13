@@ -417,13 +417,21 @@ export function linksFrom(
 /**
  * Every pair of buildings on the board that actually moved something on the
  * last tick: a reactor's heat into a generator, a cooler's cooling into a power
- * source. The board draws the ones touching the building under the pointer.
+ * source (except under a shared pool, below). The board draws the ones touching
+ * the building under the pointer.
  *
  * Read off the same distribution that scores the board, not re-derived from
  * adjacency, because being *beside* a partner is not using it: a reactor whose
  * generators are already full sends nothing, and neither does a cooler beside a
- * source another cooler has covered. Under Cryo Nexus every working cooler
- * feeds every source the pool served, which is what the pool does.
+ * source another cooler has covered.
+ *
+ * Under a shared cooling pool (Cryo Nexus) the cooling flows are left out. The
+ * engine reports every working cooler paying into every source the pool
+ * served, which is true, but drawn it is a complete bipartite graph — coolers
+ * times sources, hundreds of lines on a full board, and with the chain followed
+ * every hover reaches every building. No cooler serves any particular source
+ * there, so there is no line worth drawing; heat stays adjacency-bound and its
+ * links are kept.
  */
 export function placementFlows(
   grid: Tile[][],
@@ -442,10 +450,12 @@ export function placementFlows(
   const pairs: number[] = [];
   simulateIsland(placement, ctx, true, pairs);
 
+  const pooled = ctx.anomaly.rule === "shared_cooling";
   const flows: Flow[] = [];
   for (let k = 0; k < pairs.length; k += 2) {
     const a = pairs[k];
     const b = pairs[k + 1];
+    if (pooled && placement[a]?.type === "cooler") continue;
     flows.push({
       from: { x: ctx.xs[a], y: ctx.ys[a] },
       to: { x: ctx.xs[b], y: ctx.ys[b] },

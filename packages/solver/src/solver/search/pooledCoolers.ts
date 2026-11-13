@@ -18,26 +18,6 @@ import { anyOfflineProducer, layoutHolds } from "./stability";
  * after moving hubs off the smaller landmasses so those can hold them.
  */
 
-/**
- * How long `gatherPooledCoolers` may spend, per solve on the primary layout and
- * once more shared across its alternates. It runs after the search's deadline,
- * so this is time added to a run. Moving a cooler onto an empty tile costs
- * nothing. The cap is for the cooler-to-producer swaps, which mostly fail and
- * cost a simulation each. On the shipped maps one layout finishes in 15-110ms.
- */
-export const GATHER_BUDGET_MS = 150;
-
-/**
- * How long `evacuateMinorLandmasses` may spend, on top of `GATHER_BUDGET_MS`
- * and taken first. Spent only on a board with producers on more than one
- * landmass, and the pass stops as soon as a hub is placed — moving a
- * 15-producer hub costs about 170ms on a desktop. The cap is sized for a phone,
- * several times slower, where a tight one would make the pass silently do
- * nothing; a second is small beside a 10-30s attempt. Out of time, the layout
- * stays as it was.
- */
-export const EVACUATE_BUDGET_MS = 1000;
-
 /** Chebyshev radius of the patch `gatherPooledCoolers` anchors on. */
 const GATHER_ANCHOR_RADIUS = 2;
 
@@ -279,18 +259,24 @@ function relocateHub(
  * landmass with no producer is a scrap nothing else can use, and counts as
  * nearer than any tile on a working landmass, so empty scraps fill first. Every
  * accepted move strictly lowers the coolers' summed distance, so the sweep
- * terminates; the deadline only bounds how far it gets.
+ * terminates on its own.
+ *
+ * **Neither pass is timed against the run.** Both run after the search's
+ * deadline, and a cap there left the layouts unfinished: shared across a
+ * shortlist, the first alternate's evacuation spent it and every later variant
+ * came back with its coolers where the walk left them. Run to completion it is
+ * 0.1-0.9s per layout on the largest shipped maps (a 15-producer evacuation
+ * about 170ms of that), a few seconds over a shortlist of ten; the run reports
+ * that it is finalizing (`SearchHooks.onFinalizing`) so the wait is explained.
+ * The deadlines remain for a caller that wants to bound it.
  */
 export function gatherPooledCoolers(
   rows: SimPlacedBuilding[],
   power: number,
   effectiveBuildings: EffectiveBuilding[],
   ctx: IslandContext,
-  deadlineMs: number,
-  evacuateDeadlineMs = Math.min(
-    deadlineMs,
-    performance.now() + EVACUATE_BUDGET_MS,
-  ),
+  deadlineMs = Infinity,
+  evacuateDeadlineMs = deadlineMs,
 ): { rows: SimPlacedBuilding[]; power: number } {
   if (ctx.anomaly.rule !== "shared_cooling" || rows.length === 0)
     return { rows, power };
@@ -304,8 +290,6 @@ export function gatherPooledCoolers(
   }
 
   const { component, count } = landmasses(ctx);
-  // The callers' deadline covers both budgets; capping the evacuation at its
-  // own (the default) leaves the sweep at least `GATHER_BUDGET_MS`.
   evacuateMinorLandmasses(
     current,
     ctx,

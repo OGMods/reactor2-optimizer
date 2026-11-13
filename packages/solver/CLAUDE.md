@@ -208,9 +208,9 @@ CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
   landmasses with no producer count as nearest of all. A move onto an empty
   tile is exact. A swap with a producer is re-simulated and kept only if power,
   every producer and the upgrade plan all hold, so the pass cannot cost a watt.
-  It is capped at 150ms for the primary and 150ms shared across the
-  alternates; on the shipped maps one layout takes 15-110ms. Map 1 goes from
-  five cooler clusters to one.
+  **It is not timed against the run**, and neither is anything else past the
+  deadline — see "The cleanup past the deadline is untimed" below. Map 1 goes
+  from five cooler clusters to one.
 
   **Before the sweep, hubs leave the smaller landmasses**
   (`evacuateMinorLandmasses`). One tile at a time cannot move a hub: a
@@ -221,8 +221,7 @@ CoolingPerSec` — it is what a cooler is worth and what the game shows for it,
   tiles, and each displaced cooler crosses to the tile its producer left, so
   composition and pool are unchanged. A swap descent over the main landmass
   then restores power. The move is kept only on the same three tests as a swap,
-  and the emptied landmass then fills with coolers like any scrap. It has its
-  own 1s cap on top of the sweep's (`EVACUATE_BUDGET_MS`), sized for a phone; a
+  and the emptied landmass then fills with coolers like any scrap. A
   15-producer hub takes about 170ms on a desktop. On the eight maps with
   obstacles cleared it brings seven to a single producing landmass at the same
   power. Shadowspire keeps two, because its 29-producer second landmass does
@@ -672,7 +671,38 @@ pass: it moves the holes a layout leaves inside the land out to the shore and
 into corners, a nearer-the-edge building stepping into each, re-simulated and
 kept only if power holds, no producer goes offline, nothing new goes idle and
 the plan holds. Under a pool it leaves coolers where `gatherPooledCoolers` put
-them. Its budget (`EMPTY_GATHER_BUDGET_MS`) is added to a run.
+them.
+
+**The cleanup past the deadline is untimed.** Pruning, right-sizing, the
+pooled coolers' evacuation and sweep, and `gatherEmptyTiles` all run to
+completion on the primary and on every alternate. Each pass terminates on its
+own — every accepted move strictly lowers a summed distance or depth, except in
+the evacuation's swap descent, where every accepted swap strictly raises power
+over a finite set of layouts. That descent is the one pass with no cheap bound
+(a pass is O(pairs) simulations and it runs to a local optimum when the floor is
+never reached), so it is what to measure first if a phone's cleanup outlasts
+`FINALIZING_GRACE_MS`. Their
+`deadlineMs` parameters default to `Infinity`, kept only for a caller that
+wants a bound. They used to be capped, and the cap is what went wrong: shared
+across a shortlist, the first alternate's evacuation spent it, so every later
+variant the player stepped through came back with its coolers wherever the walk
+had left them. Uncapped, it adds 0.1s on most maps and 3-4s on a desktop on the
+largest under a pool (0.1-0.9s per layout, eleven layouts).
+
+So the wait is reported rather than hidden: `SearchHooks.onFinalizing(done,
+total)` fires as the cleanup starts and after each layout (the last at
+`total/total`), the worker posts it as `ISLAND_FINALIZING`, the coordinator sums
+it over the tasks that have reached their cleanup — a finished one counted whole
+until none is left, so the count never goes backwards — and the readout's clock
+reads "finalizing 3/11" once its countdown is out. Each report also re-arms the
+app's watchdog (`FINALIZING_GRACE_MS`), which would otherwise stop a slow phone
+mid-shortlist and lose the layouts not yet tidied.
+
+STOP lands between layouts and never cuts the primary's cleanup short. Only a
+STOP that arrives **during** the cleanup cuts the shortlist; one already in hand
+when the search ended asked for what it had found, alternates included, so the
+shortlist is finished — cutting there returned every stopped run with no
+variants at all.
 
 **`distribution.ts` is a port of Unity's `FlowNetwork.cs`.** Two shapes in it are
 load-bearing and look like details:

@@ -13,7 +13,10 @@ import {
   type SolveTaskHandle,
 } from "../worker/workerClient";
 import { MAX_SOLVE_VARIANTS } from "../worker/variants";
-import { defaultPoolSize } from "../worker/solverCoordinator";
+import {
+  defaultPoolSize,
+  type FinalizingStatus,
+} from "../worker/solverCoordinator";
 import {
   DEFAULT_SOLVE_MODE,
   SOLVE_MODES,
@@ -60,6 +63,15 @@ import { layoutState } from "./layout.svelte";
  * spinning with no way back but the Stop button.
  */
 const WATCHDOG_GRACE_MS = 5_000;
+
+/**
+ * How long a finalizing run may go between reports before the watchdog stops
+ * it. The cleanup past the deadline is untimed, so the budget-based watchdog
+ * would cut a slow phone off mid-shortlist and lose the alternates not yet
+ * tidied. Each report — one per layout, 0.1-0.9s apiece on a desktop — proves
+ * the run alive and pushes the watchdog out by this much instead.
+ */
+const FINALIZING_GRACE_MS = 30_000;
 
 /**
  * What a finished run does to the shortlist already held for this island.
@@ -466,6 +478,15 @@ class SolverState {
   runEstimateMs = $state(0);
 
   /**
+   * The run's searches are past their deadline and tidying their layouts —
+   * grouping the coolers under a pool, moving holes to the shore: how many of
+   * the layouts they hold are done. Null while every task is still searching,
+   * and when nothing is running. The cleanup is not timed against the run, so
+   * this is what the readout shows once its countdown has run out.
+   */
+  finalizing = $state<FinalizingStatus | null>(null);
+
+  /**
    * Time left in the run, ms. Null once a run outlasts its estimate, which a
    * machine that reports more cores than it gives can do.
    */
@@ -499,6 +520,8 @@ class SolverState {
   });
 
   #watchdog: ReturnType<typeof setTimeout> | null = null;
+  /** When `#watchdog` fires, `performance.now()` ms. */
+  #watchdogAt = 0;
 
   /** Settles once the run in flight has filed its result; null between runs. */
   #runEnded: Promise<void> | null = null;
@@ -1364,6 +1387,7 @@ class SolverState {
     this.lastRunDurationMs = null;
     this.runMode = this.solveMode;
     this.runEstimateMs = this.estimatedRunMs;
+    this.finalizing = null;
     this.#startClock();
 
     // `pool` as well as `cores`, because the pool is capped at eight and the
@@ -1455,6 +1479,11 @@ class SolverState {
           prestige: configState.prestige,
           upgradePlan: runPlan?.along,
           cashBudget: runBudget,
+          onFinalizing: (status) => {
+            this.finalizing = status;
+            // Proof the run is alive past its budget; see FINALIZING_GRACE_MS.
+            if (status !== null) this.#armWatchdog(FINALIZING_GRACE_MS);
+          },
         },
       );
       this.activeTask = handle;
@@ -1478,6 +1507,7 @@ class SolverState {
       this.activeTask = null;
       this.runMode = null;
       this.runEstimateMs = 0;
+      this.finalizing = null;
 
       if (
         finalVariants &&
@@ -1640,16 +1670,26 @@ class SolverState {
    * outlast this only if the browser started the workers one after another.
    */
   #startWatchdog(mode: SolveMode) {
+    this.#armWatchdog(mode.attempts * mode.attemptBudgetMs + WATCHDOG_GRACE_MS);
+  }
+
+  /**
+   * (Re)sets the watchdog to fire `delayMs` from now. A finalizing report
+   * re-arms it, so a run tidying its layouts past its budget is not stopped
+   * while it is still visibly making progress — but never shortens it.
+   */
+  #armWatchdog(delayMs: number) {
+    if (!this.isOptimizing || this.isStopping) return;
+    const firesAt = performance.now() + delayMs;
+    if (this.#watchdog !== null && firesAt <= this.#watchdogAt) return;
     this.#stopWatchdog();
-    this.#watchdog = setTimeout(
-      () => {
-        this.#watchdog = null;
-        // The same graceful stop the button performs: in-flight workers finish
-        // the pass they are on rather than dropping the layout they have.
-        this.stopOptimizer();
-      },
-      mode.attempts * mode.attemptBudgetMs + WATCHDOG_GRACE_MS,
-    );
+    this.#watchdogAt = firesAt;
+    this.#watchdog = setTimeout(() => {
+      this.#watchdog = null;
+      // The same graceful stop the button performs: in-flight workers finish
+      // the pass they are on rather than dropping the layout they have.
+      this.stopOptimizer();
+    }, delayMs);
   }
 
   #stopWatchdog() {

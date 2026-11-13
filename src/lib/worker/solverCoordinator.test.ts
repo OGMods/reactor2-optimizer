@@ -48,7 +48,12 @@ function installFakeWorker(
    * Progress powers each task streams, all at once, before it finishes —
    * and how long after that it finishes. Omitted, a task only finishes.
    */
-  stream: { progress: number[]; doneAfterMs: number } = {
+  stream: {
+    progress: number[];
+    doneAfterMs: number;
+    /** `ISLAND_FINALIZING` reports, as [done, total], sent after progress. */
+    finalizing?: [number, number][];
+  } = {
     progress: [],
     doneAfterMs: 0,
   },
@@ -96,6 +101,12 @@ function installFakeWorker(
           } as MessageEvent;
           for (const fn of listeners.get(this.#self) ?? []) fn(msg);
         }
+        for (const [done, total] of stream.finalizing ?? []) {
+          const msg = {
+            data: { id: req.id, type: "ISLAND_FINALIZING", done, total },
+          } as MessageEvent;
+          for (const fn of listeners.get(this.#self) ?? []) fn(msg);
+        }
       }, 0);
       setTimeout(() => {
         const msg = {
@@ -125,6 +136,43 @@ afterEach(() => {
 });
 
 describe("SolverCoordinator", () => {
+  it("sums the finalizing tasks' layouts, and clears once none is left", async () => {
+    // A finalizing report is a task still running, not a finished one: the
+    // run waits for every DONE, and the count is the sum over the tasks that
+    // have reached their cleanup, a finished one counted whole until none is
+    // left — so it never goes backwards.
+    installFakeWorker(() => 1, {
+      progress: [],
+      doneAfterMs: 20,
+      finalizing: [
+        [0, 3],
+        [2, 3],
+      ],
+    });
+    const coordinator = new SolverCoordinator(4);
+    const reports: ({ done: number; total: number } | null)[] = [];
+
+    const variants = await coordinator.solve(
+      board(2),
+      [...BUILDINGS],
+      UPGRADES,
+      30,
+      { attempts: 1, onFinalizing: (s) => reports.push(s) },
+    );
+    coordinator.destroy();
+
+    expect(variants.length).toBeGreaterThan(0);
+    expect(reports).toEqual([
+      { done: 0, total: 3 },
+      { done: 2, total: 3 },
+      { done: 2, total: 6 },
+      { done: 4, total: 6 },
+      // The first task finishes: counted whole, never dropped from the sum.
+      { done: 5, total: 6 },
+      null,
+    ]);
+  });
+
   it("dispatches one task per island for a single-attempt run", async () => {
     installFakeWorker(() => 1);
     const coordinator = new SolverCoordinator(4);

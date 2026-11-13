@@ -10,15 +10,6 @@ import { anyOfflineProducer, layoutHolds } from "./stability";
  * and into its corners.
  */
 
-/**
- * How long `gatherEmptyTiles` may spend, per solve on the primary layout and
- * once more shared across its alternates. It runs after the search's deadline,
- * so this is time added to a run; out of time, the holes stay where the sweep
- * left them. On a desktop the largest shipped island under Singularity takes
- * 105-145ms and the rest 0-60ms, so this leaves a phone room to finish.
- */
-export const EMPTY_GATHER_BUDGET_MS = 300;
-
 /** A tile's 8-neighbourhood is complete when every neighbour is buildable. */
 const FULL_NEIGHBOURHOOD = 8;
 
@@ -93,15 +84,16 @@ function idleCount(placement: Placement, rows: SimPlacedBuilding[]): number {
  *
  * Under a cooling pool coolers are not moved, since `gatherPooledCoolers` has
  * just put them where they are. Every accepted move strictly lowers the holes'
- * summed `interiority`, so the sweep terminates; the deadline only bounds how
- * far it gets.
+ * summed `interiority`, so the sweep terminates on its own. It runs after the
+ * search's deadline and is not timed against it — a finished layout is worth
+ * finishing, so `deadlineMs` is only for a caller that wants to bound it.
  */
 export function gatherEmptyTiles(
   rows: SimPlacedBuilding[],
   power: number,
   effectiveBuildings: EffectiveBuilding[],
   ctx: IslandContext,
-  deadlineMs: number,
+  deadlineMs = Infinity,
 ): { rows: SimPlacedBuilding[]; power: number } {
   if (rows.length === 0 || rows.length >= ctx.n) return { rows, power };
 

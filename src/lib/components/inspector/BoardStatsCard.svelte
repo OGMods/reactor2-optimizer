@@ -61,8 +61,20 @@
 
   let runMode = $derived(solverState.runMode);
   let remaining = $derived(solverState.remainingMs);
+  /*
+   * Past the countdown the search is over and its layouts are being tidied —
+   * coolers grouped, holes moved to the shore — which is untimed, so it says
+   * how far it has got rather than a bare "finishing" that reads as a hang.
+   * Only once the countdown is out: on a deep run an early attempt finalizes
+   * while the rest still search, and the time left is the truer figure then.
+   */
+  let finalizing = $derived(solverState.finalizing);
   let countdown = $derived(
-    remaining === null ? "finishing" : `${formatDuration(remaining)} left`,
+    remaining !== null
+      ? `${formatDuration(remaining)} left`
+      : finalizing
+        ? `finalizing ${finalizing.done}/${finalizing.total}`
+        : "finishing",
   );
 
   /*
@@ -722,9 +734,11 @@
           {#if solverState.isOptimizing}
             <span
               class="live"
-              title={runMode
-                ? `${runMode.label} run (${runMode.shape}), ${elapsed} in`
-                : undefined}
+              title={remaining === null && finalizing
+                ? `${elapsed} in. Tidying the layouts found so far: ${finalizing.done} of ${finalizing.total}.`
+                : runMode
+                  ? `${runMode.label} run (${runMode.shape}), ${elapsed} in`
+                  : undefined}
             >
               <Loader2 size={11} class="spinner" />
               {#if runMode}<span class="mode">{runMode.label}</span>{/if}

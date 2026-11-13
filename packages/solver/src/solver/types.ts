@@ -420,6 +420,15 @@ export interface SearchHooks {
   onProgress?: (placements: PlacedBuilding[], powerOutput: number) => void;
   shouldStop?: () => boolean;
   reportIntervalMs?: number;
+  /**
+   * The search's deadline has passed and the finished layouts are being
+   * tidied: `done` of `total` (the primary and its alternates) so far. Called
+   * once with `done` 0 as the cleanup starts, then after each layout, the
+   * last at `total` unless a STOP during the cleanup cut it short. The
+   * cleanup is not timed against the run, so this is how a caller explains the
+   * wait past its countdown.
+   */
+  onFinalizing?: (done: number, total: number) => void;
 }
 
 /**
@@ -540,6 +549,13 @@ export type IslandWorkerResponse =
       type: "ISLAND_PROGRESS";
       placements: PlacedBuilding[];
       powerOutput: number;
+    }
+  | {
+      /** Past the deadline, tidying the finished layouts — `SearchHooks.onFinalizing`. */
+      id: string;
+      type: "ISLAND_FINALIZING";
+      done: number;
+      total: number;
     }
   | {
       id: string;
