@@ -863,6 +863,44 @@ class UIState {
   }
 
   /**
+   * Steps on a short screen, where the steps bar is the whole interface.
+   *
+   * Short is a phone split-screened beside the game, which is exactly when the
+   * steps are walked, and there the app gets 330–450px. The header and the
+   * readout's folded line took a third of that and have nothing to say
+   * mid-plan: the bar carries the step's power, cost and place.
+   */
+  get stepFocus(): boolean {
+    return (
+      viewportState.isShort &&
+      !this.isPreview &&
+      (this.stepsActive || this.moveStepsPlanning !== null)
+    );
+  }
+
+  /**
+   * On a short phone the header folds into the readout's head: its menu sits
+   * beside the fold chevron and takes Center View in with it, and the
+   * readout's own actions go into that menu. Two stacked bars become one line.
+   *
+   * Only while there is a readout to fold into. An empty board of one's own
+   * has none, and the header stays as a corner pill there — the menu has to
+   * live somewhere.
+   */
+  get headerInCard(): boolean {
+    return (
+      viewportState.isShort &&
+      viewportState.isCompact &&
+      this.statsPanel !== null
+    );
+  }
+
+  /** The header is off screen, for either reason above. */
+  get headerHidden(): boolean {
+    return this.stepFocus || this.headerInCard;
+  }
+
+  /**
    * Switches the canvas between the two boards and remembers the choice.
    * A no-op write still costs a storage round-trip, so it is skipped.
    */

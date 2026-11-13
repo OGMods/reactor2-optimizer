@@ -28,6 +28,14 @@
   let compact = $derived(viewportState.isPhone);
 
   /*
+   * Short: a phone split-screened beside the game, or in landscape. The logo
+   * goes (the heading keeps its accessible name) and the bar tightens to its
+   * buttons, which is ~20px of a 400px screen handed back to the board. The
+   * buttons keep their size: they are still thumb targets.
+   */
+  let short = $derived(viewportState.isShort);
+
+  /*
    * Hidden, not disabled, on a shipped island. Its dimensions are part of the
    * map, so a stepper there is not a control the user is temporarily barred
    * from — it is one that does not exist for this board.
@@ -66,14 +74,25 @@
   $effect(() => {
     void headerHeight;
     void compact;
+    void short;
     if (headerEl)
       uiState.headerBottom = headerEl.getBoundingClientRect().bottom;
+  });
+
+  /*
+   * Cleared when the bar unmounts (step mode on a short screen takes it away),
+   * so nothing goes on reserving room under a bar that is not there — the same
+   * teardown `hudHeight` has.
+   */
+  $effect(() => () => {
+    uiState.headerBottom = 0;
   });
 </script>
 
 <header
   class="hud-header"
   class:compact
+  class:short
   bind:this={headerEl}
   bind:clientHeight={headerHeight}
 >
@@ -83,7 +102,7 @@
     dimensions are the file's own (3x the 44px it draws at, for HiDPI), which
     is what lets the browser reserve the right box before the image lands.
   -->
-  <h1 class="logo">
+  <h1 class={short ? "sr-only" : "logo"}>
     <img
       class="logo-mark"
       src={asset("logo.webp")}
@@ -263,6 +282,18 @@
     .action-btn {
       min-height: var(--tap);
     }
+  }
+
+  /*
+   * Short: the logo is gone, so the controls carry the bar on their own —
+   * a pill in the top-right corner, where they always sit, rather than a
+   * full-width bar that is empty for half its length. The padding drops to a
+   * hairline around them.
+   */
+  .hud-header.short {
+    top: calc(var(--safe-top) + 0.4rem);
+    left: auto;
+    padding: 0.2rem 0.3rem;
   }
 
   /* Icon-only, and squared up to the 44px minimum touch target. */

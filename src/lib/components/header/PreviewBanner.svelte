@@ -96,7 +96,7 @@
      * about 3rem tall. Anchored to the same safe-area insets so it clears a
      * notch in landscape exactly as the bar above it does.
      */
-    top: calc(var(--header-clearance, 4rem) + 0.35rem);
+    top: calc(max(var(--header-clearance, 4rem), var(--safe-top)) + 0.35rem);
     left: calc(var(--safe-left) + 0.75rem);
     /*
      * A step *below* the header rather than level with it. Both are header
@@ -210,7 +210,7 @@
 
   /* Phone: the bar sits under a shorter header and holds shorter labels. */
   .preview-bar.compact {
-    top: calc(var(--header-clearance, 3.9rem) + 0.35rem);
+    top: calc(max(var(--header-clearance, 3.9rem), var(--safe-top)) + 0.35rem);
     right: calc(var(--safe-right) + 0.75rem);
     padding: 0.4rem 0.5rem;
     gap: 0.4rem 0.5rem;

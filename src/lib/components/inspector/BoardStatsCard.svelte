@@ -22,6 +22,7 @@
   import { placementStatus } from "../../data/placements";
   import { ratedPlacementAt } from "../../simulation/simulator";
   import FullNumber from "./FullNumber.svelte";
+  import OverflowMenu, { type MenuAction } from "../header/OverflowMenu.svelte";
   import { asset, formatDuration, formatTileCoords } from "../../utils";
   import {
     AlertCircle,
@@ -34,6 +35,7 @@
     Copy,
     Eye,
     ListOrdered,
+    LocateFixed,
     Hammer,
     Loader2,
     Trash2,
@@ -180,13 +182,41 @@
   let stepping = $derived(
     uiState.stepsActive || uiState.moveStepsPlanning !== null,
   );
+
+  /*
+   * A short screen folds it too, whatever the stored preference says: open,
+   * a solve's figures and layout row are ~170px, which on a phone
+   * split-screened beside the game is most of what the board gets. The
+   * chevron still opens it, and that choice is held here rather than written
+   * to `statsCardCollapsed` — the preference belongs to the full-height
+   * screen, and folding it on the way past would rewrite it, the same reason
+   * `inspecting` is derived.
+   */
+  let short = $derived(collapsible && viewportState.isShort);
+  let shortOpen = $state(false);
+
+  /*
+   * A short phone has no header (`uiState.headerInCard`): its menu sits here
+   * beside the chevron, and the card's own actions ride inside it with Center
+   * View, so the head stays one line whether the card is open or folded.
+   */
+  let menuInHead = $derived(uiState.headerInCard);
+
   let collapsed = $derived(
-    stepping || (collapsible && (uiState.statsCardCollapsed || inspecting)),
+    stepping ||
+      (collapsible &&
+        (inspecting || (short ? !shortOpen : uiState.statsCardCollapsed))),
   );
+
+  function toggleFold() {
+    if (short) shortOpen = !shortOpen;
+    else uiState.toggleStatsCard();
+  }
 
   /** On a phone with the card open, the actions get a labelled row of their own. */
   let actionRow = $derived(
-    collapsible &&
+    !menuInHead &&
+      collapsible &&
       !!panel &&
       !collapsed &&
       !solverState.isOptimizing &&
@@ -582,12 +612,14 @@
     panel === "solver" ? "Discard solve" : "Remove all buildings",
   );
 
-  function resetBoard() {
-    if (!confirm.press("reset")) return;
+  /** True once it acted; false when the press only armed it. */
+  function resetBoard(): boolean {
+    if (!confirm.press("reset")) return false;
     // Whichever board is on screen is the one being thrown away — the solve,
     // or every building placed by hand.
     if (panel === "solver") solverState.clearResult();
     else layoutState.clearPlacements();
+    return true;
   }
 
   /*
@@ -599,11 +631,61 @@
    * which is exactly the habit that makes the confirmation useless on the day
    * it matters. Either way the write is undoable.
    */
-  function copySolve() {
-    if (layoutState.placements.length > 0 && !confirm.press("copy")) return;
+  /** True once it acted; false when the press only armed it. */
+  function copySolve(): boolean {
+    if (layoutState.placements.length > 0 && !confirm.press("copy"))
+      return false;
     confirm.disarm();
     uiState.copySolveToBoard();
+    return true;
   }
+
+  /*
+   * The same actions as `boardActions`, as rows of the head's menu on a short
+   * phone (`menuInHead`), with Center View first — the header's recovery
+   * action, which has no other home there. An armed row says so in words,
+   * as the buttons do.
+   */
+  let menuActions = $derived.by((): MenuAction[] => {
+    const rows: MenuAction[] = [
+      {
+        key: "center",
+        icon: LocateFixed,
+        label: "Center view",
+        onclick: () => uiState.recenterCanvas(),
+      },
+    ];
+    if (solverState.isOptimizing) return rows;
+    if (panel === "solver" && !layoutState.isPreview) {
+      if (uiState.canPlanMoveSteps && !uiState.stepsActive)
+        rows.push({
+          key: "steps",
+          icon: ListOrdered,
+          label: "Steps to this layout",
+          onclick: () => uiState.planMoveSteps(),
+        });
+      rows.push({
+        key: "copy",
+        icon: Copy,
+        label:
+          confirm.armed === "copy"
+            ? "Replace your layout? Tap again"
+            : "Copy to Edit",
+        armed: confirm.armed === "copy",
+        onclick: copySolve,
+      });
+    }
+    if (resettable)
+      rows.push({
+        key: "reset",
+        icon: Trash2,
+        label: confirm.armed === "reset" ? "Sure? Tap again" : resetLabel,
+        danger: true,
+        armed: confirm.armed === "reset",
+        onclick: resetBoard,
+      });
+    return rows;
+  });
 
   // Switching panels mid-confirm would apply the press to the other board.
   $effect(() => {
@@ -750,8 +832,13 @@
                 >{solverState.isStopping ? "stopping" : countdown}</span
               >
             </span>
-          {:else if !actionRow}
+          {:else if !actionRow && !menuInHead}
             {@render boardActions(collapsible ? "icons" : "head")}
+          {/if}
+
+          {#if menuInHead}
+            <!-- The header's menu, moved in: see `menuInHead`. -->
+            <OverflowMenu actions={menuActions} bare />
           {/if}
 
           <!--
@@ -766,7 +853,7 @@
           {#if collapsible && !inspecting && !stepping}
             <button
               class="head-btn"
-              onclick={() => uiState.toggleStatsCard()}
+              onclick={toggleFold}
               aria-label={collapsed ? "Show board stats" : "Hide board stats"}
               aria-expanded={!collapsed}
             >
@@ -976,7 +1063,12 @@
                 {/each}
               {/if}
 
-              {#if buildingCounts.length > 0}
+              <!--
+                Not on a short screen: the HUD's kind filter right below the
+                card already counts reactors, coolers and generators, and
+                there the card is a scroller over a 330px board.
+              -->
+              {#if buildingCounts.length > 0 && !short}
                 <div class="counts">
                   <div class="row">
                     <span class="row-label">Buildings</span>

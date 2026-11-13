@@ -78,6 +78,9 @@
     viewportState.isCompact && uiState.sheetDetent !== "closed",
   );
 
+  /* See `uiState.stepFocus` and `uiState.headerInCard`. */
+  let stepFocus = $derived(uiState.stepFocus);
+
   /*
    * Undo and redo from the keyboard.
    *
@@ -275,7 +278,9 @@
     instead of being the one thing left floating over a bare board.
   -->
   {#if !uiState.uiHidden}
-    <Header />
+    {#if !uiState.headerHidden}
+      <Header />
+    {/if}
     <PreviewBanner />
 
     <!--
@@ -283,9 +288,11 @@
       the inspected tile on a single line at its foot, so a phone is never asked
       to show two stacked panels over the map they describe.
     -->
-    <div class="corner-cards" bind:this={uiState.statsRef}>
-      <BoardStatsCard />
-    </div>
+    {#if !stepFocus}
+      <div class="corner-cards" bind:this={uiState.statsRef}>
+        <BoardStatsCard />
+      </div>
+    {/if}
 
     {#if !readOnly && !hudHidden}
       <!--
@@ -412,7 +419,12 @@
 
   .corner-cards {
     position: absolute;
-    top: calc(var(--header-clearance, 4.5rem) + 0.5rem);
+    /*
+     * Floored at the safe area: on a short phone the header is not mounted
+     * (`uiState.headerHidden`), its clearance is 0, and the card takes the
+     * top line itself.
+     */
+    top: calc(max(var(--header-clearance, 4.5rem), var(--safe-top)) + 0.5rem);
     right: calc(var(--safe-right) + 0.75rem);
     z-index: var(--z-inspector);
     display: flex;
@@ -421,8 +433,8 @@
     gap: 0.6rem;
     /* Leaves room for the HUD, so a long card never runs under it. */
     max-height: calc(
-      100dvh - var(--header-clearance, 4.5rem) - var(--hud-clearance, 0px) -
-        2rem
+      100dvh - max(var(--header-clearance, 4.5rem), var(--safe-top)) -
+        var(--hud-clearance, 0px) - 2rem
     );
     /* The strip itself must not intercept drags meant for the canvas. */
     pointer-events: none;
@@ -444,10 +456,11 @@
        * there is no banner, which is every board but a shared one.
        */
       top: calc(
-        var(--header-clearance, 4.5rem) + 0.5rem + var(--preview-clearance, 0px)
+        max(var(--header-clearance, 4.5rem), var(--safe-top)) + 0.5rem +
+          var(--preview-clearance, 0px)
       );
       max-height: calc(
-        100dvh - var(--header-clearance, 4.5rem) -
+        100dvh - max(var(--header-clearance, 4.5rem), var(--safe-top)) -
           var(--preview-clearance, 0px) - var(--hud-clearance, 0px) - 2rem
       );
     }
@@ -547,7 +560,7 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    top: calc(var(--header-clearance, 4rem) + 0.5rem);
+    top: calc(max(var(--header-clearance, 4rem), var(--safe-top)) + 0.5rem);
     max-width: calc(100vw - var(--safe-left) - var(--safe-right) - 2rem);
     z-index: var(--z-toast);
     display: flex;
