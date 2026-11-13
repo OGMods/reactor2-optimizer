@@ -134,7 +134,9 @@ them; a solve is a shopping list they have yet to buy.
 (`boardActions`): icons in the head on a desktop, Steps keeping its word; icons
 only in the head of a folded phone card; and on an open phone card a labelled row
 of their own under the title (`.action-row`), where there is a line to spare and
-a word beats a glyph. An armed confirmation always says so in words.
+a word beats a glyph. An armed confirmation always says so in words. On a short
+phone there is a fourth: rows of the header's menu, which moves into the head
+(`uiState.headerInCard`) — see `src/CLAUDE.md`, Short viewports.
 
 **Reset (the bin button) asks twice** and acts on whichever board is showing: the solve, or every
 hand-placed building. Switching panels disarms it, otherwise a press aimed at one

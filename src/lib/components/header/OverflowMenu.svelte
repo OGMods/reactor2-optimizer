@@ -1,3 +1,24 @@
+<script lang="ts" module>
+  import type { LocateFixed } from "lucide-svelte";
+
+  /**
+   * A row a host adds to the top of the menu. `onclick` returns `false` to
+   * keep the menu open — a two-press confirmation that has only armed, whose
+   * second press has to land on the same row.
+   */
+  export interface MenuAction {
+    key: string;
+    /** Any lucide icon; they all share one component type. */
+    icon: typeof LocateFixed;
+    label: string;
+    onclick: () => unknown;
+    /** Destroys something: the colour law's `--danger`. */
+    danger?: boolean;
+    /** Armed and waiting for its second press. */
+    armed?: boolean;
+  }
+</script>
+
 <script lang="ts">
   import { layoutState, uiState, viewportState } from "../../state";
   import GridControls from "./GridControls.svelte";
@@ -22,8 +43,72 @@
    * home keeps the header bar from growing a new button per feature. Map size
    * and Share move in only on a phone, where the bar has no room for them.
    */
+
+  /*
+   * Rows the host puts first. On a short phone the readout hosts this menu in
+   * its head, and its own actions — Center View, Steps, Copy, Discard — come
+   * in here rather than taking a line of their own.
+   */
+  let {
+    actions = [],
+    bare = false,
+  }: {
+    actions?: MenuAction[];
+    /** Borderless, matching the readout head's own buttons when hosted there. */
+    bare?: boolean;
+  } = $props();
+
+  function runAction(a: MenuAction) {
+    if (a.onclick() !== false) close();
+  }
+
   let menuEl = $state<HTMLDivElement | null>(null);
-  let compact = $derived(viewportState.isPhone);
+  let buttonEl = $state<HTMLButtonElement | null>(null);
+
+  /*
+   * The list opens in the top layer, hung off the button by measurement.
+   *
+   * Absolutely positioned it was sealed inside whatever holds it: the header
+   * bar's stacking context, and — hosted in the readout — a card that clips
+   * its own overflow and whose `backdrop-filter` makes even `position: fixed`
+   * relative to it. A popover escapes both. Without popover support the
+   * absolute rules below still place it under the button.
+   */
+  function float(node: HTMLElement) {
+    if (typeof node.showPopover !== "function" || !buttonEl) return;
+    node.showPopover();
+    const r = buttonEl.getBoundingClientRect();
+    const top = r.bottom + 8;
+    node.style.top = `${top}px`;
+    node.style.right = `${document.documentElement.clientWidth - r.right}px`;
+    node.style.maxHeight = `calc(${window.innerHeight - top}px - var(--safe-bottom) - 0.75rem)`;
+    /*
+     * Placed once, so a resize — the split-screen divider dragged, a phone
+     * rotated — closes it rather than leaving it hanging off where the
+     * button used to be.
+     */
+    window.addEventListener("resize", close);
+    window.visualViewport?.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("resize", close);
+      window.visualViewport?.removeEventListener("resize", close);
+    };
+  }
+
+  /*
+   * `overflowOpen` is one flag for whichever menu is mounted, and the menu
+   * moves between the header and the readout. Closed when its host goes, so
+   * the next one does not mount already open.
+   */
+  $effect(() => () => {
+    uiState.overflowOpen = false;
+  });
+  /*
+   * Hosted in the readout (`bare`), the header is not mounted at all, so the
+   * Share and map-size rows have to come in here at every width — a
+   * landscape phone is compact without being phone-width.
+   */
+  let compact = $derived(viewportState.isPhone || bare);
 
   /* Hidden rather than disabled on a shipped island — see `Header`. */
   let showSize = $derived(compact && layoutState.canEditTerrain);
@@ -67,6 +152,8 @@
 <div class="overflow-wrap" bind:this={menuEl}>
   <button
     class="icon-btn"
+    bind:this={buttonEl}
+    class:bare
     class:open={uiState.overflowOpen}
     onclick={() => (uiState.overflowOpen = !uiState.overflowOpen)}
     aria-label="More options"
@@ -74,14 +161,31 @@
     aria-haspopup="true"
   >
     {#if uiState.overflowOpen}
-      <X size={18} />
+      <X size={bare ? 14 : 18} />
     {:else}
-      <MoreHorizontal size={18} />
+      <MoreHorizontal size={bare ? 14 : 18} />
     {/if}
   </button>
 
   {#if uiState.overflowOpen}
-    <div class="menu thin-scroll" role="menu">
+    <div class="menu thin-scroll" role="menu" popover="manual" {@attach float}>
+      {#if actions.length > 0}
+        {#each actions as a (a.key)}
+          <button
+            class="menu-item"
+            class:danger={a.danger}
+            class:armed={a.armed}
+            role="menuitem"
+            onclick={() => runAction(a)}
+          >
+            <a.icon size={16} />
+            <span>{a.label}</span>
+          </button>
+        {/each}
+
+        <div class="menu-divider"></div>
+      {/if}
+
       {#if showSize}
         <div class="menu-section">
           <span class="menu-title">Map size</span>
@@ -217,6 +321,38 @@
     transition: all var(--dur-fast);
   }
 
+  /*
+   * Hosted in the readout's head, beside its fold chevron: dressed as that
+   * chevron is (`.head-btn` in `BoardStatsCard`) — borderless, dim, 22px
+   * (32px on touch), a 14px glyph — so the pair reads as one row of controls rather than a
+   * header button that wandered in. Open still takes the accent: an open menu
+   * is a selection.
+   */
+  .icon-btn.bare {
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+  }
+
+  .icon-btn.bare:hover {
+    background: var(--surface-raised);
+    color: var(--text);
+  }
+
+  .icon-btn.bare.open {
+    background: var(--accent-bg);
+    color: var(--accent);
+  }
+
+  @media (pointer: coarse) {
+    .icon-btn.bare {
+      width: 32px;
+      height: 32px;
+    }
+  }
+
   .icon-btn:hover,
   .icon-btn.open {
     background: var(--accent-bg);
@@ -263,6 +399,17 @@
     overflow-y: auto;
     /* A flick that runs out of menu must not drag the board behind it. */
     overscroll-behavior: contain;
+  }
+
+  /*
+   * In the top layer (see `float`): placed by the coordinates `float` writes,
+   * so the user-agent's centred-dialog defaults for a popover have to go.
+   */
+  .menu:popover-open {
+    position: fixed;
+    inset: auto;
+    margin: 0;
+    color: inherit;
   }
 
   @keyframes menu-in {
@@ -321,6 +468,17 @@
    * law in `app.css`.
    */
   .menu-item:hover {
+    background: var(--surface-raised);
+  }
+
+  /* A row that destroys something, by the colour law. */
+  .menu-item.danger {
+    color: var(--danger);
+  }
+
+  /* Armed: one more press does it. Said in words by the label too. */
+  .menu-item.armed {
+    border-color: var(--danger);
     background: var(--surface-raised);
   }
 

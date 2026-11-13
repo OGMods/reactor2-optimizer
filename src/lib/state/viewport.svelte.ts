@@ -25,6 +25,11 @@
 const SIDEBAR_MIN_WIDTH = 1024;
 /** Below this the header collapses its secondary controls into a menu. */
 const PHONE_MAX_WIDTH = 768;
+/**
+ * Below this the chrome packs tighter — see `isShort`. A phone split-screened
+ * beside the game is 330–450px tall; a phone in landscape, 360–430px.
+ */
+const SHORT_MAX_HEIGHT = 600;
 
 class ViewportState {
   /** Viewport is narrower than the sidebar breakpoint — use a bottom sheet. */
@@ -32,6 +37,15 @@ class ViewportState {
 
   /** Phone-sized: the header sheds everything but the recovery actions. */
   isPhone = $state(false);
+
+  /**
+   * Too short for the full chrome: a phone split-screened beside the game, or
+   * held in landscape. A third axis — a split-screened phone is narrow *and*
+   * short, a landscape one wide-ish and short — but only below the sidebar
+   * breakpoint: a short *desktop* window is a laptop, not a thumb beside a
+   * game, and keeps its chrome. Width-keyed layouts still apply on top.
+   */
+  isShort = $state(false);
 
   /** No usable hover — tap to inspect instead of hovering. */
   isCoarse = $state(false);
@@ -61,6 +75,14 @@ class ViewportState {
     this.#track(`(max-width: ${PHONE_MAX_WIDTH - 1}px)`, (m) => {
       this.isPhone = m;
     });
+    // Compact widths only: a desktop window under 600px tall (a 720p laptop
+    // with its browser chrome, devtools docked below) keeps the full chrome.
+    this.#track(
+      `(max-height: ${SHORT_MAX_HEIGHT - 1}px) and (max-width: ${SIDEBAR_MIN_WIDTH - 1}px)`,
+      (m) => {
+        this.isShort = m;
+      },
+    );
     this.#track("(pointer: coarse)", (m) => {
       this.isCoarse = m;
     });

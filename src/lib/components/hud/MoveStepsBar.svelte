@@ -1,7 +1,7 @@
 <script lang="ts">
   import { findBuilding, formatNumber } from "@reactor2/solver";
   import { ChevronLeft, ChevronRight, Loader2, X } from "lucide-svelte";
-  import { layoutState, uiState } from "../../state";
+  import { layoutState, uiState, viewportState } from "../../state";
   import type { MoveStep } from "../../simulation/moveSteps";
   import { asset, formatTileCoords } from "../../utils";
   import KindFilter from "./KindFilter.svelte";
@@ -30,6 +30,15 @@
   });
 
   let index = $derived(m?.index ?? 0);
+
+  /*
+   * Short: a phone split-screened beside the game, which is where the steps
+   * are walked. The arrows move up either side of the step's own line and the
+   * slider goes, which takes a 44px row out of a bar that is otherwise most of
+   * a 400px screen. The arrows are what a thumb walks a plan with; scrubbing
+   * is for reading it, and that is the full-height screen's job.
+   */
+  let short = $derived(viewportState.isShort);
 
   /*
    * "Not now" on the last step's offer, for this plan: asked once, not again
@@ -199,6 +208,42 @@
   <img src={asset("icons/icon_cash.webp")} alt="" width="14" height="14" />
 {/snippet}
 
+{#snippet prevButton()}
+  <button
+    type="button"
+    class="step-btn"
+    aria-label="Previous step"
+    disabled={index === 0}
+    onpointerdown={(e) => startHold(e, -1)}
+    onpointerup={stopHold}
+    onlostpointercapture={stopHold}
+    onpointercancel={stopHold}
+    onclick={(e) => {
+      // A pointer press already stepped; a click from the keyboard
+      // (Enter or Space on the focused button) has no pointer behind it.
+      if (e.detail === 0) uiState.showMoveStep(index - 1);
+    }}><ChevronLeft size={16} /></button
+  >
+{/snippet}
+
+{#snippet nextButton()}
+  <button
+    type="button"
+    class="step-btn"
+    aria-label="Next step"
+    disabled={index === total}
+    onpointerdown={(e) => startHold(e, 1)}
+    onpointerup={stopHold}
+    onlostpointercapture={stopHold}
+    onpointercancel={stopHold}
+    onclick={(e) => {
+      // A pointer press already stepped; a click from the keyboard
+      // (Enter or Space on the focused button) has no pointer behind it.
+      if (e.detail === 0) uiState.showMoveStep(index + 1);
+    }}><ChevronRight size={16} /></button
+  >
+{/snippet}
+
 <div class="steps-dock" bind:clientHeight={measuredHeight}>
   {#if m && !planning}
     <!--
@@ -221,7 +266,7 @@
           type="button"
           class="icon"
           aria-label="Cancel"
-          onclick={() => uiState.closeMoveSteps()}><X size={16} /></button
+          onclick={() => uiState.closeMoveSteps()}><X size={14} /></button
         >
       </div>
     {:else}
@@ -261,11 +306,12 @@
           type="button"
           class="icon"
           aria-label="Leave the steps"
-          onclick={() => uiState.closeMoveSteps()}><X size={16} /></button
+          onclick={() => uiState.closeMoveSteps()}><X size={14} /></button
         >
       </div>
 
       <div class="what">
+        {#if short}{@render prevButton()}{/if}
         {#if step}
           {#if iconOf(step)}
             <img
@@ -282,6 +328,7 @@
             Your board in Edit. {summary} to reach {formatNumber(end)}.
           </span>
         {/if}
+        {#if short}<span class="what-end">{@render nextButton()}</span>{/if}
       </div>
       <!--
         The plan ends where the island first makes the layout's power; what is
@@ -397,46 +444,20 @@
         {/if}
       {/if}
 
-      <div class="nav">
-        <button
-          type="button"
-          class="step-btn"
-          aria-label="Previous step"
-          disabled={index === 0}
-          onpointerdown={(e) => startHold(e, -1)}
-          onpointerup={stopHold}
-          onlostpointercapture={stopHold}
-          onpointercancel={stopHold}
-          onclick={(e) => {
-            // A pointer press already stepped; a click from the keyboard
-            // (Enter or Space on the focused button) has no pointer behind it.
-            if (e.detail === 0) uiState.showMoveStep(index - 1);
-          }}><ChevronLeft size={18} /></button
-        >
-        <input
-          type="range"
-          min="0"
-          max={total}
-          value={index}
-          aria-label="Step"
-          oninput={(e) => uiState.showMoveStep(Number(e.currentTarget.value))}
-        />
-        <button
-          type="button"
-          class="step-btn"
-          aria-label="Next step"
-          disabled={index === total}
-          onpointerdown={(e) => startHold(e, 1)}
-          onpointerup={stopHold}
-          onlostpointercapture={stopHold}
-          onpointercancel={stopHold}
-          onclick={(e) => {
-            // A pointer press already stepped; a click from the keyboard
-            // (Enter or Space on the focused button) has no pointer behind it.
-            if (e.detail === 0) uiState.showMoveStep(index + 1);
-          }}><ChevronRight size={18} /></button
-        >
-      </div>
+      {#if !short}
+        <div class="nav">
+          {@render prevButton()}
+          <input
+            type="range"
+            min="0"
+            max={total}
+            value={index}
+            aria-label="Step"
+            oninput={(e) => uiState.showMoveStep(Number(e.currentTarget.value))}
+          />
+          {@render nextButton()}
+        </div>
+      {/if}
     {/if}
   </div>
 </div>
@@ -536,6 +557,12 @@
     color: var(--warn);
   }
 
+  /*
+   * Close and Cancel: 32px at every pointer, the readout head's own buttons'
+   * size. It used to grow to 44px on touch with negative margins to keep the
+   * line short, which pushed it into the bar's corner and onto the next-step
+   * arrow below it.
+   */
   .icon {
     display: flex;
     align-items: center;
@@ -545,7 +572,7 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--text-muted);
+    color: var(--text-dim);
     cursor: pointer;
   }
 
@@ -562,6 +589,12 @@
     font-size: var(--fs-base);
     font-weight: 600;
     line-height: 1.3;
+  }
+
+  /* Short: the next arrow pinned to the far end, however short the line. */
+  .what-end {
+    display: flex;
+    margin-left: auto;
   }
 
   .sprite {
@@ -730,8 +763,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: var(--ctl);
-    height: var(--ctl);
+    width: var(--ctl-sm);
+    height: var(--ctl-sm);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: transparent;
@@ -763,16 +796,14 @@
   }
 
   @media (pointer: coarse) {
+    /*
+     * `--ctl`, under the tap floor on purpose. At 44px the pair were the
+     * largest thing in the bar and read heavier than the step they frame; two
+     * fixed squares at the bar's far ends are found by position, not aim.
+     */
     .step-btn {
-      width: var(--tap);
-      height: var(--tap);
-    }
-    /* A full thumb target that does not make the head line any taller. */
-    .icon {
-      width: var(--tap);
-      height: var(--tap);
-      margin: calc((var(--ctl-sm) - var(--tap)) / 2);
-      margin-left: 0;
+      width: var(--ctl);
+      height: var(--ctl);
     }
     /*
      * Below the tap floor on purpose: a setting chosen once per plan, not a

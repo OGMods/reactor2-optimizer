@@ -969,7 +969,11 @@
   let framed = false;
 
   $effect(() => {
-    const ready = uiState.headerBottom > 0 && uiState.hudHeight > 0;
+    // A short phone with a solve on screen never mounts the header (its
+    // controls ride in the readout), so there is no edge to wait for.
+    const ready =
+      (uiState.headerBottom > 0 || uiState.headerHidden) &&
+      uiState.hudHeight > 0;
     if (framed || !ready || !isAtlasLoaded) return;
     framed = true;
     recenterGrid();

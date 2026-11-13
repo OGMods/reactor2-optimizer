@@ -16,20 +16,25 @@ order `App.svelte` happened to mount them in. Two layers sit at a token minus on
 and both are the same lesson. `PreviewBanner` is `calc(var(--z-header) - 1)`: it is
 header chrome and shares the token, but it mounts _after_ the header, and at an
 equal z-index DOM order decides — which put a status line over everything the
-header opens. The overflow menu is a plain absolutely-positioned child of a bar
-with a z-index of its own, so it is sealed inside that stacking context and cannot
-climb out to reach a sibling; the bar underneath has to yield instead — which is
-also the honest reading, since the header's controls belong over a status line.
+header opens. The overflow menu's list opens as a `popover` in the top layer, hung
+off its button by measurement (`float` in `OverflowMenu`): absolutely positioned
+it was sealed inside the header's stacking context, and hosted in the readout it
+would be clipped by a card that hides its overflow and whose `backdrop-filter`
+pins even `position: fixed` to it. Without popover support the absolute rules
+still place it in the header; in the readout that fallback is clipped by the
+card (popover is Safari 17+, Chrome 114+, Firefox 125+).
 
 Note `--z-sheet` deliberately outranks `--z-header`: the mobile sheet is 90dvh at
 its `full` detent, so it has to cover a top-anchored header.
 
-**A floating menu needs a bound.** `OverflowMenu` caps itself at
-`100dvh - var(--header-clearance) - var(--safe-bottom) - 1.5rem` and scrolls
-inside it. That list only grows, and unbounded it simply ran off the bottom of the
-screen — and since the page cannot scroll (`html, body { overflow: hidden }`) and
-the menu is absolutely positioned, rows past the fold were not awkward to reach but
-_unreachable_.
+**A floating menu needs a bound.** `OverflowMenu` caps itself at the room below
+its button (`float` writes the `max-height` as it opens; the CSS
+`100dvh - var(--header-clearance) - …` cap is the no-popover fallback's) and
+scrolls inside it. That list only grows, and unbounded it simply ran off the
+bottom of the screen — and since the page cannot scroll
+(`html, body { overflow: hidden }`), rows past the fold were not awkward to reach
+but _unreachable_. It is placed once, so a resize closes it rather than leaving it
+hanging where the button was.
 
 ### The ladders
 
@@ -229,3 +234,40 @@ Two more the layout depends on:
 
 Touch-target bumps are keyed on `@media (pointer: coarse)`, not a width breakpoint,
 for the same reason `viewportState` splits the two axes.
+
+### Short viewports
+
+`viewportState.isShort` (under 600px tall **and** under the 1024px sidebar
+breakpoint) is a third axis: a phone split-screened beside the game — 330–450px,
+and exactly when the steps are walked — or held in landscape. A short desktop
+window is a laptop, not a thumb beside a game, and keeps the full chrome. Width
+rules still apply on top. Three things pack tighter there:
+
+- **The header folds into the readout** on a phone with a readout to fold
+  into (`uiState.headerInCard`): the header is not mounted, its menu sits in
+  the card's head beside the chevron, and Center View and the card's own
+  actions (Steps, Copy, Discard) become the menu's first rows (`actions` on
+  `OverflowMenu`). Two stacked bars become one line. Hosted there, the menu
+  always takes in Share and map size, since no header holds them even on a
+  landscape phone wider than `isPhone`. `TimelineStatus` goes with the header
+  — the Chronon pill is the full-height screen's — and the menu closes itself
+  on unmount, since `overflowOpen` is one flag across both hosts. With no
+  readout — an empty board of one's own — the header stays, as a corner pill
+  without the logo.
+- **The readout starts folded** whatever `statsCardCollapsed` says; its chevron
+  opens it for the session without writing the preference, which belongs to
+  the full-height screen. Opened, it leaves out the solve's building
+  counts, which the kind filter in the HUD beneath already shows.
+- **In step mode** the header and the readout both go (`uiState.stepFocus`) —
+  the steps bar carries the power, cost and place — and the bar moves its
+  arrows either side of the step's line and drops the slider.
+
+The step bar's arrows (`--ctl` on touch) and its close button (`--ctl-sm`) sit
+under the `--tap` floor at every height, by request: at 44px they were the
+heaviest thing in the bar, and a pair fixed at its two ends is found by position.
+
+`Header` zeroes `headerBottom` on teardown so nothing reserves its room;
+everything anchored under it (the corner card, `PreviewBanner`, the update
+notice) floors that clearance at the safe area; and `PixiCanvas`'s first framing
+takes `headerHidden` in place of a header edge it would otherwise wait for
+forever.
