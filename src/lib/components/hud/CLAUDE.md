@@ -89,7 +89,8 @@ the board. It rides above `MoveStepsBar` in step mode as well. On a phone the
 labels go and the icon and count stay, and it moves up onto the view toggle's
 line, left of it, so the stack is two columns — filter over Setup, toggle over
 Run — instead of a third pill centred on a third line. It wraps to its own
-line only when the two cannot share one.
+line only when the two cannot share one. With the interface hidden it is the one
+control left, mounted alone by `App.svelte` at the bottom centre.
 
 **The way off that board is `uiState.copySolveToBoard()`**, offered as a Copy
 button in the readout's head. A solve is as often a starting point as an answer —

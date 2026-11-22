@@ -17,7 +17,8 @@ export type PlacementView = "user" | "solver";
 export type ImageScale = 1 | 2;
 
 /**
- * How step mode orders its steps: the most power first, or one kind of
- * building at a time — see `PlanOptions.group` in `simulation/moveSteps.ts`.
+ * How step mode orders its steps: by area, each step beside the last, or one
+ * kind of building at a time — see `PlanOptions.group` in
+ * `simulation/moveSteps.ts`.
  */
-export type StepOrder = "power" | "kind";
+export type StepOrder = "area" | "kind";

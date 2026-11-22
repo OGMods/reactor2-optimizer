@@ -129,7 +129,7 @@ const DEFAULT_UI_PREFS: UiPrefs = {
   fillBadges: true,
   chainLinks: true,
   imageScale: 1,
-  stepOrder: "power",
+  stepOrder: "area",
 };
 
 /**

@@ -246,10 +246,14 @@ rules still apply on top. Three things pack tighter there:
 - **The header folds into the readout** on a phone with a readout to fold
   into (`uiState.headerInCard`): the header is not mounted, its menu sits in
   the card's head beside the chevron, and Center View and the card's own
-  actions (Steps, Copy, Discard) become the menu's first rows (`actions` on
+  actions (Steps, Copy, Discard) become rows of the menu (`actions` on
   `OverflowMenu`). Two stacked bars become one line. Hosted there, the menu
   always takes in Share and map size, since no header holds them even on a
-  landscape phone wider than `isPhone`. `TimelineStatus` goes with the header
+  landscape phone wider than `isPhone`, and it is ordered by use, each
+  action placed by its `group`: Hide interface and Center View; Steps, Copy,
+  Share and Save as image; Island stats, Import, Transfer and Settings; map
+  size; Discard alone near the foot, away from the thumb's first landing;
+  Support. `TimelineStatus` goes with the header
   — the Chronon pill is the full-height screen's — and the menu closes itself
   on unmount, since `overflowOpen` is one flag across both hosts. With no
   readout — an empty board of one's own — the header stays, as a corner pill

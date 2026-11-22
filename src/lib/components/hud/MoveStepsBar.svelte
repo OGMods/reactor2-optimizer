@@ -401,19 +401,19 @@
       {/if}
       {#if index === 0}
         <!--
-          The order, offered at the start where the plan is summed up: the most
-          power first keeps the island earning, one kind at a time is simpler
-          to carry out. Changing it plans again.
+          The order, offered at the start where the plan is summed up: by
+          area keeps each step beside the last, one kind at a time keeps one
+          building in hand. Changing it plans again.
         -->
         <div class="order" role="group" aria-label="Order of the steps">
           <span class="order-label">Order</span>
           <button
             type="button"
             class="order-btn"
-            class:active={uiState.stepOrder === "power"}
-            aria-pressed={uiState.stepOrder === "power"}
-            title="Each step the one that leaves the most power"
-            onclick={() => uiState.setStepOrder("power")}>Most power</button
+            class:active={uiState.stepOrder === "area"}
+            aria-pressed={uiState.stepOrder === "area"}
+            title="Each step beside the last, working through one area at a time"
+            onclick={() => uiState.setStepOrder("area")}>By area</button
           >
           <button
             type="button"

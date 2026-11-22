@@ -13,6 +13,7 @@
     ImportModal,
     HudToolbar,
     MoveStepsBar,
+    KindFilter,
     PixiCanvas,
     PreviewBanner,
     SettingsModal,
@@ -344,6 +345,14 @@
     >
       <Eye size={18} />
     </button>
+    <!--
+      The one control that stays: picking a kind out of the solver's board is
+      a way of reading the board, which is what the interface was put away
+      for. Where the HUD would offer it — the solver's board, not mid-run.
+    -->
+    {#if !readOnly && uiState.showingSolver && uiState.canSwitchBoards}
+      <div class="hidden-filter"><KindFilter /></div>
+    {/if}
   {/if}
 
   <ShareModal />
@@ -550,6 +559,18 @@
   .show-ui:focus-visible {
     opacity: 1;
     color: var(--text);
+  }
+
+  /* Bottom centre, where the HUD that normally carries it sits. */
+  .hidden-filter {
+    position: absolute;
+    left: 50%;
+    bottom: calc(var(--safe-bottom) + 0.75rem);
+    transform: translateX(-50%);
+    max-width: calc(100vw - var(--safe-left) - var(--safe-right) - 1.5rem);
+    z-index: var(--z-hud);
+    display: flex;
+    justify-content: center;
   }
 
   /*
