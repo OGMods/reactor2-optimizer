@@ -75,8 +75,8 @@
 
     <p class="lead small">
       The island makes little power until the last kind goes in, since a
-      building needs its partners beside it to work. For the most power at every
-      step, choose Most power instead.
+      building needs its partners beside it to work. To build one area at a time
+      instead, choose By area.
     </p>
 
     <div class="actions">

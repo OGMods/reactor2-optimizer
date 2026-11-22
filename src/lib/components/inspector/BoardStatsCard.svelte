@@ -642,14 +642,15 @@
 
   /*
    * The same actions as `boardActions`, as rows of the head's menu on a short
-   * phone (`menuInHead`), with Center View first — the header's recovery
-   * action, which has no other home there. An armed row says so in words,
-   * as the buttons do.
+   * phone (`menuInHead`), with Center View — the header's recovery action,
+   * which has no other home there. Each row's `group` places it in the
+   * menu's order. An armed row says so in words, as the buttons do.
    */
   let menuActions = $derived.by((): MenuAction[] => {
     const rows: MenuAction[] = [
       {
         key: "center",
+        group: "view",
         icon: LocateFixed,
         label: "Center view",
         onclick: () => uiState.recenterCanvas(),
@@ -660,12 +661,14 @@
       if (uiState.canPlanMoveSteps && !uiState.stepsActive)
         rows.push({
           key: "steps",
+          group: "layout",
           icon: ListOrdered,
           label: "Steps to this layout",
           onclick: () => uiState.planMoveSteps(),
         });
       rows.push({
         key: "copy",
+        group: "layout",
         icon: Copy,
         label:
           confirm.armed === "copy"
@@ -678,6 +681,7 @@
     if (resettable)
       rows.push({
         key: "reset",
+        group: "end",
         icon: Trash2,
         label: confirm.armed === "reset" ? "Sure? Tap again" : resetLabel,
         danger: true,

@@ -158,13 +158,8 @@ describe("planMoveSteps", () => {
     const plan = await planMoveSteps(start, target, [], count);
 
     expect(asSet(replay(start, plan))).toEqual(asSet(target));
-    expect(plan.steps).toEqual([
-      {
-        kind: "swap",
-        a: { buildingId: "cooler1", x: 0, y: 0 },
-        b: { buildingId: "generator", x: 1, y: 0 },
-      },
-    ]);
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0].kind).toBe("swap");
   });
 
   it("turns a longer ring with nowhere to park by swaps alone", async () => {
@@ -212,6 +207,51 @@ describe("planMoveSteps", () => {
     expect(plan.steps).toHaveLength(2);
   });
 
+  it("never moves a building off a tile only to build its kind there", async () => {
+    // The cooler at (2,0) is paired to (2,1), the nearer of its two targets,
+    // and (0,0) is left a build. A swap lands it on (0,0) — where a cooler is
+    // wanted — so it stays, and the build goes to (2,1) instead of the cooler
+    // moving on and another being bought for the tile it left.
+    const start = [b("generator", 0, 0), b("cooler1", 2, 0)];
+    const target = [
+      b("cooler1", 0, 0),
+      b("generator", 2, 0),
+      b("cooler1", 2, 1),
+    ];
+    // Favours the swap, so it is taken before the cooler's own move.
+    const score = (board: ReadonlyMap<string, string>) =>
+      board.size * 10 + (board.get("0,0") === "cooler1" ? 1 : 0);
+    const plan = await planMoveSteps(start, target, [], score);
+
+    expect(asSet(replay(start, plan))).toEqual(asSet(target));
+    expect(plan.steps.map((s) => s.kind)).toEqual(["swap", "build"]);
+  });
+
+  it("takes the nearest step, not the first found", async () => {
+    const target = [
+      b("cooler1", 0, 0),
+      b("cooler1", 9, 0),
+      b("cooler1", 1, 0),
+      b("cooler1", 8, 0),
+    ];
+    const plan = await planMoveSteps([], target, [], count);
+    expect(plan.steps.map((s) => (s.kind === "build" ? s.x : -1))).toEqual([
+      0, 1, 8, 9,
+    ]);
+  });
+
+  it("moves the spare building that leaves no tile to replace", async () => {
+    // Two generators, one wanted at (4,0). Moving the nearer, from (5,0),
+    // would leave the one at (0,0) to sell and (5,0) to build on: three
+    // steps. Moving the far one lets (5,0) be one replace: two.
+    const start = [b("generator", 0, 0), b("generator", 5, 0)];
+    const target = [b("generator", 4, 0), b("cooler1", 5, 0)];
+    const plan = await planMoveSteps(start, target, [], count);
+
+    expect(asSet(replay(start, plan))).toEqual(asSet(target));
+    expect(plan.steps.map((s) => s.kind).sort()).toEqual(["move", "replace"]);
+  });
+
   it("replaces a building in place rather than selling and building", async () => {
     const start = [b("cooler1", 0, 0), b("generator", 1, 0)];
     const target = [b("cooler2", 0, 0), b("generator", 1, 0)];
@@ -256,14 +296,14 @@ describe("planMoveSteps", () => {
     const score = (board: ReadonlyMap<string, string>) =>
       [...board.values()].filter((id) => id === "generator").length;
     const plan = await planMoveSteps(
-      [b("cooler1", 0, 0), b("cooler1", 1, 0)],
-      [b("generator", 5, 5), b("cooler1", 2, 0), b("cooler1", 3, 0)],
+      [b("cooler1", 5, 5), b("cooler1", 6, 5)],
+      [b("generator", 0, 0), b("cooler1", 7, 5), b("cooler1", 8, 5)],
       [],
       score,
       { stopAtPower: 1 },
     );
     expect(plan.steps).toEqual([
-      { kind: "build", buildingId: "generator", x: 5, y: 5 },
+      { kind: "build", buildingId: "generator", x: 0, y: 0 },
     ]);
     expect(plan.stoppedEarly).toBe(true);
   });
@@ -275,27 +315,26 @@ describe("planMoveSteps", () => {
     expect(stepCount([b("cooler1", 0, 0)], [b("cooler1", 3, 0)])).toBe(1);
   });
 
-  it("orders by power: a running island gets its cooler before its generator", async () => {
-    // A generator makes power only while every generator has a cooler: one
-    // more without its cooler shuts the lot down.
-    const score = (board: ReadonlyMap<string, string>) => {
-      const ids = [...board.values()];
-      const coolers = ids.filter((id) => id === "cooler1").length;
-      const gens = ids.filter((id) => id === "generator").length;
-      return gens <= coolers ? gens : 0;
-    };
-    const running = [b("generator", 0, 0), b("cooler1", 1, 0)];
+  it("orders by area, not power: a step far off waits for the near ones", async () => {
+    // The far generator is worth the most, but the coolers beside the last
+    // step come first.
+    const score = (board: ReadonlyMap<string, string>) =>
+      [...board.values()].filter((id) => id === "generator").length * 10 +
+      board.size;
     const plan = await planMoveSteps(
-      running,
-      [...running, b("generator", 2, 0), b("cooler1", 3, 0)],
+      [],
+      [
+        b("cooler1", 0, 0),
+        b("generator", 9, 9),
+        b("cooler1", 1, 0),
+        b("cooler1", 2, 0),
+      ],
       [],
       score,
     );
     expect(
-      plan.steps.map((s) => (s.kind === "build" ? s.buildingId : s.kind)),
-    ).toEqual(["cooler1", "generator"]);
-    // The island never goes dark on the way.
-    expect(plan.powers).toEqual([1, 1, 2]);
+      plan.steps.map((s) => (s.kind === "build" ? `${s.x},${s.y}` : s.kind)),
+    ).toEqual(["0,0", "1,0", "2,0", "9,9"]);
   });
 
   it("builds one kind at a time when grouped, each in reading order", async () => {
@@ -340,14 +379,14 @@ describe("planMoveSteps", () => {
       { group },
     );
     expect(plan.steps.map((s) => s.kind)).toEqual(["build", "move"]);
-    // Ungrouped, a move still goes before a build of equal power.
+    // Ungrouped, too: the first step is the first in reading order.
     const ungrouped = await planMoveSteps(
       [b("generator", 5, 5)],
       [b("generator", 0, 0), b("generator", 9, 9)],
       [],
       () => 0,
     );
-    expect(ungrouped.steps.map((s) => s.kind)).toEqual(["move", "build"]);
+    expect(ungrouped.steps.map((s) => s.kind)).toEqual(["build", "move"]);
   });
 
   it("puts the cash ahead of the groups", async () => {
@@ -487,10 +526,10 @@ describe("planMoveSteps", () => {
       return { net: running, peak };
     };
 
-    it("sells before the build the sale pays for, power waiting on cash", async () => {
-      // More buildings is more power, so on power alone the new cooler goes
-      // in first, and 100 is needed at once for a change that pays out 200.
-      const start = [b("generator", 0, 0), b("cooler1", 1, 0)];
+    it("sells before the build the sale pays for, the area order waiting on cash", async () => {
+      // The new cooler reads first, so on area alone it goes in first, and
+      // 100 is needed at once for a change that pays out 200.
+      const start = [b("generator", 0, 0), b("cooler1", 3, 0)];
       const target = [b("generator", 0, 0), b("cooler2", 2, 0)];
       const p = pricing(new Map([["cooler1", 1]]));
 

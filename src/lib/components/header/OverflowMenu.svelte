@@ -2,12 +2,19 @@
   import type { LocateFixed } from "lucide-svelte";
 
   /**
-   * A row a host adds to the top of the menu. `onclick` returns `false` to
-   * keep the menu open — a two-press confirmation that has only armed, whose
-   * second press has to land on the same row.
+   * A row a host adds to the menu. `onclick` returns `false` to keep the menu
+   * open — a two-press confirmation that has only armed, whose second press
+   * has to land on the same row.
    */
   export interface MenuAction {
     key: string;
+    /**
+     * Where it goes in the readout's menu (`bare`): with Hide interface at
+     * the top (`view`), with Share and Save as image (`layout`), or alone
+     * near the foot (`end`), where a destructive row is not the first thing
+     * a thumb lands on. The header's menu puts every action first.
+     */
+    group: "view" | "layout" | "end";
     /** Any lucide icon; they all share one component type. */
     icon: typeof LocateFixed;
     label: string;
@@ -45,9 +52,9 @@
    */
 
   /*
-   * Rows the host puts first. On a short phone the readout hosts this menu in
-   * its head, and its own actions — Center View, Steps, Copy, Discard — come
-   * in here rather than taking a line of their own.
+   * Rows the host adds. On a short phone the readout hosts this menu in its
+   * head, and its own actions — Center View, Steps, Copy, Discard — come in
+   * here rather than taking a line of their own, each placed by its `group`.
    */
   let {
     actions = [],
@@ -169,125 +176,53 @@
 
   {#if uiState.overflowOpen}
     <div class="menu thin-scroll" role="menu" popover="manual" {@attach float}>
-      {#if actions.length > 0}
-        {#each actions as a (a.key)}
-          <button
-            class="menu-item"
-            class:danger={a.danger}
-            class:armed={a.armed}
-            role="menuitem"
-            onclick={() => runAction(a)}
-          >
-            <a.icon size={16} />
-            <span>{a.label}</span>
-          </button>
-        {/each}
-
-        <div class="menu-divider"></div>
-      {/if}
-
-      {#if showSize}
-        <div class="menu-section">
-          <span class="menu-title">Map size</span>
-          <GridControls variant="stacked" />
-        </div>
-
-        <div class="menu-divider"></div>
-      {/if}
-
-      {#if compact}
-        <button
-          class="menu-item share"
-          role="menuitem"
-          onclick={() => uiState.shareLayout()}
-        >
-          <Share2 size={16} />
-          <span>Share this layout</span>
-        </button>
-      {/if}
-
-      <!--
-        Present at every width, and in preview too: it captures the board on
-        screen and writes nothing the visitor owns. The label says what comes
-        back rather than what it does, because "export" is what the two rows
-        around it also are — a code, a link, and now a picture.
-      -->
-      <button
-        class="menu-item"
-        role="menuitem"
-        disabled={uiState.isSavingImage}
-        onclick={() => uiState.saveLayoutImage()}
-      >
-        <ImageDown size={16} />
-        <span>{uiState.isSavingImage ? "Saving image…" : "Save as image"}</span>
-      </button>
-
-      <!--
-        Puts every other pixel away and leaves the board. It sits beside "Save
-        as image" because the two answer the same wish from opposite ends —
-        one takes the board out of the app, the other takes the app off the
-        board — and it belongs in preview for the same reason that one does:
-        it shows the visitor more of the layout and writes nothing they own.
-      -->
-      <button
-        class="menu-item"
-        role="menuitem"
-        onclick={() => uiState.setUiHidden(true)}
-      >
-        <EyeOff size={16} />
-        <span>Hide interface</span>
-      </button>
-
-      {#if showImport}
-        <button
-          class="menu-item"
-          role="menuitem"
-          onclick={() => uiState.openImport()}
-        >
-          <Download size={16} />
-          <span>Import code</span>
-        </button>
+      {#if bare}
         <!--
-          Everything this browser holds, to another one — see
-          `modals/TransferModal.svelte`. Absent in preview with Import: the
-          board on screen is not the visitor's to send.
+          Hosted in the readout on a short screen, the menu is the whole of the
+          chrome, so it is ordered by use rather than by where each row came
+          from: looking at the board first, then this layout, then the app,
+          then map size, with a destructive row last but one.
         -->
-        <button
-          class="menu-item"
-          role="menuitem"
-          onclick={() => uiState.openTransfer()}
-        >
-          <MonitorSmartphone size={16} />
-          <span>Transfer to another device</span>
-        </button>
+        {@render hideRow()}
+        {@render actionRows("view")}
+
+        <div class="menu-divider"></div>
+        {@render actionRows("layout")}
+        {@render shareRow()}
+        {@render imageRow()}
+
+        <div class="menu-divider"></div>
+        {@render statsRow()}
+        {@render importRows()}
+        {@render settingsRow()}
+
+        {#if showSize}
+          <div class="menu-divider"></div>
+          {@render sizeSection()}
+        {/if}
+
+        {#if actions.some((a) => a.group === "end")}
+          <div class="menu-divider"></div>
+          {@render actionRows("end")}
+        {/if}
+      {:else}
+        {#if actions.length > 0}
+          {@render actionRows()}
+          <div class="menu-divider"></div>
+        {/if}
+
+        {#if showSize}
+          {@render sizeSection()}
+          <div class="menu-divider"></div>
+        {/if}
+
+        {#if compact}{@render shareRow()}{/if}
+        {@render imageRow()}
+        {@render hideRow()}
+        {@render importRows()}
+        {@render statsRow()}
+        {@render settingsRow()}
       {/if}
-
-      <!--
-        Read-only figures over the player's own islands, so present in preview
-        too: a previewed board is not counted, and nothing here writes.
-      -->
-      <button
-        class="menu-item"
-        role="menuitem"
-        onclick={() => uiState.openIslandStats()}
-      >
-        <LandPlot size={16} />
-        <span>Island stats</span>
-      </button>
-
-      <!--
-        Present in preview too, unlike Import: it changes how the app behaves
-        rather than what board is loaded, so there is nothing about a shared
-        layout that should put it out of reach.
-      -->
-      <button
-        class="menu-item"
-        role="menuitem"
-        onclick={() => uiState.openSettings()}
-      >
-        <Settings size={16} />
-        <span>Settings</span>
-      </button>
 
       <div class="menu-divider"></div>
 
@@ -295,6 +230,133 @@
     </div>
   {/if}
 </div>
+
+{#snippet actionRows(group?: MenuAction["group"])}
+  {#each actions.filter((a) => !group || a.group === group) as a (a.key)}
+    <button
+      class="menu-item"
+      class:danger={a.danger}
+      class:armed={a.armed}
+      role="menuitem"
+      onclick={() => runAction(a)}
+    >
+      <a.icon size={16} />
+      <span>{a.label}</span>
+    </button>
+  {/each}
+{/snippet}
+
+{#snippet sizeSection()}
+  <div class="menu-section">
+    <span class="menu-title">Map size</span>
+    <GridControls variant="stacked" />
+  </div>
+{/snippet}
+
+{#snippet shareRow()}
+  <button
+    class="menu-item share"
+    role="menuitem"
+    onclick={() => uiState.shareLayout()}
+  >
+    <Share2 size={16} />
+    <span>Share this layout</span>
+  </button>
+{/snippet}
+
+<!--
+  Present at every width, and in preview too: it captures the board on
+  screen and writes nothing the visitor owns. The label says what comes
+  back rather than what it does, because "export" is what the two rows
+  around it also are — a code, a link, and now a picture.
+-->
+{#snippet imageRow()}
+  <button
+    class="menu-item"
+    role="menuitem"
+    disabled={uiState.isSavingImage}
+    onclick={() => uiState.saveLayoutImage()}
+  >
+    <ImageDown size={16} />
+    <span>{uiState.isSavingImage ? "Saving image…" : "Save as image"}</span>
+  </button>
+{/snippet}
+
+<!--
+  Puts every other pixel away and leaves the board. In the header's menu it
+  sits beside "Save as image" because the two answer the same wish from
+  opposite ends — one takes the board out of the app, the other takes the
+  app off the board; in the readout's it leads. It belongs in preview for
+  the same reason that one does: it shows the visitor more of the layout and
+  writes nothing they own.
+-->
+{#snippet hideRow()}
+  <button
+    class="menu-item"
+    role="menuitem"
+    onclick={() => uiState.setUiHidden(true)}
+  >
+    <EyeOff size={16} />
+    <span>Hide interface</span>
+  </button>
+{/snippet}
+
+<!--
+  Transfer is everything this browser holds, to another one — see
+  `modals/TransferModal.svelte`. Absent in preview with Import: the board on
+  screen is not the visitor's to send.
+-->
+{#snippet importRows()}
+  {#if showImport}
+    <button
+      class="menu-item"
+      role="menuitem"
+      onclick={() => uiState.openImport()}
+    >
+      <Download size={16} />
+      <span>Import code</span>
+    </button>
+    <button
+      class="menu-item"
+      role="menuitem"
+      onclick={() => uiState.openTransfer()}
+    >
+      <MonitorSmartphone size={16} />
+      <span>Transfer to another device</span>
+    </button>
+  {/if}
+{/snippet}
+
+<!--
+  Read-only figures over the player's own islands, so present in preview
+  too: a previewed board is not counted, and nothing here writes.
+-->
+{#snippet statsRow()}
+  <button
+    class="menu-item"
+    role="menuitem"
+    onclick={() => uiState.openIslandStats()}
+  >
+    <LandPlot size={16} />
+    <span>Island stats</span>
+  </button>
+{/snippet}
+
+<!--
+  Present in preview too, unlike Import: it changes how the app behaves
+  rather than what board is loaded, so there is nothing about a shared
+  layout that should put it out of reach.
+-->
+{#snippet settingsRow()}
+  <button
+    class="menu-item"
+    role="menuitem"
+    onclick={() => uiState.openSettings()}
+  >
+    <Settings size={16} />
+    <span>Settings</span>
+  </button>
+{/snippet}
 
 <style>
   .overflow-wrap {

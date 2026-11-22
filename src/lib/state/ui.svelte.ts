@@ -403,15 +403,15 @@ class UIState {
   }
 
   /**
-   * How step mode orders its steps. `power` is the planner's own order, the
-   * most power first; `kind` builds one kind at a time in `stepKinds`'
-   * order, each swept in reading order — slower to pay off, simpler to carry
-   * out. Persisted: it is how a player builds.
+   * How step mode orders its steps. `area` is the planner's own order, each
+   * step beside the last; `kind` builds one kind at a time in `stepKinds`'
+   * order, each swept in reading order. Persisted: it is how a player
+   * builds. A stored `power`, the order before area, reads as `area`.
    */
   // A stored value from another build reads as the default, never as an
   // order neither button would light.
   #stepOrder = $state<StepOrder>(
-    uiStorage.loadPrefs().stepOrder === "kind" ? "kind" : "power",
+    uiStorage.loadPrefs().stepOrder === "kind" ? "kind" : "area",
   );
 
   get stepOrder(): StepOrder {
@@ -1337,7 +1337,7 @@ class UIState {
         ),
         // Under a cash limit the steps must never need more at once than the
         // layout, which fits it, costs in all: sales that pay for a build
-        // come before it. Without one, power alone orders them.
+        // come before it. Without one, the order alone decides.
         cash: configState.cashLimit !== null ? pricing : undefined,
         group: order === "kind" ? stepKindRank(kinds) : undefined,
       });

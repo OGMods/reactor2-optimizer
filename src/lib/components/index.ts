@@ -12,6 +12,7 @@ export { default as PreviewBanner } from "./header/PreviewBanner.svelte";
 export { default as PixiCanvas } from "./canvas/PixiCanvas.svelte";
 export { default as HudToolbar } from "./hud/HudToolbar.svelte";
 export { default as MoveStepsBar } from "./hud/MoveStepsBar.svelte";
+export { default as KindFilter } from "./hud/KindFilter.svelte";
 export { default as BoardStatsCard } from "./inspector/BoardStatsCard.svelte";
 export { default as ConfigSidebar } from "./sidebar/ConfigSidebar.svelte";
 export { default as ShareModal } from "./modals/ShareModal.svelte";

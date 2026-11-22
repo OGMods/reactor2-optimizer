@@ -454,18 +454,26 @@ building kept or moved rules it out, since selling it at a share of its price an
 buying it back at the next copy's loses cash a step saved is not worth — under a
 cash limit, enough to put the steps over a budget the layout itself fits.
 
-**As few steps as it takes.** Of a solve's tied layouts, the one nearest the
-island (`stepCount`) is put on screen and aimed at. The order is greedy on power
-— each step takes the available action that leaves the most — so the gains come
-first, and the plan **stops at the solve's power** (`stopAtPower`, scored by the
-same scorer): what would be left only rearranges buildings, and the last step
-says so. **Under a cash limit cash comes first** (`PlanOptions.cash`): no step
-may take the cash needed at once past what the whole change costs net, so a
-sale that pays for a build comes before it and a layout that fits the limit
-never has a step that does not; power orders the steps that fit. An island already at the solve's power gets no plan, just a toast.
-Every candidate is scored by `createBoardScorer` — one island context, each
-building's rating per tile cached — ~0.2ms a board; the planner yields every 30ms
-and reports progress.
+**As few steps as it takes, and easy to follow.** Of a solve's tied layouts,
+the one nearest the island (`stepCount`) is put on screen and aimed at. A kind's
+spare leavers and arrivals are picked to leave a tile one replace rather than a
+sale and a build. The order is **by area** (`stepOrder: "area"`, the default):
+each step is the available action nearest the tiles the last one touched, ties
+in reading order, and only a swap that sends both buildings home — two moves in
+one — goes ahead of distance. Power plays no part in the order, at the player's
+request: the island is built out whole either way, and the power-first order it
+replaced hopped from one end of the island to the other between steps worth
+much the same (on 35 real islands: 3.3 tiles between steps against ~1 now, and
+fewer steps). The plan still **stops at the solve's power** (`stopAtPower`,
+scored by the same scorer): what would be left only rearranges buildings, and
+the last step says so. **Under a cash limit cash comes first**
+(`PlanOptions.cash`): no step may take the cash needed at once past what the
+whole change costs net, so a sale that pays for a build comes before it and a
+layout that fits the limit never has a step that does not; the order sorts the
+steps that fit. An island already at the solve's power gets no plan, just a
+toast. Boards are scored by `createBoardScorer` — one island context, each
+building's rating per tile cached — ~0.2ms a board: once per step by area, per
+candidate only when grouped; the planner yields every 30ms and reports progress.
 
 **Or one kind at a time** (`uiState.stepOrder`, persisted, offered at the
 bar's Start): `kind` hands the planner `PlanOptions.group`, so every generator
@@ -473,9 +481,8 @@ goes down, then every cooler, then every reactor — or whatever order the
 player sets (`uiState.stepKinds`, persisted, set in `StepOrderModal`, which "By kind" opens) — each
 swept in reading order, sales ahead of all of them. Asked for by a player who
 builds that way: a solve of a hundred buildings is easier to carry out with
-one building in hand. It gives up the power line — on a live island it can
-fall to nothing until the reactors land — but **not the cash rule**, which
-still filters before the groups order. Changing it re-plans.
+one building in hand. Within a kind the most power goes first. It keeps **the
+cash rule**, which still filters before the groups order. Changing it re-plans.
 
 **The kind filter picks one kind out of the solver's board**
 (`uiState.kindFilter`, `hud/KindFilter`, not persisted): that kind stays at
@@ -921,7 +928,9 @@ Tiles are typed `water | grass | rock | tree1 | tree2 | pond | transformer` — 
 header, banner, readout, HUD, panel and scrim — and leaves one small button in the
 corner. The board is what this app is about and everything else is chrome standing
 on it; there are moments when none of it is wanted, reading a finished layout most
-of all.
+of all. The one control that stays is **the kind filter** (`hud/KindFilter`), at
+the bottom centre on the solver's board when not mid-run — where the HUD would
+offer it — since picking out one kind is a way of reading that layout.
 
 Five things about it, each a way it would otherwise leave the app with no way out:
 
