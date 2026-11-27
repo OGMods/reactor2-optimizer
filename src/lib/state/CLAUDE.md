@@ -397,9 +397,12 @@ terrain under today's roster, research and anomaly, so one found before an
 upgrade counts at the tier the player has now — no signature check, because the
 shape is all that is used. An island whose solve makes less than its board keeps
 the board. `targetEta.secondsWithSolves` is the wait at that power, shown only
-when it beats the game's. Storage is not reactive, so `TimelineStatus`'s refresh
-effect also reads `solverState.optimizationResult` and `appliedVariant`: a solve
-landing or a variant applied is what changes a stored solve.
+when it beats the game's. Storage is not reactive, so the refresh effect also
+reads `solverState.optimizationResult` and `appliedVariant`: a solve landing or a
+variant applied is what changes a stored solve. **That effect lives in
+`App.svelte`, not in the header**: the header is unmounted on a short screen, in
+step mode and with the interface hidden, and an import made there left the
+island list, Island stats and every price on the boards it replaced.
 
 **Without a timeline, nothing that needs one shows.** A game code from a build
 that writes no section 7 — or no import at all — leaves `record.timeline` null,

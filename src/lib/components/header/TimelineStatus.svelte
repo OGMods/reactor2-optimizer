@@ -1,11 +1,6 @@
 <script lang="ts">
   import { formatNumber } from "@reactor2/solver";
-  import {
-    solverState,
-    timelineState,
-    uiState,
-    viewportState,
-  } from "../../state";
+  import { timelineState, uiState, viewportState } from "../../state";
   import {
     asset,
     formatClockTime,
@@ -43,16 +38,6 @@
   let eta = $derived(timelineState.targetEta);
   let visible = $derived(power > 0 || record !== null);
   let compact = $derived(viewportState.isPhone);
-
-  // Re-score the islands whenever a saved board or the rules change; the call
-  // reads its inputs before its first await, so this tracks exactly those.
-  $effect(() => {
-    // Stored solves are read off storage, which nothing tracks; a solve that
-    // lands or a variant applied is what changes them.
-    void solverState.optimizationResult;
-    void solverState.appliedVariant;
-    void timelineState.refreshIslands();
-  });
 
   let pace = $derived(timelineState.pace);
 
