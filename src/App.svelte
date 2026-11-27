@@ -4,6 +4,7 @@
     editorState,
     layoutState,
     solverState,
+    timelineState,
     uiState,
     viewportState,
   } from "./lib/state";
@@ -38,6 +39,25 @@
     keepScreenAwake(uiState.running);
   });
   $effect(() => () => keepScreenAwake(false));
+
+  /*
+   * Re-score every island whenever a saved board or the rules change — an
+   * import above all. The call reads its inputs before its first await, so
+   * this tracks exactly those. Stored solves are read off storage, which
+   * nothing tracks; a solve that lands or a variant applied is what changes
+   * them.
+   *
+   * In the shell rather than in the header's `TimelineStatus`, which is where
+   * it used to be: the header is unmounted on a short screen, in step mode and
+   * with the interface hidden, and the island list, Island stats, prices and
+   * the cash limit all read these figures — so an import made there left
+   * every one of them on the boards it replaced.
+   */
+  $effect(() => {
+    void solverState.optimizationResult;
+    void solverState.appliedVariant;
+    void timelineState.refreshIslands();
+  });
 
   /*
    * On a compact viewport the config panel is a bottom sheet, and once it is
